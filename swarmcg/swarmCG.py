@@ -655,7 +655,7 @@ def compute_Rg(ns, traj_type):
 
 		gyr_aa = np.empty(len(ns.aa_universe.trajectory))
 		for ts in ns.aa_universe.trajectory:
-			gyr_aa[ts.frame] = ns.aa_universe.atoms[:len(ns.all_atoms)].radius_of_gyration(pbc=None, backend=ns.mda_backend)
+			gyr_aa[ts.frame] = ns.aa_universe.atoms[:len(ns.all_atoms)].radius_of_gyration(backend=ns.mda_backend)
 		ns.gyr_aa = round(np.average(gyr_aa) / 10, 3)  # retrieve nm
 		ns.gyr_aa_std = round(np.std(gyr_aa) / 10, 3)  # retrieve nm
 
@@ -663,7 +663,7 @@ def compute_Rg(ns, traj_type):
 
 		gyr_aa_mapped = np.empty(len(ns.aa_universe.trajectory))
 		for ts in ns.aa2cg_universe.trajectory:
-			gyr_aa_mapped[ts.frame] = ns.aa2cg_universe.atoms[:len(ns.cg_itp['atoms'])].radius_of_gyration(pbc=None, backend=ns.mda_backend)
+			gyr_aa_mapped[ts.frame] = ns.aa2cg_universe.atoms[:len(ns.cg_itp['atoms'])].radius_of_gyration(backend=ns.mda_backend)
 		ns.gyr_aa_mapped = round(np.average(gyr_aa_mapped) / 10 + ns.aa_rg_offset, 3)  # retrieve nm
 		ns.gyr_aa_mapped_std = round(np.std(gyr_aa_mapped) / 10, 3)  # retrieve nm
 
@@ -671,7 +671,7 @@ def compute_Rg(ns, traj_type):
 
 		gyr_cg = np.empty(len(ns.cg_universe.trajectory))
 		for ts in ns.cg_universe.trajectory:
-			gyr_cg[ts.frame] = ns.cg_universe.atoms[:len(ns.cg_itp['atoms'])].radius_of_gyration(pbc=None, backend=ns.mda_backend)
+			gyr_cg[ts.frame] = ns.cg_universe.atoms[:len(ns.cg_itp['atoms'])].radius_of_gyration(backend=ns.mda_backend)
 		ns.gyr_cg = round(np.average(gyr_cg) / 10, 3)  # retrieve nm
 		ns.gyr_cg_std = round(np.std(gyr_cg) / 10, 3)  # retrieve nm
 
@@ -1355,7 +1355,7 @@ def map_aa2cg_traj(ns):
 			traj = np.empty((len(ns.aa_universe.trajectory), 3))
 			for ts in ns.aa_universe.trajectory:
 				traj[ts.frame] = ns.mda_beads_atom_grps[bead_id].center(
-					ns.mda_weights_atom_grps[bead_id], pbc=None, compound='group'
+					ns.mda_weights_atom_grps[bead_id], compound='group'
 				)  # no need for PBC handling, trajectories were made wholes for the molecule
 			coord[:, bead_id, :] = traj
 
