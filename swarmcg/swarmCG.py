@@ -18,7 +18,7 @@ from scipy.optimize import curve_fit
 from swarmcg import config
 from swarmcg.shared import utils, styling
 from swarmcg.shared import exceptions
-from swarmcg.simulations.potentials import (gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2,
+from swarmcg.simulations.potentials import (gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2, gmx_angles_func_10,
 	gmx_dihedrals_func_1, gmx_dihedrals_func_2)
 import swarmcg.simulations.vs_functions as vsf
 
@@ -1779,6 +1779,15 @@ def perform_BI(ns):
 							popt[0] += 10
 					except RuntimeError:  # curve fit did not converge
 						popt[0] = 30
+
+				elif func == 10:
+					params_guess = [max(y)-min(y), std_rad_grp_angle, min(y)]
+					try:
+						popt, pcov = curve_fit(gmx_angles_func_10, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
+					except RuntimeError:  # curve fit did not converge
+						print("curve fit did not converge for some angle")
+						popt[0] = 30
+
 
 				# here we just update the force constant, angle value is already set to the average of distribution
 				ns.out_itp['angle'][grp_angle]['fct'] = popt[0]
