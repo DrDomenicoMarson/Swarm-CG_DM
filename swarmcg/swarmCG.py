@@ -758,7 +758,7 @@ def compute_SASA(ns, traj_type):
 
 		# finally get sasa
 		if not non_zero_return_code:
-			gmx_cmd = f'{ns.gmx_path} sasa -s {ns.aa_mapped_tpr_sasa_filename} -f {ns.aa_mapped_traj_whole_filename} -n {ns.cg_ndx_filename} -surface 0 -o {ns.aa_mapped_sasa_filename} -probe {probe_radius}'
+			gmx_cmd = f'{ns.gmx_path} sasa -ndots 48 -s {ns.aa_mapped_tpr_sasa_filename} -f {ns.aa_mapped_traj_whole_filename} -n {ns.cg_ndx_filename} -surface 0 -o {ns.aa_mapped_sasa_filename} -probe {probe_radius}'
 			return_code = exec_gmx(gmx_cmd)
 			if return_code != 0:
 				non_zero_return_code = True
@@ -789,7 +789,7 @@ def compute_SASA(ns, traj_type):
 		# then compute SASA
 		if not non_zero_return_code:
 			# surface to choose the index group, 2 is the molecule even when there are ions (0 and 1 are System and Others)
-			gmx_cmd = f'{ns.gmx_path} sasa -s {ns.cg_tpr_filename} -f {ns.cg_traj_whole_filename} -n {ns.cg_ndx_filename} -surface 0 -o {ns.cg_sasa_filename} -probe {probe_radius}'
+			gmx_cmd = f'{ns.gmx_path} sasa -ndots 48 -s {ns.cg_tpr_filename} -f {ns.cg_traj_whole_filename} -n {ns.cg_ndx_filename} -surface 0 -o {ns.cg_sasa_filename} -probe {probe_radius}'
 			return_code = exec_gmx(gmx_cmd)
 			if return_code != 0:
 				non_zero_return_code = True
