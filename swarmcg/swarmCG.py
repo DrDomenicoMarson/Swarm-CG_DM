@@ -1427,11 +1427,17 @@ def make_aa_traj_whole_for_selected_mols(ns):
 
 
 # build gromacs command with arguments
-def gmx_args(ns, gmx_cmd, mpi=True):
+def gmx_args(ns, gmx_cmd, mpi=True, minimization=False):
 
 	gmx_cmd = f"{ns.gmx_path} {gmx_cmd}"
 	if ns.gmx_args_str != '':
-		gmx_cmd = f"{gmx_cmd} {ns.gmx_args_str}"
+		if minimization:
+			gmx_args_str = ns.gmx_args_str.replace('-pme gpu', '-pme cpu')
+			gmx_args_str = gmx_args_str.replace('-bonded gpu', '-bonded cpu')
+			gmx_args_str = gmx_args_str.replace('-update gpu', '-update cpu')
+			gmx_cmd = f"{gmx_cmd} {gmx_args_str}"
+		else:
+			gmx_cmd = f"{gmx_cmd} {ns.gmx_args_str}"
 	else:
 		if ns.nb_threads > 0:
 			gmx_cmd = f"{gmx_cmd} -nt {ns.nb_threads}"
@@ -2719,7 +2725,7 @@ def eval_function(parameters_set, ns):
 
 	if gmx_process.returncode == 0:
 		# mdrun -- minimization
-		gmx_cmd = gmx_args(ns, 'mdrun -deffnm mini', mpi=False)
+		gmx_cmd = gmx_args(ns, 'mdrun -deffnm mini', mpi=False, minimization=True)
 		with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid) as gmx_process:  # create a process group for the minimization run
 
 			# check if minimization run is stuck because of instabilities
