@@ -380,7 +380,7 @@ def read_cg_itp_file(ns):
 					if ns.user_input:
 						if func == 1 and not 0 <= float(sp_itp_line[5]) <= ns.default_max_fct_angles_opti_f1:
 							raise exceptions.MissformattedFile(msg_force_boundaries(i+1, 0, ns.default_max_fct_angles_opti_f1, '-max_fct_angles_f1'))
-						elif func == 2 and not 0 <= float(sp_itp_line[5]) <= ns.default_max_fct_angles_opti_f2:
+						elif func in [2, 10] and not 0 <= float(sp_itp_line[5]) <= ns.default_max_fct_angles_opti_f2:
 							raise exceptions.MissformattedFile(msg_force_boundaries(i+1, 0, ns.default_max_fct_angles_opti_f2, '-max_fct_angles_f2'))
 
 				elif section_read['dihedral']:
@@ -1021,7 +1021,7 @@ def get_search_space_boundaries(ns):
 		for grp_angle in range(ns.opti_cycle['nb_geoms']['angle']):  # angles force constants
 			if ns.cg_itp['angle'][grp_angle]['func'] == 1:
 				search_space_boundaries.extend([[0, ns.default_max_fct_angles_opti_f1]])
-			elif ns.cg_itp['angle'][grp_angle]['func'] == 2:
+			elif ns.cg_itp['angle'][grp_angle]['func'] in [2, 10]:
 				search_space_boundaries.extend([[0, ns.default_max_fct_angles_opti_f2]])
 
 	if ns.opti_cycle['nb_geoms']['dihedral'] > 0:
@@ -1068,7 +1068,7 @@ def get_initial_guess_list(ns, nb_particles):
 	for i in range(ns.opti_cycle['nb_geoms']['angle']):
 		if ns.cg_itp['angle'][i]['func'] == 1:
 			input_guess.append(min(max(ns.out_itp['angle'][i]['fct'], 0), ns.default_max_fct_angles_opti_f1))  # angles force constants
-		elif ns.cg_itp['angle'][i]['func'] == 2:
+		elif ns.cg_itp['angle'][i]['func'] in [2, 10]:
 			input_guess.append(min(max(ns.out_itp['angle'][i]['fct'], 0), ns.default_max_fct_angles_opti_f2))  # angles force constants
 
 	if ns.exec_mode == 1:
@@ -1131,7 +1131,7 @@ def get_initial_guess_list(ns, nb_particles):
 			else:
 				if ns.cg_itp['angle'][i]['func'] == 1:
 					input_guess.append(min(max(ns.out_itp['angle'][i]['fct'], 0), ns.default_max_fct_angles_opti_f1))
-				elif ns.cg_itp['angle'][i]['func'] == 2:
+				elif ns.cg_itp['angle'][i]['func'] in [2, 10]:
 					input_guess.append(min(max(ns.out_itp['angle'][i]['fct'], 0), ns.default_max_fct_angles_opti_f2))
 
 		# dihedrals equilibrium values
@@ -1184,7 +1184,7 @@ def get_initial_guess_list(ns, nb_particles):
 		for i in range(ns.opti_cycle['nb_geoms']['angle']):
 			if ns.cg_itp['angle'][i]['func'] == 1:
 				input_guess.append(min(max(ns.out_itp['angle'][i]['fct_user'], 0), ns.default_max_fct_angles_opti_f1))
-			elif ns.cg_itp['angle'][i]['func'] == 2:
+			elif ns.cg_itp['angle'][i]['func'] in [2, 10]:
 				input_guess.append(min(max(ns.out_itp['angle'][i]['fct_user'], 0), ns.default_max_fct_angles_opti_f2))
 
 		# dihedrals equilibrium values
@@ -1264,7 +1264,7 @@ def get_initial_guess_list(ns, nb_particles):
 			draw_low = max(min(ns.out_itp['angle'][j]['fct']*(1-ns.fct_guess_fact*emd_err_fact), ns.out_itp['angle'][j]['fct']-config.fct_guess_min_flat_diff_angles), 0)
 			if ns.cg_itp['angle'][j]['func'] == 1:
 				draw_high = min(max(ns.out_itp['angle'][j]['fct']*(1+ns.fct_guess_fact*emd_err_fact), ns.out_itp['angle'][j]['fct']+config.fct_guess_min_flat_diff_angles), ns.default_max_fct_angles_opti_f1)
-			elif ns.cg_itp['angle'][j]['func'] == 2:
+			elif ns.cg_itp['angle'][j]['func'] in [2, 10]:
 				draw_high = min(max(ns.out_itp['angle'][j]['fct']*(1+ns.fct_guess_fact*emd_err_fact), ns.out_itp['angle'][j]['fct']+config.fct_guess_min_flat_diff_angles), ns.default_max_fct_angles_opti_f2)
 			init_guess.append(draw_float(draw_low, draw_high, 3))
 			# print('Particle', i+1, '-- ANGLE', j+1, '-- FCT RANGE', draw_low, draw_high)
@@ -1796,7 +1796,7 @@ def perform_BI(ns):
 				if func == 1:
 					if not 0 <= ns.out_itp['angle'][grp_angle]['fct'] <= min(config.default_max_fct_angles_bi, ns.default_max_fct_angles_opti_f1):
 						ns.out_itp['angle'][grp_angle]['fct'] = min(config.default_max_fct_angles_bi, ns.default_max_fct_angles_opti_f1) / 2
-				elif func == 2:
+				elif func == 2 or func == 10:
 					if not 0 <= ns.out_itp['angle'][grp_angle]['fct'] <= min(config.default_max_fct_angles_bi, ns.default_max_fct_angles_opti_f2):
 						ns.out_itp['angle'][grp_angle]['fct'] = min(config.default_max_fct_angles_bi, ns.default_max_fct_angles_opti_f2) / 2
 
