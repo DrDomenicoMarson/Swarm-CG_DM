@@ -147,7 +147,7 @@ def vs4_func_2(ns, traj, vs_def_beads_ids, vs_params):
 def vsn_func_1(ns, traj, vs_def_beads_ids):
 
     for ts in ns.aa2cg_universe.trajectory:
-        traj[ts.frame] = ns.aa2cg_universe.atoms[vs_def_beads_ids].center_of_geometry(pbc=None)
+        traj[ts.frame] = ns.aa2cg_universe.atoms[vs_def_beads_ids].center_of_geometry()
 
 
 # vs_n func 2 -> Center of Mass
@@ -164,7 +164,7 @@ def vsn_func_2(ns, traj, vs_def_beads_ids, bead_id):
         print('  WARNING: Virtual site ID {} uses function 2 for COM, but its definition contains IDs ' + ' '.join(zero_mass_beads_ids) + 'which have no mass'.format(bead_id + 1))
 
     for ts in ns.aa2cg_universe.trajectory:
-        traj[ts.frame] = ns.aa2cg_universe.atoms[vs_def_beads_ids].center_of_mass(pbc=None)
+        traj[ts.frame] = ns.aa2cg_universe.atoms[vs_def_beads_ids].center_of_mass()
 
 
 # vs_n func 3 -> Center of Weights (each atom has a given weight, pairwise formatting: id1 w1 id2 w2 ..)
