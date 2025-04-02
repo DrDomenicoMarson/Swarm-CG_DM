@@ -2735,12 +2735,25 @@ def eval_function(parameters_set, ns):
 	if gmx_process.returncode == 0:
 		# mdrun -- minimization
 		gmx_cmd = gmx_args(ns, 'mdrun -deffnm mini', mpi=False, minimization=True)
+		if ns.debug:
+			print_stdout_forced(gmx_cmd)
 		with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid) as gmx_process:  # create a process group for the minimization run
 
 			# check if minimization run is stuck because of instabilities
 			cycles_check = 0
 			last_log_file_size = 0
 			while gmx_process.poll() is None:  # while process is alive
+
+				# # Read and write process output in real-time
+				# output = gmx_process.stdout.readline().decode()
+				# if output:
+				# 	print_stdout_forced(output, end="")  # Print to the command line
+				# 	#log_file.write(output)  # Write to the log file
+				# error = gmx_process.stderr.readline().decode()
+				# if error:
+				# 	print_stdout_forced(error, end="")  # Print errors to the command line
+				# 	#log_file.write(error)  # Write errors to the log file
+
 				time.sleep(ns.process_alive_time_sleep)
 				cycles_check += 1
 
@@ -2770,7 +2783,7 @@ def eval_function(parameters_set, ns):
 	if os.path.isfile('mini.gro'):
 
 		# grompp -- EQUI
-		gmx_cmd = ns.gmx_path+' grompp -c mini.gro -p '+ns.top_input_basename+' -f '+ns.mdp_equi_basename+' -o equi'
+		gmx_cmd = ns.gmx_path+' grompp -c mini.gro -p '+ns.top_input_basename+' -f '+ns.mdp_equi_basename+' -o equi -maxwarn 1'
 		with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as gmx_process:
 			gmx_out = gmx_process.communicate()[1].decode()
 			gmx_process.kill()
@@ -2778,6 +2791,8 @@ def eval_function(parameters_set, ns):
 		if gmx_process.returncode == 0:
 			# mdrun -- EQUI
 			gmx_cmd = gmx_args(ns, 'mdrun -deffnm equi')
+			if ns.debug:
+				print_stdout_forced(gmx_cmd)
 			with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid) as gmx_process:  # create a process group for the EQUI run
 
 				# check if EQUI run is stuck because of instabilities

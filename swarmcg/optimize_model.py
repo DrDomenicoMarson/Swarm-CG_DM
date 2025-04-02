@@ -739,6 +739,8 @@ def main():
     optional_args3.add_argument('-h', '--help', help='Show this help message and exit', action='help')
     optional_args3.add_argument('-v', '--verbose', dest='verbose', help=config.help_verbose,
                               action='store_true', default=False)
+    optional_args3.add_argument('--debug', dest='debug', help="prints for debugging purposes",
+                              action='store_true', default=False)
 
     # display help if script was called without arguments
     if len(sys.argv) == 1:
