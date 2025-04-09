@@ -180,6 +180,7 @@ def run(ns):
     os.mkdir(ns.exec_folder+'/.internal')
     os.mkdir(ns.exec_folder+'/'+config.distrib_plots_all_evals_dirname)
     os.mkdir(ns.exec_folder+'/'+config.log_files_all_evals_dirname)
+    os.mkdir(ns.exec_folder+'/'+config.itp_files_all_evals_dirname)
     if ns.keep_all_sims:
         os.mkdir(ns.exec_folder+'/'+config.sim_files_all_evals_dirname)
 

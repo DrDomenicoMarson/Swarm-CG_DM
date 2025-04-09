@@ -106,6 +106,7 @@ iteration_sim_files_dirname = 'CG_sim_files'  # basename to be appended to with 
 best_fitted_model_dirname = 'optimized_CG_model'
 distrib_plots_all_evals_dirname = 'all_evals_distributions'
 log_files_all_evals_dirname = 'all_evals_logs'
+itp_files_all_evals_dirname = 'all_evals_itps'
 sim_files_all_evals_dirname = 'all_evals_all_sim_files'
 opti_perf_recap_file = '.internal/opti_recap_evals_perfs_and_params.csv'
 opti_pairwise_distances_file = '.internal/opti_recap_evals_pairwise_distribs_diffs.csv'

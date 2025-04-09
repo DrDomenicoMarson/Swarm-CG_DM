@@ -2972,6 +2972,9 @@ def eval_function(parameters_set, ns):
 	if os.path.isfile(current_eval_dir+'/mini.log'):
 		shutil.copy(current_eval_dir+'/mini.log', f'{config.log_files_all_evals_dirname}/mini_sim_eval_step_{ns.nb_eval}.log')
 
+	if os.path.isfile(current_eval_dir+f'/{ns.cg_itp_basename}'):
+		shutil.copy(current_eval_dir+f'/{ns.cg_itp_basename}', f'{config.itp_files_all_evals_dirname}/sim_eval_step_{ns.nb_eval}.itp')
+
 	# update the best results distrib plot in execution directory
 	if new_best_fit:
 		shutil.copy(f'{config.distrib_plots_all_evals_dirname}/distributions_eval_step_{ns.nb_eval}.png', config.best_distrib_plots)
