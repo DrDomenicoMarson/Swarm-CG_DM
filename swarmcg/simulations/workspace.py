@@ -1,8 +1,8 @@
-
 import os
 import shutil
 import time
 from typing import List, Optional
+from pathlib import Path
 from swarmcg.config_types import SwarmConfig
 import swarmcg.config as config
 from swarmcg.shared import exceptions
@@ -14,7 +14,7 @@ class WorkspaceManager:
     """
     def __init__(self, config_obj: SwarmConfig):
         self.config = config_obj
-        self.exec_folder = ""
+        self.exec_folder: Path = Path("")
         
     def setup_execution_folder(self, output_folder: str = "") -> str:
         """
@@ -22,34 +22,34 @@ class WorkspaceManager:
         Returns the absolute path of the execution folder.
         """
         if output_folder:
-            self.exec_folder = output_folder
+            self.exec_folder = Path(output_folder)
         else:
-            self.exec_folder = time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")
+            self.exec_folder = Path(time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss"))
             
-        if os.path.exists(self.exec_folder):
+        if self.exec_folder.exists():
              msg = (
                 "Provided output folder already exists, please delete existing folder "
                 "manually or provide another folder name."
             )
              raise exceptions.AvoidOverwritingFolder(msg)
              
-        os.mkdir(self.exec_folder)
-        os.mkdir(os.path.join(self.exec_folder, ".internal"))
-        os.mkdir(os.path.join(self.exec_folder, config.distrib_plots_all_evals_dirname))
-        os.mkdir(os.path.join(self.exec_folder, config.log_files_all_evals_dirname))
+        self.exec_folder.mkdir()
+        (self.exec_folder / ".internal").mkdir()
+        (self.exec_folder / config.distrib_plots_all_evals_dirname).mkdir()
+        (self.exec_folder / config.log_files_all_evals_dirname).mkdir()
         
         if self.config.optimization.keep_all_sims:
-             os.mkdir(os.path.join(self.exec_folder, config.sim_files_all_evals_dirname))
+             (self.exec_folder / config.sim_files_all_evals_dirname).mkdir()
              
-        return self.exec_folder
+        return str(self.exec_folder.absolute())
 
     def prepare_simulation_input(self, top_includes: List[str]):
         """
         Prepares the input simulation directory by copying necessary files
         and adjusting the topology includes.
         """
-        input_sim_dir = os.path.join(self.exec_folder, config.input_sim_files_dirname)
-        os.mkdir(input_sim_dir)
+        input_sim_dir = self.exec_folder / config.input_sim_files_dirname
+        input_sim_dir.mkdir()
         
         # Copy includes
         for include in top_includes:
@@ -75,8 +75,8 @@ class WorkspaceManager:
                 shutil.copy(f, input_sim_dir)
                 
         # Modify TOP file includes
-        top_basename = os.path.basename(self.config.cg_model.top_input_filename)
-        top_path = os.path.join(input_sim_dir, top_basename)
+        top_basename = Path(self.config.cg_model.top_input_filename).name
+        top_path = input_sim_dir / top_basename
         
         with open(top_path, "r") as fp:
             lines = fp.readlines()
@@ -88,7 +88,7 @@ class WorkspaceManager:
                      # We assume top_includes list matches the order of includes in the file
                      # This logic mimics the original optimize_model.py logic
                      if nb_includes < len(top_includes):
-                         basename = os.path.basename(top_includes[nb_includes])
+                         basename = Path(top_includes[nb_includes]).name
                          fp.write(f'#include "{basename}"\n')
                          nb_includes += 1
                      else:
@@ -103,7 +103,7 @@ class WorkspaceManager:
         Returns a list of included file paths.
         """
         top_filename = self.config.cg_model.top_input_filename
-        cg_itp_basename = os.path.basename(self.config.cg_model.cg_itp_filename)
+        cg_itp_basename = Path(self.config.cg_model.cg_itp_filename).name
         
         top_includes_filenames = []
         with open(top_filename, "r") as fp:
@@ -115,7 +115,7 @@ class WorkspaceManager:
             top_lines = all_top_lines.split("\n")
             top_lines = [top_line.strip().split(";")[0] for top_line in top_lines]
             
-            base_dir = os.path.dirname(top_filename) or "."
+            base_dir = Path(top_filename).parent
             
             for top_line in top_lines:
                 if top_line.startswith("#include"):
@@ -123,13 +123,13 @@ class WorkspaceManager:
                     parts = top_line.split(maxsplit=1)
                     if len(parts) > 1:
                         include_name = parts[1].strip("'\"")
-                        top_includes_filenames.append(os.path.join(base_dir, include_name))
+                        top_includes_filenames.append(str(base_dir / include_name))
                         
         return top_includes_filenames
 
     def cleanup_input_staging(self):
         """Removes the input staging directory."""
-        input_sim_dir = os.path.join(self.exec_folder, config.input_sim_files_dirname)
-        if os.path.exists(input_sim_dir):
+        input_sim_dir = self.exec_folder / config.input_sim_files_dirname
+        if input_sim_dir.exists():
             shutil.rmtree(input_sim_dir)
 

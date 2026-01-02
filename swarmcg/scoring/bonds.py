@@ -2,7 +2,7 @@ import MDAnalysis as mda
 import numpy as np
 from swarmcg.config_types import SwarmConfig
 
-def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmConfig):
+def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmConfig, bins=None, bandwidth=None):
     """Calculate bonds distribution from AA trajectory."""
     
     # Access usage via config object or defaults if not present

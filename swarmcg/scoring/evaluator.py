@@ -85,6 +85,8 @@ class SwarmEvaluator:
              avg, hist, values = scores.get_AA_bonds_distrib(
                  self.ns.aa2cg_universe, 
                  grp["beads"], 
+                 "constraint",
+                 i,
                  self.config, 
                  self.ns.bins_constraints, 
                  self.ns.bw_constraints
@@ -99,6 +101,8 @@ class SwarmEvaluator:
             avg, hist, values = scores.get_AA_bonds_distrib(
                 self.ns.aa2cg_universe,
                 grp["beads"],
+                "bond",
+                i,
                 self.config,
                 self.ns.bins_bonds,
                 self.ns.bw_bonds

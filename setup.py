@@ -29,9 +29,9 @@ setup(
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.13',
     ],
-    python_requires='>=3.11',
+    python_requires='>=3.13',
     entry_points={
         'console_scripts': [
             'scg_optimize=swarmcg.optimize_model:main',
