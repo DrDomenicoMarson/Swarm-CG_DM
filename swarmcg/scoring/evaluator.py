@@ -91,7 +91,8 @@ class SwarmEvaluator:
                  self.ns.bins_constraints, 
                  self.ns.bw_constraints
              )
-             grp["value"] = avg # Set initial value (exec_mode 1)
+             if self.config.optimization.exec_mode == 1:
+                grp["value"] = avg 
              grp["avg"] = avg
              grp["hist"] = hist
              self.ns.domains_val.setdefault("constraint", []).append([round(np.min(values), 3), round(np.max(values), 3)])
@@ -107,7 +108,8 @@ class SwarmEvaluator:
                 self.ns.bins_bonds,
                 self.ns.bw_bonds
             )
-            grp["value"] = avg
+            if self.config.optimization.exec_mode == 1:
+                grp["value"] = avg
             grp["avg"] = avg
             grp["hist"] = hist
             
@@ -132,7 +134,8 @@ class SwarmEvaluator:
                  self.ns.bins_angles,
                  self.ns.bw_angles
              )
-             grp["value"] = avg
+             if self.config.optimization.exec_mode == 1:
+                grp["value"] = avg
              grp["avg"] = avg
              grp["hist"] = hist
              
@@ -153,7 +156,9 @@ class SwarmEvaluator:
                 self.ns.bw_dihedrals
             )
             # exec_mode 1 logic handled later/in optimize
-            grp["value"] = avg 
+            if self.config.optimization.exec_mode == 1:
+                grp["value"] = avg 
+            grp["avg"] = avg 
             grp["avg"] = avg
             grp["hist"] = hist
             
