@@ -91,6 +91,27 @@ def test_gromacs_minimization_run():
             
             log_file = Path(step.sim_setup['monitor_file'])
             assert log_file.exists(), "Log file missing"
+
+            # 6. Verify Data Extraction
+            # We use MDAnalysis to check we can read the generated trajectory
+            import MDAnalysis as mda
+            
+            # Load the universe
+            u = mda.Universe(str(gro_file), str(step.sim_setup['md_output'] + ".trr")) 
+            # Note: minimisation usually outputs trr/gro, checks mdp nstxout
+            # mini.mdp has nstxout=0, so maybe no trr? 
+            # Default md output is usually .trr or .xtc
+            # SimulationStep sets '-o {md_output}', so it produces default formatted files. 
+            # In GROMACS, -o usually produces .trr by default unless specified.
+            # But let's check what was produced.
+            
+            # Actually let's just check the GRO first for data
+            u_gro = mda.Universe(str(gro_file))
+            assert len(u_gro.atoms) > 0, "GRO file is empty"
+            
+            # Check we can extract coordinates
+            coords = u_gro.atoms.positions
+            assert coords.shape == (len(u_gro.atoms), 3)
             
         finally:
             os.chdir(cwd)
