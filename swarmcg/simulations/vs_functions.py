@@ -186,15 +186,24 @@ def vsn_func_2(universe, traj, vs_def_beads_ids, bead_id, cg_itp=None):
     zero_mass_beads_ids = []
     if cg_itp is not None:
         for bid in vs_def_beads_ids:
-            if bid in cg_itp["virtual_sitesn"]:
-                if cg_itp["virtual_sitesn"][bid]["mass"] == 0:
-                    zero_mass_beads_ids.append(bid)
+            try:
+                mass = cg_itp["atoms"][bid].get("mass")
+            except (KeyError, IndexError, TypeError, AttributeError):
+                mass = None
+            if mass == 0:
+                zero_mass_beads_ids.append(bid)
     if len(zero_mass_beads_ids) > 0:
-        print("  WARNING: Virtual site ID {} uses function 2 for COM, but its definition contains IDs " + " ".join(
-            zero_mass_beads_ids) + "which have no mass".format(bead_id + 1))
+        ids_str = " ".join(str(bid + 1) for bid in zero_mass_beads_ids)
+        print(
+            f"  WARNING: Virtual site ID {bead_id + 1} uses function 2 for COM, "
+            f"but its definition contains IDs {ids_str} which have no mass"
+        )
 
     for ts in universe.trajectory:
-        traj[ts.frame] = universe.atoms[vs_def_beads_ids].center_of_mass(pbc=None)
+        try:
+            traj[ts.frame] = universe.atoms[vs_def_beads_ids].center_of_mass(pbc=None)
+        except TypeError:
+            traj[ts.frame] = universe.atoms[vs_def_beads_ids].center_of_mass()
 
 
 def vsn_func_3(universe, traj, vs_def_beads_ids, vs_params):
