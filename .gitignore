@@ -104,3 +104,4 @@ ENV/
 /G1_DATA/.cg_traj.xtc_offsets.npz
 *.DS_Store
 .DS_Store
+.DS_Store
