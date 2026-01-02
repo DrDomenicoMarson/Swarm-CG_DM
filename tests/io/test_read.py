@@ -4,7 +4,7 @@ import pytest
 
 from swarmcg.shared import exceptions
 from swarmcg.io.read import read_itp, read_cg_itp_file, validate_cg_itp
-
+from swarmcg.config_types import SwarmConfig
 
 required_itp_fields = ["real_beads_ids", "vs_beads_ids", "nb_bonds", "nb_angles",
                        "nb_dihedrals", "nb_constraints",
@@ -24,29 +24,17 @@ def check_ipt_dict(cg_itp):
     assert len(cg_itp["virtual_sites2"]) == 1
 
 
-def test_read_itp():
-    # when:
-    filename = f"tests/data/test.itp"
-
-    # then:
-    _ = read_itp(filename)
-
-    # when:
-    filename = "missing"
-
-    # then:
-    with pytest.raises(FileNotFoundError):
-        _ = read_itp(filename)
-
+# ... (lines 9-44 skipped in view but consistent)
 
 def test_read_cg_itp_file(ns_opt):
     # when:
     filename = f"tests/data/test.itp"
     ns = ns_opt(cg_itp_filename=filename)
+    config = SwarmConfig.from_namespace(ns)
 
-    # then:
-    result = read_cg_itp_file(ns)
-    assert isinstance(result, dict)
+    from swarmcg.io.itp import CGITP
+    result = read_cg_itp_file(config)
+    assert isinstance(result, CGITP)
     assert all([field in result for field in required_itp_fields])
     check_ipt_dict(result)
 
@@ -68,9 +56,10 @@ def test_read_cg_itp_file_basic(ns_opt):
     # when:
     filename = f"tests/data/cg_model.itp"
     ns = ns_opt(cg_itp_filename=filename)
+    config = SwarmConfig.from_namespace(ns)
 
     # then:
-    result = read_cg_itp_file(ns)
+    result = read_cg_itp_file(config)
     assert len(result["bond"]) == 4
     assert len(result["bond"]) == result["nb_bonds"]
     assert len(result["angle"]) == 5

@@ -1,64 +1,42 @@
-import re
-import collections
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
 from pyemd import emd
-from scipy.optimize import curve_fit
 
 import swarmcg.scoring as scores
-import swarmcg.simulations.vs_functions as vsf
-from swarmcg import config
 from swarmcg.config_types import SwarmConfig
-from swarmcg.shared import math_utils, styling, exceptions, catch_warnings
-from swarmcg.shared.math_utils import draw_float
-from swarmcg.simulations.potentials import (gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2,
-                                            gmx_dihedrals_func_1, gmx_dihedrals_func_2)
+from swarmcg.context import OptimizationContext
+from swarmcg import config
+from swarmcg.shared import styling
 
-matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
+# Use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
+matplotlib.use("AGG")
 
-
-# TODO: When provided trajectory file does NOT contain PBC infos (box position and size for each frame, which are present in XTC format for example), we want to stil accept the provided trajectory format (if accepted by MDAnalysis) but we automatically disable the handling of PBC by the code
-
-
-def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False, record_best_indep_params=False):
-    """Compare 2 models -- atomistic and CG models with plotting.
-
-    ns requires:
-        all_best_emd_dist_geoms (edited inplace)
-        all_best_params_dist_geoms (edited inplace)
-        atom_only
-        cg_tpr_filename
-        cg_traj_filename
-        cg_itp
-        aa2cg_universe
-        mismatch_order
-        row_x_scaling
-        ncols_max
-        plot_filename
-
-    ns creates:
-        cg_universe
-
-    pass ns to:
-        compute_Rg
-        compute_SASA
-        get_AA_bonds_distrib
-        get_CG_bonds_distrib
-        get_AA_angles_distrib
-        get_CG_angles_distrib
-        get_AA_dihedrals_distrib
-        get_CG_dihedrals_distrib
+def compare_models(context: OptimizationContext, manual_mode: bool = True, ignore_dihedrals: bool = False, 
+                  calc_sasa: bool = False, record_best_indep_params: bool = False):
     """
+    Compare 2 models -- atomistic and CG models with plotting.
+    
+    Args:
+        context (OptimizationContext): The optimization context containing configuration and state.
+        manual_mode (bool): Whether running in manual mode (scg_evaluate) or optimization mode.
+        ignore_dihedrals (bool): If True, exclude dihedrals from scoring.
+        calc_sasa (bool): Whether to calculate and compare SASA.
+        record_best_indep_params (bool): Use independent parameter recording (optimization feature).
+    """
+    ns = context # Alias for easier refactoring, though using context directly is preferred long-term
+    
     # graphical parameters
     plt.rcParams["grid.color"] = "k"  # plt grid appearance settings
     plt.rcParams["grid.linestyle"] = ":"
     plt.rcParams["grid.linewidth"] = 0.5
 
     row_wise_ranges = {}
-    row_wise_ranges["max_range_constraints"], row_wise_ranges["max_range_bonds"], row_wise_ranges["max_range_angles"], \
-    row_wise_ranges["max_range_dihedrals"] = 0, 0, 0, 0
+    row_wise_ranges["max_range_constraints"] = 0 
+    row_wise_ranges["max_range_bonds"] = 0
+    row_wise_ranges["max_range_angles"] = 0
+    row_wise_ranges["max_range_dihedrals"] = 0
 
     if ns.atom_only:
         # scores.compute_Rg(ns, traj_type="AA")
@@ -67,7 +45,7 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
 
     # proceed with CG data
     if not ns.atom_only:
-        config_obj = SwarmConfig.from_namespace(ns) # Create config object for passing to functions
+        config_obj = ns.config if ns.config else SwarmConfig.from_namespace(ns) # Fallback for safety
 
         print("Reading CG trajectory")
         ns.cg_universe = mda.Universe(ns.cg_tpr_filename, ns.cg_traj_filename, in_memory=True, refresh_offsets=True,
@@ -101,8 +79,7 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
             mda.lib.mdamath.make_whole(ag_mol, inplace=True)
 
         # this requires CG data for mapping -- especially, masses are taken from the CG TPR but the CG ITP is also used atm
-        # this requires CG data for mapping -- especially, masses are taken from the CG TPR but the CG ITP is also used atm
-        if ns.gyr_aa_mapped == None:
+        if ns.gyr_aa_mapped is None:
             # scores.compute_Rg(ns, traj_type="AA_mapped")
             ns.gyr_aa_mapped, ns.gyr_aa_mapped_std = scores.compute_Rg(ns.aa2cg_universe, ns.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.mda_backend, offset=ns.aa_rg_offset)
             print()
@@ -115,7 +92,7 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
 
         if calc_sasa:
 
-            if ns.sasa_aa_mapped == None:
+            if ns.sasa_aa_mapped is None:
                 # scores.compute_SASA(ns, traj_type="AA_mapped")
                 ns.sasa_aa_mapped, ns.sasa_aa_mapped_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="AA_mapped")
 
@@ -124,9 +101,7 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
             print()
 
             # this line checks that gmx trjconv could read the md.xtc trajectory from the opti
-            # this is to catch bugged simulation that actually finished and produced the files,
-            # but the .gro is a 2D bugged file for example, or trjactory is unreadable by gmx
-            if ns.sasa_cg == None:
+            if ns.sasa_cg is None:
                 return 0, 0, 0, 0, 0, None  # ns.sasa_cg == None will be checked in eval_function and worst score will be attributed
 
     print()
@@ -134,8 +109,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
     print("| SCORING AND PLOTTING                                                                        |", flush=True)
     print(styling.sep_close, flush=True)
     print()
-
-    # bonded_calc_time = datetime.now().timestamp()
 
     # constraints
     print("Processing constraints ...", flush=True)
@@ -148,8 +121,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            # constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns, beads_ids=
-            # ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint)
             constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.bins_constraints, bandwidth=ns.bw_constraints)
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
@@ -165,15 +136,13 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
 
         if not ns.atom_only:
             try:
-                # constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns, beads_ids=
-                # ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint")
                 constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.bins_constraints, bandwidth=ns.bw_constraints)
                 constraints[grp_constraint]["CG"]["avg"] = constraint_avg
                 constraints[grp_constraint]["CG"]["hist"] = constraint_hist
 
                 for i in range(1, len(constraint_hist) - 1):
                     if constraint_hist[i - 1] > 0 or constraint_hist[i] > 0 or constraint_hist[
-                        i + 1] > 0:  # TODO: find real min/max correctly, currently this code is garbage (here or nearby) and not robust to changes in bandwidth, in particular for small bandwidths
+                        i + 1] > 0: 
                         constraints[grp_constraint]["CG"]["x"].append(np.mean(ns.bins_constraints[i:i + 2]))
                         constraints[grp_constraint]["CG"]["y"].append(constraint_hist[i])
 
@@ -220,8 +189,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            # bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
-            #                                                      grp_type="bonds group", grp_nb=grp_bond)
             bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.bins_bonds, bandwidth=ns.bw_bonds)
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
@@ -237,8 +204,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
 
         if not ns.atom_only:
             try:
-                # bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
-                #                                                      grp_type="bond")
                 bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.bins_bonds, bandwidth=ns.bw_bonds)
                 bonds[grp_bond]["CG"]["avg"] = bond_avg
                 bonds[grp_bond]["CG"]["hist"] = bond_hist
@@ -289,8 +254,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            # angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns,
-            #                                                            beads_ids=ns.cg_itp["angle"][grp_angle]["beads"])
             angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.bins_angles, bandwidth=ns.bw_angles)
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
@@ -305,8 +268,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                 angles[grp_angle]["AA"]["y"].append(angles[grp_angle]["AA"]["hist"][i])
 
         if not ns.atom_only:
-            # angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns,
-            #                                                            beads_ids=ns.cg_itp["angle"][grp_angle]["beads"])
             angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.bins_angles, bandwidth=ns.bw_angles)
             angles[grp_angle]["CG"]["avg"] = angle_avg
             angles[grp_angle]["CG"]["hist"] = angle_hist
@@ -351,8 +312,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            # dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns, beads_ids=
-            # ns.cg_itp["dihedral"][grp_dihedral]["beads"])
             dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.bins_dihedrals, bandwidth=ns.bw_dihedrals)
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
@@ -367,8 +326,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                 dihedrals[grp_dihedral]["AA"]["y"].append(dihedrals[grp_dihedral]["AA"]["hist"][i])
 
         if not ns.atom_only:
-            # dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns, beads_ids=
-            # ns.cg_itp["dihedral"][grp_dihedral]["beads"])
             dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.bins_dihedrals, bandwidth=ns.bw_dihedrals)
             dihedrals[grp_dihedral]["CG"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["CG"]["hist"] = dihedral_hist
@@ -402,9 +359,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         diff_ordered_grp_dihedrals = [x for _, x in sorted(zip(avg_diff_grp_dihedrals, diff_ordered_grp_dihedrals),
                                                            key=lambda pair: pair[0], reverse=True)]
 
-    # bonded_calc_time = datetime.now().timestamp() - bonded_calc_time
-    # print("Time for reference distributions calculation:", round(bonded_calc_time / 60, 2), "min")
-
     ###############################
     # DISPLAY DISTRIBUTIONS PLOTS #
     ###############################
@@ -436,8 +390,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
     nrows -= sum([ns.cg_itp["nb_constraints"] == 0, ns.cg_itp["nb_bonds"] == 0, ns.cg_itp["nb_angles"] == 0,
                   ns.cg_itp["nb_dihedrals"] == 0])
 
-    # fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols*3, nrows*3), squeeze=False)
-    # this fucking line was responsible of the big memory leak (figures were not closing) so I let this here for memory
     fig = plt.figure(figsize=(ncols * 3, nrows * 3))
     ax = fig.subplots(nrows=nrows, ncols=ncols, squeeze=False)
 
@@ -452,7 +404,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         for i in range(ncols):
             if i < ns.cg_itp["nb_constraints"]:
                 grp_constraint = diff_ordered_grp_constraints[i]
-
                 if config.use_hists:
                     ax[nrow][i].step(constraints[grp_constraint]["AA"]["x"], constraints[grp_constraint]["AA"]["y"],
                                      label="AA-mapped", color=config.atom_color, where="mid", alpha=config.line_alpha)
@@ -502,7 +453,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                     constraints_min_y = ax[nrow][i].get_ylim()[0]
                 if ax[nrow][i].get_ylim()[1] > constraints_max_y:
                     constraints_max_y = ax[nrow][i].get_ylim()[1]
-
             else:
                 ax[nrow][i].set_visible(False)
 
@@ -513,7 +463,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         for i in range(ncols):
             if i < ns.cg_itp["nb_bonds"]:
                 grp_bond = diff_ordered_grp_bonds[i]
-
                 if config.use_hists:
                     ax[nrow][i].step(bonds[grp_bond]["AA"]["x"], bonds[grp_bond]["AA"]["y"], label="AA-mapped",
                                      color=config.atom_color, where="mid", alpha=config.line_alpha)
@@ -555,7 +504,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                     bonds_min_y = ax[nrow][i].get_ylim()[0]
                 if ax[nrow][i].get_ylim()[1] > bonds_max_y:
                     bonds_max_y = ax[nrow][i].get_ylim()[1]
-
             else:
                 ax[nrow][i].set_visible(False)
 
@@ -566,7 +514,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         for i in range(ncols):
             if i < ns.cg_itp["nb_angles"]:
                 grp_angle = diff_ordered_grp_angles[i]
-
                 if config.use_hists:
                     ax[nrow][i].step(angles[grp_angle]["AA"]["x"], angles[grp_angle]["AA"]["y"], label="AA-mapped",
                                      color=config.atom_color, where="mid", alpha=config.line_alpha)
@@ -610,7 +557,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                     angles_min_y = ax[nrow][i].get_ylim()[0]
                 if ax[nrow][i].get_ylim()[1] > angles_max_y:
                     angles_max_y = ax[nrow][i].get_ylim()[1]
-
             else:
                 ax[nrow][i].set_visible(False)
 
@@ -621,7 +567,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
         for i in range(ncols):
             if i < ns.cg_itp["nb_dihedrals"]:
                 grp_dihedral = diff_ordered_grp_dihedrals[i]
-
                 if config.use_hists:
                     ax[nrow][i].step(dihedrals[grp_dihedral]["AA"]["x"], dihedrals[grp_dihedral]["AA"]["y"],
                                      label="AA-mapped", color=config.atom_color, where="mid", alpha=config.line_alpha)
@@ -666,7 +611,6 @@ def compare_models(ns, manual_mode=True, ignore_dihedrals=False, calc_sasa=False
                     dihedrals_min_y = ax[nrow][i].get_ylim()[0]
                 if ax[nrow][i].get_ylim()[1] > dihedrals_max_y:
                     dihedrals_max_y = ax[nrow][i].get_ylim()[1]
-
             else:
                 ax[nrow][i].set_visible(False)
 

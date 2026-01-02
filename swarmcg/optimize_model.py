@@ -18,10 +18,7 @@ from swarmcg.scoring import eval_function
 from swarmcg.simulations import SimulationStep, get_settings
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings, input_parameter_validation
-from swarmcg import swarmCG as scg # Keep for compare_models? 
-# Check if compare_models is the only thing left. 
-# Yes, import compare_models directly to be clean.
-from swarmcg.swarmCG import compare_models
+from swarmcg.scoring.compare import compare_models
 from swarmcg import utils
 from swarmcg import forcefield
 from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols

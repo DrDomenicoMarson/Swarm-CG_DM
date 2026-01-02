@@ -8,7 +8,7 @@ import matplotlib
 import swarmcg.shared.styling
 import swarmcg.io as io
 import swarmcg.scoring as scores
-from swarmcg.swarmCG import compare_models
+from swarmcg.scoring.compare import compare_models
 from swarmcg import config
 from swarmcg.shared import catch_warnings, input_parameter_validation
 from swarmcg import utils

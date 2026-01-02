@@ -407,8 +407,10 @@ def read_cg_itp_file(config: SwarmConfig):
                                                                                     config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     "-max_fct_dihedrals_f2"))
 
+
                     # handle multiplicity if function assumes multiplicity
-                    if func in config.dihedral_func_with_mult:
+                    from swarmcg import config as global_config
+                    if func in global_config.dihedral_func_with_mult:
                         try:
                             cg_itp["dihedral"][nb_dihedrals]["mult"].append(
                                 int(sp_itp_line[7]))

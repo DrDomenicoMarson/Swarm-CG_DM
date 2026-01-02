@@ -4,9 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 import swarmcg
+import swarmcg
 from swarmcg import config
-from swarmcg.simulations.runner import ns_to_runner, SimulationStep
+from swarmcg.simulations.runner import config_to_runner, SimulationStep
 from swarmcg.simulations.simulation_steps import Minimisation, Equilibration, Production
+from swarmcg.config_types import SwarmConfig
 
 TEST_DATA = "tests/data/"
 ROOT_DIR = os.path.dirname(swarmcg.__file__)
@@ -104,14 +106,20 @@ def md():
 
 @pytest.fixture(scope="module")
 def simstep_mini(ns_opt, mini):
-    return ns_to_runner(ns_opt(), mini, f"{TEST_DATA}start_conf.gro")
+    ns = ns_opt()
+    config_obj = SwarmConfig.from_namespace(ns)
+    return config_to_runner(config_obj, mini, f"{TEST_DATA}start_conf.gro")
 
 
 @pytest.fixture(scope="module")
 def simstep_equi(ns_opt, equi):
-    return ns_to_runner(ns_opt(), equi, f"{TEST_DATA}mini.gro")
+    ns = ns_opt()
+    config_obj = SwarmConfig.from_namespace(ns)
+    return config_to_runner(config_obj, equi, f"{TEST_DATA}mini.gro")
 
 
 @pytest.fixture(scope="module")
 def simstep_md(ns_opt, md):
-    return ns_to_runner(ns_opt(), md, f"{TEST_DATA}equi.gro")
+    ns = ns_opt()
+    config_obj = SwarmConfig.from_namespace(ns)
+    return config_to_runner(config_obj, md, f"{TEST_DATA}equi.gro")

@@ -20,7 +20,7 @@ class BaseSimulationConfig:
     def read_mdp(filename):
         with open(filename, "r") as f:
             raw_content = f.readlines()
-        SUB_PATTERN = "[\n\t\s]*"
+        SUB_PATTERN = r"[\n\t\s]*"
         SPLIT_PATTER = "(.*)=(.*)"
         KEEP_PATTERN = "^[^;]*"
         f_clean = lambda x: re.sub(SUB_PATTERN, "", x)
@@ -42,7 +42,7 @@ class BaseSimulationConfig:
                                   if i not in self.sim_setup.keys()])
         if missing_args:
             msg = (
-                f"The following arguments are missing form mdp file for {self.name}: {missing_args}. "
+                f"The following arguments are missing form mdp file for {self.step_name}: {missing_args}. "
                 "Please check you input."
             )
             raise exceptions.MissformattedFile(msg)
