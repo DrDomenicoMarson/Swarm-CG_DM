@@ -72,7 +72,23 @@ def test_prepare_simulation_input(workspace_mgr, tmp_path):
             
     workspace_mgr.prepare_simulation_input(["test.itp"])
     
-    input_dir = os.path.join(workspace_mgr.exec_folder, "input_sim_files")
+    # In the real class, it uses config.input_sim_files_dirname which is nested
+    # The default mock config doesn't seemingly change this behavior, but WorkspaceManager uses constant from config module
+    # Let's inspect what WorkspaceManager uses. It uses config.input_sim_files_dirname.
+    # We should verify if that dirname has a path separator.
+    # If not, let's look at the failure: assert False where False = isdir('EXEC_DIR/input_sim_files') (from previous output)
+    
+    # Actually, let's verify where the manager creates it.
+    # It creates it at os.path.join(self.exec_folder, config.input_sim_files_dirname)
+    # config.input_sim_files_dirname defaults to ".internal/input_CG_simulation_files"
+    # So we should check for that.
+    
+    import swarmcg.config as config
+    input_dir = os.path.join(workspace_mgr.exec_folder, config.input_sim_files_dirname)
+    
+    # Ensure parent dir exists (it is created by setup_execution_folder)
+    # The manager creates input_sim_dir.
+    
     assert os.path.isdir(input_dir)
     assert os.path.isfile(os.path.join(input_dir, "test.itp"))
     assert os.path.isfile(os.path.join(input_dir, "test.gro"))
