@@ -83,6 +83,7 @@ class OptimizationConfig(BaseModel):
     
     # Other
     keep_all_sims: bool = False
+    bi_nb_bins: int = 50
 
     @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1', 'default_max_fct_angles_opti_f2')
     @classmethod
@@ -234,7 +235,8 @@ class SwarmConfig(BaseModel):
             bonds_scaling=getattr(ns, 'bonds_scaling', 1.0),
             bonds_scaling_str=getattr(ns, 'bonds_scaling_str', ""),
             min_bonds_length=getattr(ns, 'min_bonds_length', 0.0),
-            keep_all_sims=getattr(ns, 'keep_all_sims', False)
+            keep_all_sims=getattr(ns, 'keep_all_sims', False),
+            bi_nb_bins=getattr(ns, 'bi_nb_bins', 50)
         )
 
         # Output

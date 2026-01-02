@@ -88,14 +88,20 @@ class SimulationStep:
     def _run_prep(self, cmd):
         with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE) as gmx_process:
-            _ = gmx_process.communicate()[1].decode()
+            out, err = gmx_process.communicate()
+            gmx_out = f"STDOUT:\n{out.decode()}\nSTDERR:\n{err.decode()}"
             gmx_process.kill()
 
         if gmx_process.returncode == 0:
             return self
         else:
+            print_stdout_forced(
+                'NON-ZERO EXIT CODE FOR COMMAND:', cmd, '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
+            )
             msg = (
-                f"Gromacs grompp failed at MD {self.step_name} step, see its error message above. "
+                f"Gromacs grompp failed at MD {self.step_name} step.\n"
+                f"COMMAND: {cmd}\n"
+                f"OUTPUT:\n{gmx_out}\n"
                 f"You may also want to check the parameters of the MDP file provided through "
                 f"argument -{self.swarmcg_flag}. If you think this is a bug, please consider opening "
                 f"an issue on GitHub at {config.github_url}/issues."
@@ -131,15 +137,32 @@ class SimulationStep:
                         last_log_file_size = log_file_size
 
             gmx_process.kill()
-
+            
+            # Capture output after process finishes
+            out, err = gmx_process.communicate()
+            
         if _run_killed:
             msg = (
                 f"MD {self.step_name} run failed (unstable simulation was killed, with unstable "
                 f"= NOT writing in log file for {keep_alive_n_cycles * seconds_between_checks} sec)"
             )
             print_stdout_forced(msg)
-        else:
-            return gmx_process.returncode
+            raise exceptions.ComputationError(msg)
+            
+        if gmx_process.returncode != 0:
+            gmx_out = f"STDOUT:\n{out.decode()}\nSTDERR:\n{err.decode()}"
+            print_stdout_forced(
+                'NON-ZERO EXIT CODE FOR COMMAND:', cmd, '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
+            )
+            msg = (
+                f"Gromacs mdrun failed at MD {self.step_name} step.\n"
+                f"COMMAND: {cmd}\n"
+                f"OUTPUT:\n{gmx_out}\n"
+                f"If you think this is a bug, please consider opening an issue on GitHub."
+            )
+            raise exceptions.ComputationError(msg)
+
+        return gmx_process.returncode
 
     def run(self, exec_path, aux_command=""):
         # We need to make sure we are operating in the right directory

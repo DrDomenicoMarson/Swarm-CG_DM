@@ -64,6 +64,10 @@ class SwarmEvaluator:
         self.ns.mda_beads_atom_grps = self.mapping.mda_beads_atom_grps
         self.ns.mda_weights_atom_grps = self.mapping.mda_weights_atom_grps
         
+        # 6b. Initialize Data Containers
+        self.ns.data_BI = {}
+        self.ns.domains_val = {}
+        
         # 7. Map AA to CG
         print("\nMapping AA Trajectory to CG representation...")
         self.ns.aa2cg_universe = initialize_cg_traj(self.ns.cg_itp)
@@ -118,10 +122,7 @@ class SwarmEvaluator:
             xmin, xmax = xmin - self.ns.bw_bonds, xmax + self.ns.bw_bonds
             
             # Helper for hist in BI range
-            h, _ = np.histogram(values, range=(xmin, xmax), bins=self.config.optimization.bi_nb_bins) # Using config constant directly if accessible or hardcoded? 
-            # Actually bi_nb_bins is not in ConfigType yet? It was in config.py.
-            # config object should have it if we migrated everything. 
-            # Assuming swarmcg.config.bi_nb_bins exists.
+            h, _ = np.histogram(values, range=(xmin, xmax), bins=self.config.optimization.bi_nb_bins)
             
             self.ns.data_BI.setdefault("bond", []).append([h, np.std(values), np.mean(values), (xmin, xmax)])
             self.ns.domains_val.setdefault("bond", []).append([round(np.min(values), 3), round(np.max(values), 3)])
@@ -142,7 +143,7 @@ class SwarmEvaluator:
              xmin, xmax = min(np.inf, self.ns.bins_angles[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.bins_angles[np.max(np.nonzero(hist)) + 1])
              xmin, xmax = xmin + self.ns.bw_angles / 2, xmax - self.ns.bw_angles / 2
              
-             h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=config.bi_nb_bins)
+             h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=self.config.optimization.bi_nb_bins)
              
              self.ns.data_BI.setdefault("angle", []).append([h, np.std(val_rad), (xmin, xmax)])
              self.ns.domains_val.setdefault("angle", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
@@ -163,7 +164,7 @@ class SwarmEvaluator:
             grp["hist"] = hist
             
             xmin, xmax = -180, 180
-            h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=2 * config.bi_nb_bins)
+            h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=2 * self.config.optimization.bi_nb_bins)
             
             self.ns.data_BI.setdefault("dihedral", []).append([h, np.std(val_rad), np.mean(val_rad), (xmin, xmax)])
             self.ns.domains_val.setdefault("dihedral", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
