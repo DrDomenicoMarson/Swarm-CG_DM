@@ -105,3 +105,4 @@ ENV/
 *.DS_Store
 .DS_Store
 .DS_Store
+tests/data/.aa_traj.xtc_offsets.npz
