@@ -101,13 +101,19 @@ class Production(BaseSimulationConfig):
     edit_mpd = True
 
 
-def select_class(flag, ns):
-    filename = getattr(ns, flag)
-    if "mdp_md_basename" == flag:
-        return Production(filename)
-    elif "mdp_equi_basename" == flag:
-        return Equilibration(filename)
-    elif "mdp_minimization_basename" == flag:
-        return Minimisation(filename)
+def select_class(step_type, config):
+    """
+    Factory for simulation step configuration.
+    
+    Args:
+        step_type (str): One of 'minimization', 'equilibration', 'production'
+        config (SimulationConfig): Configuration object containing file paths
+    """
+    if step_type == "production":
+        return Production(config.mdp_md_filename)
+    elif step_type == "equilibration":
+        return Equilibration(config.mdp_equi_filename)
+    elif step_type == "minimization":
+        return Minimisation(config.mdp_minimization_filename)
     else:
-        ValueError(f"Flag {flag} does not correspond to any class.")
+        raise ValueError(f"Step type '{step_type}' does not correspond to any class.")

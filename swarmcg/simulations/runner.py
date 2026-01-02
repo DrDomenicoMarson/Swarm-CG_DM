@@ -1,10 +1,9 @@
-import time, subprocess, os, signal
-
+import time, subprocess, os, signal, shutil
 import swarmcg.shared.exceptions as exceptions
 import swarmcg.config as config
 from swarmcg.utils import print_stdout_forced
 from swarmcg.simulations.simulation_steps import select_class
-
+from swarmcg.config_types import SwarmConfig
 
 def exec_gmx(gmx_cmd):
     """Execute gmx cmd and return only exit code"""
@@ -82,6 +81,7 @@ class SimulationStep:
     def _run_setup(self, exec_path):
         sim_time = self.sim_setup.get("sim_duration")
         nb_frames = self.sim_setup.get("prod_nb_frames")
+        # Ensure we write to exec_path even if basenames are used
         self.sim_setup.get("simulation_config").modify_mdp(sim_time, nb_frames).to_file(exec_path)
         return self
 
@@ -142,45 +142,80 @@ class SimulationStep:
             return gmx_process.returncode
 
     def run(self, exec_path, aux_command=""):
+        # We need to make sure we are operating in the right directory
+        # The exec_path is used as the directory to write the MDP file
+        # The commands are executed via subprocess.Popen(shell=True)
+        # So unless we explicitly change dir or prepend path, it runs in CWD
+        
+        # PRECONDITION: Caller must have chdir'd to the working directory or exec_path needs to be used more effectively
+        # But looking at usage, the caller usually chdirs.
+        
         prep_cmd = self._prepare_cmd()
         md_cmd = self._run_cmd(aux_command)
         return self._run_setup(exec_path)._run_prep(prep_cmd)._run_md(md_cmd)
 
 
-def ns_to_runner(ns, sim_config, prev_gro):
+def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, nb_frames=None):
     simulation_setup = {
-        "exec": ns.gmx_path,
+        "exec": config.gromacs.gmx_path,
         "gro": prev_gro,
-        "mdp": getattr(ns, sim_config.mdp_base_name),
-        "top": ns.top_input_basename,
+        "mdp": sim_config.base_name,
+        "top": os.path.basename(config.cg_model.top_input_filename),
 
-        "gpu_id": ns.gpu_id,
-        "mpi_tasks": ns.mpi_tasks,
-        "nb_threads": ns.nb_threads,
-        "maxwarn": ns.mini_maxwarn,
+        "gpu_id": config.gromacs.gpu_id,
+        "mpi_tasks": config.gromacs.mpi_tasks,
+        "nb_threads": config.gromacs.nb_threads,
+        "maxwarn": config.gromacs.mini_maxwarn,
 
         "swarmcg_flag": sim_config.swarmcg_flag,
         "step_name": sim_config.step_name,
         "md_output": sim_config.md_output,
 
         "monitor_file": f"{sim_config.md_output}.log",
-        "keep_alive_n_cycles": ns.process_alive_nb_cycles_dead,
-        "seconds_between_checks": ns.process_alive_time_sleep,
+        "keep_alive_n_cycles": int(config.gromacs.sim_kill_delay / 10),
+        "seconds_between_checks": 10,
         "simulation_config": sim_config,
     }
-    if hasattr(ns, "prod_sim_time"):
-        simulation_setup["sim_duration"] = getattr(ns, "prod_sim_time")
-    if hasattr(ns, "prod_nb_frames"):
-        simulation_setup["prod_nb_frames"] = getattr(ns, "prod_nb_frames")
+    
+    if sim_time:
+        simulation_setup["sim_duration"] = sim_time
+    if nb_frames:
+        simulation_setup["prod_nb_frames"] = nb_frames
 
     return simulation_setup
 
 
-def generate_steps(ns):
-    step_flags = ["mdp_minimization_basename", "mdp_equi_basename", "mdp_md_basename"]
-    prev_gro = ns.gro_input_basename
-    for step in step_flags:
-        sim_config = select_class(step, ns)
-        simulation_step = SimulationStep(ns_to_runner(ns, sim_config, prev_gro))
-        prev_gro = simulation_step.output_gro
-        yield simulation_step
+class SimulationManager:
+    """Manages the full lifecycle of a simulation (Mini -> Equi -> Prod)."""
+    
+    def __init__(self, config: SwarmConfig):
+        self.config = config
+
+    def run_simulation(self, working_dir, sim_time=None, nb_frames=None):
+        """Run the simulation chain in the specified working directory."""
+        
+        # Store original directory
+        original_dir = os.getcwd()
+        try:
+            os.chdir(working_dir)
+            
+            # Initial GRO file (assumed to be in working_dir as basename)
+            prev_gro = os.path.basename(self.config.cg_model.gro_input_filename)
+            
+            steps = ["minimization", "equilibration", "production"]
+            
+            for step_type in steps:
+                sim_config = select_class(step_type, self.config.simulation)
+                simulation_setup = config_to_runner(self.config, sim_config, prev_gro, sim_time, nb_frames)
+                
+                step = SimulationStep(simulation_setup)
+                step.run(working_dir) # executing in CWD
+                
+                # Update prev_gro for next step
+                prev_gro = step.output_gro
+                
+        finally:
+            os.chdir(original_dir)
+            
+        return True # Success if we got here (exceptions would raise)
+

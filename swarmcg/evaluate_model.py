@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 from shlex import quote as cmd_quote
 
 import numpy as np
@@ -7,15 +8,23 @@ import matplotlib
 import swarmcg.shared.styling
 import swarmcg.io as io
 import swarmcg.scoring as scores
-from swarmcg import swarmCG as scg
+from swarmcg.swarmCG import compare_models
 from swarmcg import config
 from swarmcg.shared import catch_warnings, input_parameter_validation
+from swarmcg import utils
+from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols
+from swarmcg.config_types import SwarmConfig
+from swarmcg.context import OptimizationContext
 
 matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 
 
 @catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
-def run(ns):
+def run(config_obj: SwarmConfig):
+    
+    # Create context
+    ns = OptimizationContext(config=config_obj)
+
     print()
     print(swarmcg.shared.styling.sep_close)
     print("| PRE-PROCESSING                                                                              |")
@@ -32,19 +41,17 @@ def run(ns):
     ns.molname_in = None
     ns.gyr_aa_mapped, ns.gyr_aa_mapped_std = None, None
     ns.sasa_aa_mapped, ns.sasa_aa_mapped_std = None, None
-    ns.aa_rg_offset = 0  # TODO: allow an argument more in evaluate_model, like in optimiwe_model, for adding an offset to Rg
-    ns.user_input = False
-    ns.default_max_fct_bonds_opti = np.inf
-    ns.default_max_fct_angles_opti_f1 = np.inf
-    ns.default_max_fct_angles_opti_f2 = np.inf
-    ns.default_abs_range_fct_dihedrals_opti_func_with_mult = np.inf
-    ns.default_abs_range_fct_dihedrals_opti_func_without_mult = np.inf
+    # ns.aa_rg_offset = 0  # This should be in config via reference.aa_rg_offset
+    # ns.user_input = False # logic handled by config usually
+    # ns.default_max_fct_bonds_opti = np.inf # logic handled by config usually
 
     # scg.set_MDA_backend(ns)
     ns.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
 
     # TODO: this eventually will need to be taked out of this function when we can avoid adding new attributed to ns
-    ns.mapping_type = ns.mapping_type.upper()
+    # ns.mapping_type = ns.mapping_type.upper() # Handled by Config usually, or we ensure it
+    
+    # Ideally should use config object directly, but input_parameter_validation is legacy
     input_parameter_validation(ns, config)
 
     # display parameters for function compare_models
@@ -64,39 +71,55 @@ def run(ns):
         ns.plot_filename = ns.plot_filename + ".png"
 
     scores.create_bins_and_dist_matrices(ns)  # bins for EMD calculations
-    scg.read_ndx_atoms2beads(ns)  # read mapping, get atoms accurences in beads
-    scg.get_atoms_weights_in_beads(ns)  # get weights of atoms within beads
+    
+    # Mapping initialization
+    mapping = Mapping(config_obj)
+    mapping.read_ndx_atoms2beads()
+    
+    # Expose mapping to ns
+    ns.all_beads = mapping.all_beads
+    
+    mapping.get_atoms_weights_in_beads()
+    ns.atom_w = mapping.atom_w
 
-    ns.cg_itp = io.read_cg_itp_file(ns)  # load the ITP object and find out geoms grouping
+    ns.cg_itp = io.read_cg_itp_file(config_obj)  # load the ITP object and find out geoms grouping
     io.validate_cg_itp(ns.cg_itp)  # check ITP object is correct
-    scg.process_scaling_str(ns)  # process the bonds scaling specified by user
+    
+    utils.process_scaling_str(ns)  # process the bonds scaling specified by user
 
     print()
-    io.read_aa_traj(ns)  # create universe and read traj
-    scg.load_aa_data(ns)  # read atoms attributes
-    scg.make_aa_traj_whole_for_selected_mols(ns)
+    ns.aa_universe = io.read_aa_traj(config_obj.reference)  # create universe and read traj
+    
+    mapping.load_aa_data(ns.aa_universe)
+    ns.all_atoms = mapping.all_atoms
+    ns.all_aa_mols = mapping.all_aa_mols
+    
+    make_aa_traj_whole_for_selected_mols(ns.aa_universe, ns.all_aa_mols)
 
     # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    scg.get_beads_MDA_atomgroups(ns)
+    mapping.get_beads_MDA_atomgroups(ns.aa_universe)
+    ns.mda_beads_atom_grps = mapping.mda_beads_atom_grps
+    ns.mda_weights_atom_grps = mapping.mda_weights_atom_grps
 
     print("\nMapping the trajectory from AA to CG representation")
-    ns.aa2cg_universe = scg.initialize_cg_traj(ns.cg_itp)
-    scg.map_aa2cg_traj(ns)
+    ns.aa2cg_universe = initialize_cg_traj(ns.cg_itp)
+    mapping.map_aa2cg_traj(ns.aa_universe, ns.aa2cg_universe, ns.cg_itp)
     print()
 
-    scg.compare_models(ns, manual_mode=True, calc_sasa=False)
+    compare_models(ns, manual_mode=True, calc_sasa=False)
 
 
 def main():
     args_parser = io.get_evaluate_args()
 
     # arguments handling, display command line if help or no arguments provided
-    ns = args_parser.parse_args()
+    ns_args = args_parser.parse_args()
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
     print("Working directory:", os.getcwd())
     print("Command line:", input_cmdline)
 
-    run(ns)
+    swarm_config = SwarmConfig.from_namespace(ns_args)
+    run(swarm_config)
 
 
 if __name__ == "__main__":

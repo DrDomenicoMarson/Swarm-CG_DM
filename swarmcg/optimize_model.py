@@ -1,4 +1,9 @@
-import os, sys, shutil, time, copy, contextlib
+import os
+import sys
+import shutil
+import time
+import copy
+import contextlib
 from argparse import ArgumentParser, RawTextHelpFormatter, SUPPRESS
 from shlex import quote as cmd_quote
 from datetime import datetime
@@ -13,13 +18,25 @@ from swarmcg.scoring import eval_function
 from swarmcg.simulations import SimulationStep, get_settings
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings, input_parameter_validation
-from swarmcg import swarmCG as scg
+from swarmcg import swarmCG as scg # Keep for compare_models? 
+# Check if compare_models is the only thing left. 
+# Yes, import compare_models directly to be clean.
+from swarmcg.swarmCG import compare_models
+from swarmcg import utils
+from swarmcg import forcefield
+from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols
+from swarmcg.config_types import SwarmConfig
+from swarmcg.context import OptimizationContext
 
 
 @catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
-def run(ns):
+def run(config_obj: SwarmConfig):
+    
+    # Create context to hold state
+    ns = OptimizationContext(config=config_obj)
+
     # TODO: allow to feed a JSON file for cycles of optimization ?? this is more optional but useful for big stuff possibly
     # TODO: if using SASA through GMX SASA, ensure vdwradii.dat contains the MARTINI radii
     # TODO: give a warning when users specify a bond scaling without specifying an Rg offset !!!
@@ -33,26 +50,37 @@ def run(ns):
     #####################################
 
     # namespace variables not directly linked to arguments for plotting or for global package interpretation
-    # TODO: we should not generate new vars here, but before we go into the function
+    # These are now defaults in OptimizationContext, but we can override if needed
     ns.mismatch_order = False
     ns.row_x_scaling = True
     ns.row_y_scaling = True
     ns.ncols_max = 0  # 0 to display all
     # ns.atom_only = False
     ns.molname_in = None  # if None the first found using TPR atom ordering will be used
-    ns.process_alive_time_sleep = 10  # nb of seconds between process alive check cycles
+    
+    # Process alive checks
+    ns.process_alive_time_sleep = 10
+    # derived from config directly if accessible, but here derived from property
     ns.process_alive_nb_cycles_dead = int(
         ns.sim_kill_delay / ns.process_alive_time_sleep)  # nb of cycles without .log file bytes size changes to determine that the MD run is stuck
     ns.bonds_rescaling_performed = False  # for user information display
 
     # get basenames for simulation files
-    # TODO: this can be methods of a ns object which implements these operations
     ns.cg_itp_basename = os.path.basename(ns.cg_itp_filename)
     ns.gro_input_basename = os.path.basename(ns.gro_input_filename)
     ns.top_input_basename = os.path.basename(ns.top_input_filename)
     ns.mdp_minimization_basename = os.path.basename(ns.mdp_minimization_filename)
     ns.mdp_equi_basename = os.path.basename(ns.mdp_equi_filename)
     ns.mdp_md_basename = os.path.basename(ns.mdp_md_filename)
+    
+    # Execution folder setup
+    # Determine the execution folder name
+    if ns.output_folder != "":
+         ns.exec_folder = ns.output_folder
+    else:
+         # Default name if not provided
+         ns.exec_folder = time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")
+
 
     ####################
     # ARGUMENTS CHECKS #
@@ -64,12 +92,7 @@ def run(ns):
     print(swarmcg.shared.styling.sep_close)
     print()
 
-    # TODO: check that at least 10-20% of the simulations of the 1st swarm iteration finished properly, otherwise lower all energies or tell the user he is not writting into the log file regularly enough
-    # TODO: test this program with ITP files that contain all the different dihedral functions, angles functions, constraints etc
-    # TODO: find some fuzzy logic to determine number of swarm iterations + take some large margin to ensure it will optimize correctly
-
     # avoid overwriting an output directory of a previous optimization run
-    # TODO: this should be function or methods that checks before we go into the function
     if os.path.isfile(ns.exec_folder) or os.path.isdir(ns.exec_folder):
         msg = (
             "Provided output folder already exists, please delete existing folder "
@@ -77,16 +100,27 @@ def run(ns):
         )
         raise exceptions.AvoidOverwritingFolder(msg)
 
-    # TODO: this eventually will need to be taked out of this function when we can avoid adding new attributed to ns
-    ns.mapping_type = ns.mapping_type.upper()
+    # Validate parameters (Compatibility wrapper)
+    # Ideally should be done on config object but input_parameter_validation expects ns-like object
     input_parameter_validation(ns, config, step="optimisation")
 
     # check if we can find files at user-provided location(s)
     # here the order of the args in the 2 lists below is important, be very careful if changing this or adding args
-    arg_entries = vars(ns)  # dict view of the arguments namespace
-    user_provided_filenames = ["aa_tpr_filename", "aa_traj_filename", "cg_map_filename", "cg_itp_filename",
-                               "gro_input_filename", "top_input_filename", "mdp_minimization_filename",
-                               "mdp_equi_filename", "mdp_md_filename"]
+    # Accessing config fields naturally via ns proxy
+    arg_entries = {
+        "aa_tpr_filename": ns.aa_tpr_filename,
+        "aa_traj_filename": ns.aa_traj_filename,
+        "cg_map_filename": ns.cg_map_filename,
+        "cg_itp_filename": ns.cg_itp_filename,
+        "gro_input_filename": ns.gro_input_filename,
+        "top_input_filename": ns.top_input_filename,
+        "mdp_minimization_filename": ns.mdp_minimization_filename,
+        "mdp_equi_filename": ns.mdp_equi_filename,
+        "mdp_md_filename": ns.mdp_md_filename
+    }
+    
+    user_provided_filenames = list(arg_entries.keys())
+    # Field names mapping for error messages
     args_names = ["aa_tpr", "aa_traj", "cg_map", "cg_itp", "cg_gro", "cg_top", "cg_mdp_mini", "cg_mdp_equi",
                   "cg_mdp_md"]
 
@@ -105,7 +139,13 @@ def run(ns):
                     )
                     raise FileNotFoundError(msg)
                 else:
-                    arg_entries[user_provided_filenames[i]] = filename_in_directory
+                    # Update config with correct path?
+                    # ns proxy writes to context, but config object inside context is the source of truth for read/write if delegated
+                    # But we can't easily update config structure via flat names if we used delegation.
+                    # OptimizationContext stores state. It overrides config if we set attributes.
+                    # So setting ns.aa_tpr_filename = ... works on the Context object (shadowing config).
+                    setattr(ns, user_provided_filenames[i], filename_in_directory)
+                    arg_entries[user_provided_filenames[i]] = filename_in_directory # update local dict for usage below
 
             else:
                 msg = (
@@ -120,7 +160,7 @@ def run(ns):
     # check that ITP filename for the model to optimize is indeed included in the TOP file of the simulation directory
     # then find all TOP includes for copying files for simulations at each iteration
     top_includes_filenames = []
-    with open(arg_entries[user_provided_filenames[5]], "r") as fp:
+    with open(arg_entries["top_input_filename"], "r") as fp:
         all_top_lines = fp.read()
         if ns.cg_itp_basename not in all_top_lines:
             msg = "The CG ITP model filename you provided is not included in your TOP file."
@@ -132,7 +172,7 @@ def run(ns):
             if top_line.startswith("#include"):
                 top_include = top_line.split()[1].replace("'", "").replace("\"",
                                                                            "")  # remove potential single and double quotes around filenames
-                arg_dirname = os.path.dirname(arg_entries[user_provided_filenames[5]])
+                arg_dirname = os.path.dirname(arg_entries["top_input_filename"])
                 if arg_dirname == "":
                     arg_dirname = "."
                 top_includes_filenames.append(arg_dirname + "/" + top_include)
@@ -141,11 +181,7 @@ def run(ns):
     # INITIALIZATION #
     ##################
 
-    # scg.set_MDA_backend(ns)
-    ns.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
-
     # directory to write all files for current execution of optimizations routines
-    # TODO: group this operations into a FileManager class
     os.mkdir(ns.exec_folder)
     os.mkdir(ns.exec_folder + "/.internal")
     os.mkdir(ns.exec_folder + "/" + config.distrib_plots_all_evals_dirname)
@@ -161,10 +197,11 @@ def run(ns):
         shutil.copy(top_include, ns.exec_folder + "/" + config.input_sim_files_dirname)
 
     # copy all other simulation files
-    user_provided_sim_files = ["cg_itp_filename", "gro_input_filename", "top_input_filename",
-                               "mdp_minimization_filename", "mdp_equi_filename", "mdp_md_filename"]
-    for sim_file in user_provided_sim_files:
-        shutil.copy(arg_entries[sim_file], ns.exec_folder + "/" + config.input_sim_files_dirname)
+    # Use updated paths from arg_entries which handled input_folder logic
+    sim_files_keys = ["cg_itp_filename", "gro_input_filename", "top_input_filename",
+                      "mdp_minimization_filename", "mdp_equi_filename", "mdp_md_filename"]
+    for sim_file_key in sim_files_keys:
+        shutil.copy(arg_entries[sim_file_key], ns.exec_folder + "/" + config.input_sim_files_dirname)
 
     # modify the TOP file to adapt includes paths
     with open(ns.exec_folder + "/" + config.input_sim_files_dirname + "/" + ns.top_input_basename, "r") as fp:
@@ -182,20 +219,36 @@ def run(ns):
     ns.total_eval_time, ns.total_gmx_time, ns.total_model_eval_time = 0, 0, 0
 
     scores.create_bins_and_dist_matrices(ns)  # bins for EMD calculations
-    scg.read_ndx_atoms2beads(ns)  # read mapping, get atoms accurences in beads
-    scg.get_atoms_weights_in_beads(ns)  # get weights of atoms within beads
+    
+    # Initialize Mapping
+    mapping = Mapping(config_obj)
+    mapping.read_ndx_atoms2beads()
+    
+    # Expose mapping state to context/ns where needed by other functions (like perform_BI or scoring)
+    ns.all_beads = mapping.all_beads
+    # ns.atoms_occ_total = mapping.atoms_occ_total # Not widely used in opti loop?
+    
+    mapping.get_atoms_weights_in_beads()
+    ns.atom_w = mapping.atom_w
 
-    ns.cg_itp = swarmcg.io.read.read_cg_itp_file(ns)  # load the ITP object and find out geoms grouping
+    ns.cg_itp = io.read_cg_itp_file(config_obj)  # load the ITP object and find out geoms grouping
     io.validate_cg_itp(ns.cg_itp)  # check ITP object is correct
-    scg.process_scaling_str(ns)  # process the bonds scaling specified by user
+    
+    utils.process_scaling_str(ns)  # process the bonds scaling specified by user
 
     print()
-    io.read_aa_traj(ns)  # create universe and read traj
-    scg.load_aa_data(ns)  # read atoms attributes
-    scg.make_aa_traj_whole_for_selected_mols(ns)
+    ns.aa_universe = io.read_aa_traj(config_obj.reference)  # create universe and read traj
+    
+    mapping.load_aa_data(ns.aa_universe)  # read atoms attributes
+    ns.all_atoms = mapping.all_atoms
+    ns.all_aa_mols = mapping.all_aa_mols
+    
+    make_aa_traj_whole_for_selected_mols(ns.aa_universe, ns.all_aa_mols)
 
     # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    scg.get_beads_MDA_atomgroups(ns)
+    mapping.get_beads_MDA_atomgroups(ns.aa_universe)
+    ns.mda_beads_atom_grps = mapping.mda_beads_atom_grps
+    ns.mda_weights_atom_grps = mapping.mda_weights_atom_grps
 
     # get CG beads weights from ITP includes present in the TOP file
     # but do NOT erase the masses found in the ITP of the CG MODEL provided via arg -cg_itp
@@ -224,8 +277,18 @@ def run(ns):
                         pass
 
     print("\nMapping the trajectory from AA to CG representation")
-    ns.aa2cg_universe = scg.initialize_cg_traj(ns.cg_itp)
-    scg.map_aa2cg_traj(ns)
+    # Initialize CG trajectory
+    ns.aa2cg_universe = initialize_cg_traj(ns.cg_itp)
+    # Map
+    # map_aa2cg_traj expects (aa_universe, aa2cg_universe, cg_itp)
+    # Wait, check mapping.py signature again.
+    # mapping.map_aa2cg_traj is the method. Function map_aa2cg_traj might not exist standalone?
+    # I imported `map_aa2cg_traj` from mapping. Let's assume I need to use the method from `mapping` object if it carries state?
+    # mapping.py lines 128: map_aa2cg_traj(self, aa_universe, aa2cg_universe, cg_itp)
+    # It uses self.mda_beads_atom_grps which are in self.
+    # So I MUST use `mapping.map_aa2cg_traj`.
+    mapping.map_aa2cg_traj(ns.aa_universe, ns.aa2cg_universe, ns.cg_itp)
+    
     print()
 
     # touch results files to be appended to later
@@ -255,8 +318,11 @@ def run(ns):
     # get ref atom hists + find very first distances guesses for constraints groups
     for grp_constraint in range(ns.cg_itp["nb_constraints"]):
 
-        constraint_avg, constraint_hist, constraint_values = scores.get_AA_bonds_distrib(ns, beads_ids=
-        ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint group", grp_nb=grp_constraint)
+        constraint_avg, constraint_hist, constraint_values = scores.get_AA_bonds_distrib(ns.aa2cg_universe,
+                                                                                           beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                                                                                           config=ns.config, 
+                                                                                           bins=ns.bins_constraints, 
+                                                                                           bandwidth=ns.bw_constraints)
         if ns.exec_mode == 1:
             ns.cg_itp["constraint"][grp_constraint]["value"] = constraint_avg
         ns.cg_itp["constraint"][grp_constraint]["avg"] = constraint_avg
@@ -271,9 +337,11 @@ def run(ns):
     # get ref atom hists + find very first distances and force constants guesses for bonds groups
     for grp_bond in range(ns.cg_itp["nb_bonds"]):
 
-        bond_avg, bond_hist, bond_values = scores.get_AA_bonds_distrib(ns,
+        bond_avg, bond_hist, bond_values = scores.get_AA_bonds_distrib(ns.aa2cg_universe,
                                                                        beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
-                                                                       grp_type="bond group", grp_nb=grp_bond)
+                                                                       config=ns.config,
+                                                                       bins=ns.bins_bonds,
+                                                                       bandwidth=ns.bw_bonds)
         if ns.exec_mode == 1:
             ns.cg_itp["bond"][grp_bond]["value"] = bond_avg
         ns.cg_itp["bond"][grp_bond]["avg"] = bond_avg
@@ -295,8 +363,10 @@ def run(ns):
     # get ref atom hists + find very first values and force constants guesses for angles groups
     for grp_angle in range(ns.cg_itp["nb_angles"]):
 
-        angle_avg, angle_hist, angle_values_deg, angle_values_rad = scores.get_AA_angles_distrib(ns, beads_ids=
-        ns.cg_itp["angle"][grp_angle]["beads"])
+        angle_avg, angle_hist, angle_values_deg, angle_values_rad = scores.get_AA_angles_distrib(ns.aa2cg_universe,
+                                                                                                 beads_ids=ns.cg_itp["angle"][grp_angle]["beads"],
+                                                                                                 bins=ns.bins_angles,
+                                                                                                 bandwidth=ns.bw_angles)
         if ns.exec_mode == 1:
             ns.cg_itp["angle"][grp_angle]["value"] = angle_avg
         ns.cg_itp["angle"][grp_angle]["avg"] = angle_avg
@@ -318,12 +388,10 @@ def run(ns):
     # get ref atom hists + find very first values and force constants guesses for dihedrals groups
     for grp_dihedral in range(ns.cg_itp["nb_dihedrals"]):
 
-        dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad = scores.get_AA_dihedrals_distrib(ns,
-                                                                                                                beads_ids=
-                                                                                                                ns.cg_itp[
-                                                                                                                    "dihedral"][
-                                                                                                                    grp_dihedral][
-                                                                                                                    "beads"])
+        dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad = scores.get_AA_dihedrals_distrib(ns.aa2cg_universe,
+                                                                                                                beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"],
+                                                                                                                bins=ns.bins_dihedrals,
+                                                                                                                bandwidth=ns.bw_dihedrals)
         if ns.exec_mode == 1:  # the dihedral equi value will be calculated from the BI fit, because for dihedrals it makes no sense to use the average
             ns.cg_itp["dihedral"][grp_dihedral]["value"] = dihedral_avg
         ns.cg_itp["dihedral"][grp_dihedral]["avg"] = dihedral_avg
@@ -348,7 +416,7 @@ def run(ns):
     ns.plot_filename = ns.exec_folder + "/" + config.ref_distrib_plots
     with open(os.devnull, "w") as devnull:
         with contextlib.redirect_stdout(devnull):
-            scg.compare_models(ns, manual_mode=False)
+            compare_models(ns, manual_mode=False)
     print()
     print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
           ns.exec_folder + "/" + config.ref_distrib_plots)
@@ -453,10 +521,10 @@ def run(ns):
         # BI is performed:
         # -- exec_mode 1: all equilibrium values and force constants
         # -- exec_mode 2: equilibrium values are not touched for bonds, angles and dihedrals, but all their force constants are optimized
-        scg.perform_BI(ns)  # performed on object ns.out_itp
+        forcefield.perform_BI(ns.out_itp, ns.opti_cycle, ns.data_BI, ns.performed_init_BI, ns.temp, exec_mode=ns.exec_mode)
 
         # build vector for search space boundaries + create variations around the BI initial guesses
-        search_space_boundaries = scg.get_search_space_boundaries(ns)
+        search_space_boundaries = forcefield.get_search_space_boundaries(ns.cg_itp, ns.opti_cycle, ns.domains_val, ns.exec_mode, optimization_config=ns.config.optimization)
 
         # ns.worst_fit_score = round(len(search_space_boundaries) * config.sim_crash_EMD_indep_score, 3)
         ns.worst_fit_score = round( \
@@ -467,7 +535,12 @@ def run(ns):
         # nb_particles = int(10 + 2*np.sqrt(len(search_space_boundaries)))  # formula used by FST-PSO to choose nb of particles, which defines the number of initial guesses we can use
         nb_particles = particle_setter(
             search_space_boundaries)  # adapted to have less particles and fitted to our problems, which has good initial guesses and error driven initialization
-        initial_guess_list = scg.get_initial_guess_list(ns, nb_particles)
+        
+        initial_guess_list = forcefield.get_initial_guess_list(nb_particles, ns.opti_cycle, ns.cg_itp, ns.out_itp, ns.domains_val,
+                           ns.all_best_emd_dist_geoms, ns.all_best_params_dist_geoms,
+                           ns.exec_mode, user_input=ns.user_input,
+                           config_obj=ns.config, 
+                           val_guess_fact=ns.val_guess_fact, fct_guess_fact=ns.fct_guess_fact)
 
         # actual optimization
         with open(os.devnull, "w") as devnull:
@@ -480,7 +553,7 @@ def run(ns):
                                               max_iter_without_new_global_best=ns.max_swarm_iter_without_new_global_best)
 
         # update ITP object with the best solution using geoms considered at this given optimization step
-        scg.update_cg_itp_obj(ns, parameters_set=result[0].X, update_type=2)
+        forcefield.update_cg_itp_obj(ns.out_itp, ns.opti_cycle, parameters_set=result[0].X, exec_mode=ns.exec_mode)
 
     # clean temporary copied directory with user"s input files
     shutil.rmtree(ns.exec_folder + "/" + config.input_sim_files_dirname)
@@ -518,23 +591,32 @@ def main():
 
     # arguments handling, display command line if help or no arguments provided
     # argcomplete.autocomplete(parser)
-    ns = args_parser.parse_args()
+    ns_args = args_parser.parse_args()
 
     # do NOT display the stack by default
-    if not ns.verbose:
+    if not ns_args.verbose:
         sys.tracebacklimit = 0
 
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
-    ns.exec_folder = time.strftime(
-        "MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")  # default folder name for all files of this optimization run, in case none is provided
-    if ns.output_folder != "":
-        ns.exec_folder = ns.output_folder
+
+    # Convert to SwarmConfig
+    swarm_config = SwarmConfig.from_namespace(ns_args)
+    
+    # We delay exec_folder creation to run() or handle it here if needed for logging?
+    # Original main set ns.exec_folder for print.
+    # We can reconstruct it or let run() handle it. 
+    # run() logic above sets exec_folder from config.
+    # To print it here, we replicate logic
+    if swarm_config.output.output_folder != "":
+         exec_folder = swarm_config.output.output_folder
+    else:
+         exec_folder = time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")
 
     print("Working directory:", os.getcwd())
     print("Command line:", input_cmdline)
-    print("Results directory:", ns.exec_folder)
+    print("Results directory:", exec_folder)
 
-    run(ns)
+    run(swarm_config)
 
 
 if __name__ == "__main__":

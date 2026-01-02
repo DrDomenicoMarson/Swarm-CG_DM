@@ -1,49 +1,24 @@
 import numpy as np
 
-
-def compute_Rg(ns, traj_type):
+def compute_Rg(universe, atom_selection, backend='serial', offset=0.0):
     """Compute average radius of gyration.
-
-    ns requires:
-        aa_universe
-        aa2cg_universe
-        cg_universe
-        mda_backend
-
-    ns creates:
-        gyr_aa
-        gyr_aa_std
-        gyr_aa_mapped
-        gyr_aa_mapped_std
-        gyr_cg
-        gyr_cg_std
+    Returns: (avg_rg, std_rg) in nm
     """
-    if traj_type == "AA":
-
-        gyr_aa = np.empty(len(ns.aa_universe.trajectory))
-        for ts in ns.aa_universe.trajectory:
-            gyr_aa[ts.frame] = ns.aa_universe.atoms[:len(ns.all_atoms)].radius_of_gyration(pbc=None,
-                                                                                           backend=ns.mda_backend)
-        ns.gyr_aa = round(np.average(gyr_aa) / 10, 3)  # retrieve nm
-        ns.gyr_aa_std = round(np.std(gyr_aa) / 10, 3)  # retrieve nm
-
-    elif traj_type == "AA_mapped":
-
-        gyr_aa_mapped = np.empty(len(ns.aa_universe.trajectory))
-        for ts in ns.aa2cg_universe.trajectory:
-            gyr_aa_mapped[ts.frame] = ns.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])].radius_of_gyration(pbc=None,
-                                                                                                           backend=ns.mda_backend)
-        ns.gyr_aa_mapped = round(np.average(gyr_aa_mapped) / 10 + ns.aa_rg_offset, 3)  # retrieve nm
-        ns.gyr_aa_mapped_std = round(np.std(gyr_aa_mapped) / 10, 3)  # retrieve nm
-
-    elif traj_type == "CG":
-
-        gyr_cg = np.empty(len(ns.cg_universe.trajectory))
-        for ts in ns.cg_universe.trajectory:
-            gyr_cg[ts.frame] = ns.cg_universe.atoms[:len(ns.cg_itp["atoms"])].radius_of_gyration(pbc=None,
-                                                                                                 backend=ns.mda_backend)
-        ns.gyr_cg = round(np.average(gyr_cg) / 10, 3)  # retrieve nm
-        ns.gyr_cg_std = round(np.std(gyr_cg) / 10, 3)  # retrieve nm
-
-    else:
-        raise RuntimeError("Unexpected error in function: compute_Rg")
+    gyr_values = np.empty(len(universe.trajectory))
+    
+    # Pre-calculate selection indices to avoid repeated parsing if possible, 
+    # but here we pass the AtomGroup or indices directly?
+    # The original code used specific slicing:
+    # AA: ns.aa_universe.atoms[:len(ns.all_atoms)]
+    # AA_mapped: ns.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])]
+    # CG: ns.cg_universe.atoms[:len(ns.cg_itp["atoms"])]
+    
+    # So the caller should pass the *AtomGroup* or sliced atoms object.
+    
+    for ts in universe.trajectory:
+        gyr_values[ts.frame] = atom_selection.radius_of_gyration(pbc=None, backend=backend)
+        
+    avg_rg = round(np.average(gyr_values) / 10 + offset, 3) # retrieve nm
+    std_rg = round(np.std(gyr_values) / 10, 3)
+    
+    return avg_rg, std_rg

@@ -4,11 +4,14 @@ import time
 from datetime import datetime
 
 from swarmcg import config, io as io, simulations as sim
-from swarmcg.swarmCG import update_cg_itp_obj, compare_models
+from swarmcg.config_types import SwarmConfig
+from swarmcg.context import OptimizationContext
+from swarmcg.swarmCG import compare_models
+from swarmcg.forcefield import update_cg_itp_obj
 from swarmcg.utils import print_stdout_forced
 
 
-def eval_function(parameters_set, ns):
+def eval_function(parameters_set, ns: OptimizationContext):
     """Evaluation function to be optimized using FST-PSO.
 
     ns requires:
@@ -68,8 +71,18 @@ def eval_function(parameters_set, ns):
     new_best_fit = False
     start_gmx_ts = datetime.now().timestamp()
 
-    for step in sim.generate_steps(ns):
-        step.run(os.getcwd())
+    # Create configuration object from namespace
+    # swarm_config = SwarmConfig.from_namespace(ns) # Redundant if ns is OptimizationContext, but kept for compatibility or deep copy if needed
+    swarm_config = ns.config # Use config directly from context
+
+    
+    # Instantiate manager and run simulation chain
+    sim_manager = sim.SimulationManager(swarm_config)
+    sim_manager.run_simulation(
+        os.getcwd(),
+        sim_time=getattr(ns, 'prod_sim_time', None),
+        nb_frames=getattr(ns, 'prod_nb_frames', None)
+    )
 
     # to verify if MD run finished properly, we check for the .gro file printed in the end
     if os.path.isfile("md.gro"):

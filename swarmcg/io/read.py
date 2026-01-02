@@ -1,25 +1,22 @@
 import re
-
 import MDAnalysis as mda
-
+from swarmcg.config_types import ReferenceModelConfig, SwarmConfig
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings
-from swarmcg.shared import catch_warnings
 
-
-@catch_warnings(
-    ImportWarning)  # ignore warning: "bootstrap.py:219: ImportWarning: can"t resolve package from __spec__ or __package__, falling back on __name__ and __path__"
-def read_aa_traj(ns):
+@catch_warnings(ImportWarning)
+def read_aa_traj(config: ReferenceModelConfig):
     """Read atomistic trajectory
-
-    ns creates:
-        aa_universe
+    
+    Returns:
+        aa_universe (mda.Universe)
     """
     print("Reading All Atom (AA) trajectory")
-    ns.aa_universe = mda.Universe(ns.aa_tpr_filename, ns.aa_traj_filename,
+    aa_universe = mda.Universe(config.aa_tpr_filename, config.aa_traj_filename,
                                   in_memory=True, refresh_offsets=True,
-                                  guess_bonds=False)  # setting guess_bonds=False disables angles, dihedrals and improper_dihedrals guessing, which is activated by default in some MDA versions
-    print("  Found", len(ns.aa_universe.trajectory), "frames")
+                                  guess_bonds=False)
+    print("  Found", len(aa_universe.trajectory), "frames")
+    return aa_universe
 
 
 def read_itp(filename):
@@ -36,8 +33,7 @@ def read_itp(filename):
 
 def verify_handled_functions(geom, func, line_nb):
     """Check if functions present in CG ITP file can be used by this program, if not we throw
-    an error authorized functions are defined in config.py (we switch them on in config.py
-    once we have tested them)"""
+    an error authorized functions are defined in config.py"""
     try:
         func = int(func)
     except (ValueError, IndexError):
@@ -61,9 +57,6 @@ def verify_handled_functions(geom, func, line_nb):
 
     return func
 
-
-# TODO: the 3 next functions below (section_switch, vs_error_control, read_cg_itp_file) could be isolated in a sort of
-#       "topology reader" class, and next we would include the formats from other MD engines
 
 def section_switch(section_read, section_active):
     """Sections switch for reading ITP sections"""
@@ -118,23 +111,17 @@ def validate_cg_itp(cg_itp, **kwargs):
         return True
 
 
-def read_cg_itp_file(ns):
+def read_cg_itp_file(config: SwarmConfig):
     """Read coarse-grain ITP
-
-    ns required:
-        cg_itp_filename
-        user_input
-        default_max_fct_bonds_opti
-        default_max_fct_angles_opti_f1
     """
     print("Reading Coarse-Grained (CG) ITP file")
-    cg_itp = {"moleculetype": {"molname": "", "nrexcl": 0}, "atoms": [], "constraint": [],
-              "bond": [], "angle": [], "dihedral": [], "virtual_sites2": {},
-              "virtual_sites3": {}, "virtual_sites4": {}, "virtual_sitesn": {}, "exclusion": []}
+    from swarmcg.io.itp import CGITP
+    cg_itp = CGITP()
+    
     real_beads_ids, vs_beads_ids = [], []
     nb_constraints, nb_bonds, nb_angles, nb_dihedrals = -1, -1, -1, -1
 
-    itp_lines = read_itp(ns.cg_itp_filename)
+    itp_lines = read_itp(config.cg_model.cg_itp_filename)
 
     section_read = {
         "moleculetype": False,
@@ -315,10 +302,10 @@ def read_cg_itp_file(ns):
                     cg_itp["bond"][nb_bonds]["fct"].append(float(sp_itp_line[4]))
                     cg_itp["bond"][nb_bonds]["fct_user"].append(float(sp_itp_line[4]))
 
-                    if ns.user_input and not 0 <= float(
-                            sp_itp_line[4]) <= ns.default_max_fct_bonds_opti:
+                    if config.cg_model.user_input and not 0 <= float(
+                            sp_itp_line[4]) <= config.optimization.default_max_fct_bonds_opti:
                         raise exceptions.MissformattedFile(
-                            msg_force_boundaries(i + 1, 0, ns.default_max_fct_bonds_opti,
+                            msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_bonds_opti,
                                                  "-max_fct_bonds_f1"))
 
                 elif section_read["angle"]:
@@ -355,16 +342,16 @@ def read_cg_itp_file(ns):
                     cg_itp["angle"][nb_angles]["fct"].append(float(sp_itp_line[5]))
                     cg_itp["angle"][nb_angles]["fct_user"].append(float(sp_itp_line[5]))
 
-                    if ns.user_input:
+                    if config.cg_model.user_input:
                         if func == 1 and not 0 <= float(
-                                sp_itp_line[5]) <= ns.default_max_fct_angles_opti_f1:
+                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f1:
                             raise exceptions.MissformattedFile(
-                                msg_force_boundaries(i + 1, 0, ns.default_max_fct_angles_opti_f1,
+                                msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f1,
                                                      "-max_fct_angles_f1"))
                         elif func == 2 and not 0 <= float(
-                                sp_itp_line[5]) <= ns.default_max_fct_angles_opti_f2:
+                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f2:
                             raise exceptions.MissformattedFile(
-                                msg_force_boundaries(i + 1, 0, ns.default_max_fct_angles_opti_f2,
+                                msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f2,
                                                      "-max_fct_angles_f2"))
 
                 elif section_read["dihedral"]:
@@ -403,20 +390,21 @@ def read_cg_itp_file(ns):
                     cg_itp["dihedral"][nb_dihedrals]["fct"].append(float(sp_itp_line[6]))
                     cg_itp["dihedral"][nb_dihedrals]["fct_user"].append(float(sp_itp_line[6]))
 
-                    if ns.user_input:
-                        if func in config.dihedral_func_with_mult and not -ns.default_abs_range_fct_dihedrals_opti_func_with_mult <= float(
+                    if config.cg_model.user_input:
+                        from swarmcg import config as global_config
+                        if func in global_config.dihedral_func_with_mult and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult <= float(
                                 sp_itp_line[
-                                    6]) <= ns.default_abs_range_fct_dihedrals_opti_func_with_mult:
+                                    6]) <= config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult:
                             raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
-                                                                                    -ns.default_abs_range_fct_dihedrals_opti_func_with_mult,
-                                                                                    ns.default_abs_range_fct_dihedrals_opti_func_with_mult,
+                                                                                    -config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
+                                                                                    config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
                                                                                     "-max_fct_dihedrals_f149"))
-                        elif func == 2 and not -ns.default_abs_range_fct_dihedrals_opti_func_without_mult <= float(
+                        elif func == 2 and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult <= float(
                                 sp_itp_line[
-                                    6]) <= ns.default_abs_range_fct_dihedrals_opti_func_without_mult:
+                                    6]) <= config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult:
                             raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
-                                                                                    -ns.default_abs_range_fct_dihedrals_opti_func_without_mult,
-                                                                                    ns.default_abs_range_fct_dihedrals_opti_func_without_mult,
+                                                                                    -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
+                                                                                    config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     "-max_fct_dihedrals_f2"))
 
                     # handle multiplicity if function assumes multiplicity
