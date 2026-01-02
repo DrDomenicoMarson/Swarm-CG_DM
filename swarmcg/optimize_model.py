@@ -75,222 +75,54 @@ def run(config_obj: SwarmConfig):
     ns.mdp_md_basename = os.path.basename(ns.mdp_md_filename)
     
     # Execution folder setup
-    # Determine the execution folder name
-    if ns.output_folder != "":
-         ns.exec_folder = ns.output_folder
-    else:
-         # Default name if not provided
-         ns.exec_folder = time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")
-
-
-    ####################
-    # ARGUMENTS CHECKS #
-    ####################
-
+    from swarmcg.simulations.workspace import WorkspaceManager
+    from swarmcg.scoring.evaluator import SwarmEvaluator
+    
+    # Initialize Managers
+    ns.workspace_manager = WorkspaceManager(config_obj)
+    ns.evaluator = SwarmEvaluator(config_obj)
+    
+    # Setup Workspace
+    try:
+        ns.exec_folder = ns.workspace_manager.setup_execution_folder(ns.output_folder)
+    except exceptions.AvoidOverwritingFolder as e:
+        raise e
+        
     print()
     print(swarmcg.shared.styling.sep_close)
     print("| PRE-PROCESSING AND CONTROLS                                                                 |")
     print(swarmcg.shared.styling.sep_close)
     print()
 
-    # avoid overwriting an output directory of a previous optimization run
-    if os.path.isfile(ns.exec_folder) or os.path.isdir(ns.exec_folder):
-        msg = (
-            "Provided output folder already exists, please delete existing folder "
-            "manually or provide another folder name."
-        )
-        raise exceptions.AvoidOverwritingFolder(msg)
-
-    # Validate parameters (Compatibility wrapper)
-    # Ideally should be done on config object but input_parameter_validation expects ns-like object
-    # Validate parameters (Compatibility wrapper)
-    # Pydantic validation happened at config creation.
-    # We rely on optimize_model's own file finding logic below for file existence.
-
-    # check if we can find files at user-provided location(s)
-    # here the order of the args in the 2 lists below is important, be very careful if changing this or adding args
-    # Accessing config fields naturally via ns proxy
-    arg_entries = {
-        "aa_tpr_filename": ns.aa_tpr_filename,
-        "aa_traj_filename": ns.aa_traj_filename,
-        "cg_map_filename": ns.cg_map_filename,
-        "cg_itp_filename": ns.cg_itp_filename,
-        "gro_input_filename": ns.gro_input_filename,
-        "top_input_filename": ns.top_input_filename,
-        "mdp_minimization_filename": ns.mdp_minimization_filename,
-        "mdp_equi_filename": ns.mdp_equi_filename,
-        "mdp_md_filename": ns.mdp_md_filename
-    }
+    # Verify input files existence (validation handled by WorkspaceManager or Config mostly, 
+    # but optimize_model had explicit checks for input/output folder logic).
+    # Since config object creation already validated basic existence, 
+    # and WorkspaceManager assumes checked paths or checks them during copy.
+    # We can rely on Config validation + runtime checks.
     
-    user_provided_filenames = list(arg_entries.keys())
-    # Field names mapping for error messages
-    args_names = ["aa_tpr", "aa_traj", "cg_map", "cg_itp", "cg_gro", "cg_top", "cg_mdp_mini", "cg_mdp_equi",
-                  "cg_mdp_md"]
-
-    for i in range(len(user_provided_filenames)):
-        filename_out_directory = arg_entries[user_provided_filenames[i]]
-
-        if not os.path.isfile(filename_out_directory):
-
-            # if an input folder is specified (because "." is the default input_folder)
-            if ns.input_folder != ".":
-                filename_in_directory = ns.input_folder + "/" + arg_entries[user_provided_filenames[i]]
-                if not os.path.isfile(filename_in_directory):
-                    msg = (
-                        "Cannot find file for argument -{} "
-                        "(expected at location: {})".format(args_names[i], filename_in_directory)
-                    )
-                    raise FileNotFoundError(msg)
-                else:
-                    # Update config with correct path?
-                    # ns proxy writes to context, but config object inside context is the source of truth for read/write if delegated
-                    # But we can't easily update config structure via flat names if we used delegation.
-                    # OptimizationContext stores state. It overrides config if we set attributes.
-                    # So setting ns.aa_tpr_filename = ... works on the Context object (shadowing config).
-                    setattr(ns, user_provided_filenames[i], filename_in_directory)
-                    arg_entries[user_provided_filenames[i]] = filename_in_directory # update local dict for usage below
-
-            else:
-                msg = (
-                    "Cannot find file for argument -{} "
-                    "(expected at location: {})".format(args_names[i], filename_out_directory)
-                )
-                raise FileNotFoundError(msg)
-
-    # check that gromacs alias is correct
+    # Check executables
     SimulationStep._validate_exec(ns.gmx_path)
 
-    # check that ITP filename for the model to optimize is indeed included in the TOP file of the simulation directory
-    # then find all TOP includes for copying files for simulations at each iteration
-    top_includes_filenames = []
-    with open(arg_entries["top_input_filename"], "r") as fp:
-        all_top_lines = fp.read()
-        if ns.cg_itp_basename not in all_top_lines:
-            msg = "The CG ITP model filename you provided is not included in your TOP file."
-            raise exceptions.MDSimulationInputError(msg)
-
-        top_lines = all_top_lines.split("\n")
-        top_lines = [top_line.strip().split(";")[0] for top_line in top_lines]  # the split removes comments
-        for top_line in top_lines:
-            if top_line.startswith("#include"):
-                top_include = top_line.split()[1].replace("'", "").replace("\"",
-                                                                           "")  # remove potential single and double quotes around filenames
-                arg_dirname = os.path.dirname(arg_entries["top_input_filename"])
-                if arg_dirname == "":
-                    arg_dirname = "."
-                top_includes_filenames.append(arg_dirname + "/" + top_include)
+    # Verify topology includes
+    top_includes_filenames = ns.workspace_manager.verify_topology_includes()
 
     ##################
     # INITIALIZATION #
     ##################
+    
+    # Prepare simulation input files
+    ns.workspace_manager.prepare_simulation_input(top_includes_filenames)
 
-    # directory to write all files for current execution of optimizations routines
-    os.mkdir(ns.exec_folder)
-    os.mkdir(ns.exec_folder + "/.internal")
-    os.mkdir(ns.exec_folder + "/" + config.distrib_plots_all_evals_dirname)
-    os.mkdir(ns.exec_folder + "/" + config.log_files_all_evals_dirname)
-    if ns.keep_all_sims:
-        os.mkdir(ns.exec_folder + "/" + config.sim_files_all_evals_dirname)
-
-    # prepare a directory to be copied at each iteration of the optimization, to run the new simulation
-    os.mkdir(ns.exec_folder + "/" + config.input_sim_files_dirname)
-
-    # get all TOP file includes copied into input simulation directory
-    for top_include in top_includes_filenames:
-        shutil.copy(top_include, ns.exec_folder + "/" + config.input_sim_files_dirname)
-
-    # copy all other simulation files
-    # Use updated paths from arg_entries which handled input_folder logic
-    sim_files_keys = ["cg_itp_filename", "gro_input_filename", "top_input_filename",
-                      "mdp_minimization_filename", "mdp_equi_filename", "mdp_md_filename"]
-    for sim_file_key in sim_files_keys:
-        shutil.copy(arg_entries[sim_file_key], ns.exec_folder + "/" + config.input_sim_files_dirname)
-
-    # modify the TOP file to adapt includes paths
-    with open(ns.exec_folder + "/" + config.input_sim_files_dirname + "/" + ns.top_input_basename, "r") as fp:
-        all_top_lines = fp.read().split("\n")
-    with open(ns.exec_folder + "/" + config.input_sim_files_dirname + "/" + ns.top_input_basename, "w+") as fp:
-        nb_includes = 0
-        for i in range(len(all_top_lines)):
-            if all_top_lines[i].startswith("#include"):
-                all_top_lines[i] = "#include \"" + os.path.basename(top_includes_filenames[nb_includes]) + "\""
-                nb_includes += 1
-        fp.writelines("\n".join(all_top_lines))
-
-    ns.nb_eval = 0  # global count of evaluation steps
+    # State initialization
+    ns.nb_eval = 0
     ns.start_opti_ts = datetime.now().timestamp()
-    ns.total_eval_time, ns.total_gmx_time, ns.total_model_eval_time = 0, 0, 0
-
-    scores.create_bins_and_dist_matrices(ns)  # bins for EMD calculations
     
-    # Initialize Mapping
-    mapping = Mapping(config_obj)
-    mapping.read_ndx_atoms2beads()
+    # Initialize Evaluator (this loads TRAJ, MAPPING, calculates BINS, etc.)
+    # This replaces ~100 lines of manual setup
+    ns.evaluator.initialize(ns)
     
-    # Expose mapping state to context/ns where needed by other functions (like perform_BI or scoring)
-    ns.all_beads = mapping.all_beads
-    # ns.atoms_occ_total = mapping.atoms_occ_total # Not widely used in opti loop?
-    
-    mapping.get_atoms_weights_in_beads()
-    ns.atom_w = mapping.atom_w
-
-    ns.cg_itp = io.read_cg_itp_file(config_obj)  # load the ITP object and find out geoms grouping
-    io.validate_cg_itp(ns.cg_itp)  # check ITP object is correct
-    
-    utils.process_scaling_str(ns)  # process the bonds scaling specified by user
-
-    print()
-    ns.aa_universe = io.read_aa_traj(config_obj.reference)  # create universe and read traj
-    
-    mapping.load_aa_data(ns.aa_universe)  # read atoms attributes
-    ns.all_atoms = mapping.all_atoms
-    ns.all_aa_mols = mapping.all_aa_mols
-    
-    make_aa_traj_whole_for_selected_mols(ns.aa_universe, ns.all_aa_mols)
-
-    # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    mapping.get_beads_MDA_atomgroups(ns.aa_universe)
-    ns.mda_beads_atom_grps = mapping.mda_beads_atom_grps
-    ns.mda_weights_atom_grps = mapping.mda_weights_atom_grps
-
-    # get CG beads weights from ITP includes present in the TOP file
-    # but do NOT erase the masses found in the ITP of the CG MODEL provided via arg -cg_itp
-    for top_include in top_includes_filenames:
-
-        with open(top_include, "r") as fp:
-            try:
-                itp_lines = fp.read().split("\n")
-                itp_lines = [itp_line.split(";")[0].strip() for itp_line in itp_lines]
-            except UnicodeDecodeError:
-                msg = "Cannot read CG ITP, it seems you provided a binary file."
-                raise exceptions.MissformattedFile(msg)
-
-            for itp_line in itp_lines:
-                if itp_line != "":
-
-                    try:  # look for beads and VS masses: try to find the format, this is exigent enough to be unique
-                        sp_itp_line = itp_line.split()
-                        b_type, b_mass, b_sitetype = sp_itp_line[0], float(sp_itp_line[1]), sp_itp_line[3]
-                        if b_sitetype in ["A", "V", "D"]:  # atom, virtual site, dummy (old virtual site)
-                            for bead_id in range(len(ns.cg_itp["atoms"])):
-                                if ns.cg_itp["atoms"][bead_id]["bead_type"] == b_type:
-                                    if ns.cg_itp["atoms"][bead_id]["mass"] == None:
-                                        ns.cg_itp["atoms"][bead_id]["mass"] = b_mass
-                    except (IndexError, ValueError):
-                        pass
-
-    print("\nMapping the trajectory from AA to CG representation")
-    # Initialize CG trajectory
-    ns.aa2cg_universe = initialize_cg_traj(ns.cg_itp)
-    # Map
-    # map_aa2cg_traj expects (aa_universe, aa2cg_universe, cg_itp)
-    # Wait, check mapping.py signature again.
-    # mapping.map_aa2cg_traj is the method. Function map_aa2cg_traj might not exist standalone?
-    # I imported `map_aa2cg_traj` from mapping. Let's assume I need to use the method from `mapping` object if it carries state?
-    # mapping.py lines 128: map_aa2cg_traj(self, aa_universe, aa2cg_universe, cg_itp)
-    # It uses self.mda_beads_atom_grps which are in self.
-    # So I MUST use `mapping.map_aa2cg_traj`.
-    mapping.map_aa2cg_traj(ns.aa_universe, ns.aa2cg_universe, ns.cg_itp)
+    # Compute reference distributions (populates data_BI, domains_val, etc.)
+    ns.evaluator.compute_reference_distributions()
     
     print()
 

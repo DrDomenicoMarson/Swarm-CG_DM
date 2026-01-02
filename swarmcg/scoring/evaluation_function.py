@@ -47,17 +47,28 @@ def eval_function(parameters_set, ns: OptimizationContext):
     print_stdout_forced(
         f"Starting iteration {ns.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')}"
     )
-
-    # enter the execution directory
+    
+    # We assume we are in exec_folder (optimize_model chdirs to it? No, it just sets ns.exec_folder)
+    # Actually optimize_model.py doesn't seem to chdir to exec_folder globally.
+    # It creates it.
+    
+    # Enter execution directory
     os.chdir(ns.exec_folder)
-
-    # create new directory for new parameters evaluation
+    
+    # Manual directory handling using shutil (WorkspaceManager might be overkill for just copytree, but consistency is good)
+    # However, WorkspaceManager is designed for setup/cleanup.
+    # Here we are in the loop.
+    
     current_eval_dir = f"{config.iteration_sim_files_dirname}_eval_step_{ns.nb_eval}"
+    if os.path.exists(current_eval_dir):
+        shutil.rmtree(current_eval_dir)
+        
     shutil.copytree(config.input_sim_files_dirname, current_eval_dir)
 
-    # create a modified CG ITP file with parameters according to current evaluation type
+    # create a modified CG ITP file with parameters according to current calculation
     update_cg_itp_obj(ns, parameters_set=parameters_set, update_type=1)
-    out_path_itp = f"{config.iteration_sim_files_dirname}_eval_step_{ns.nb_eval}/{ns.cg_itp_basename}"
+    out_path_itp = f"{current_eval_dir}/{ns.cg_itp_basename}"
+    
     if ns.opti_cycle["nb_geoms"]["dihedral"] == 0:
         print_sections = ["constraint", "bond", "angle", "exclusion"]
     else:

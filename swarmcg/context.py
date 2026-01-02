@@ -21,6 +21,10 @@ class OptimizationContext:
     out_itp: dict = field(default_factory=dict) # The ITP being optimized/modified
     opti_cycle: dict = field(default_factory=dict)
     
+    # Managers (injected at runtime)
+    workspace_manager: Any = None
+    evaluator: Any = None
+    
     # Results of current evaluation
     gyr_aa_mapped: float | None = None
     gyr_aa_mapped_std: float | None = None

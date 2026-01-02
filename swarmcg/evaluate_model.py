@@ -6,13 +6,8 @@ import numpy as np
 import matplotlib
 
 import swarmcg.shared.styling
-import swarmcg.io as io
-import swarmcg.scoring as scores
-from swarmcg.scoring.compare import compare_models
-from swarmcg import config
 from swarmcg.shared import catch_warnings
-from swarmcg import utils
-from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols
+from swarmcg.scoring.compare import compare_models
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 
@@ -59,6 +54,10 @@ def run(config_obj: SwarmConfig):
         print(e)
         sys.exit(1)
 
+    # Create Evaluator
+    from swarmcg.scoring.evaluator import SwarmEvaluator
+    ns.evaluator = SwarmEvaluator(config_obj)
+
     # display parameters for function compare_models
     if not os.path.isfile(ns.cg_tpr_filename) or not os.path.isfile(ns.cg_traj_filename):
         # switch to atomistic mapping inspection exclusively (= do NOT plot the CG distributions)
@@ -75,42 +74,10 @@ def run(config_obj: SwarmConfig):
     except IndexError as e:
         ns.plot_filename = ns.plot_filename + ".png"
 
-    scores.create_bins_and_dist_matrices(ns)  # bins for EMD calculations
-    
-    # Mapping initialization
-    mapping = Mapping(config_obj)
-    mapping.read_ndx_atoms2beads()
-    
-    # Expose mapping to ns
-    ns.all_beads = mapping.all_beads
-    
-    mapping.get_atoms_weights_in_beads()
-    ns.atom_w = mapping.atom_w
+    # Initialize Evaluator (loads AA reference, mapping, maps AA->CG)
+    ns.evaluator.initialize(ns)
 
-    ns.cg_itp = io.read_cg_itp_file(config_obj)  # load the ITP object and find out geoms grouping
-    io.validate_cg_itp(ns.cg_itp)  # check ITP object is correct
-    
-    utils.process_scaling_str(ns)  # process the bonds scaling specified by user
-
-    print()
-    ns.aa_universe = io.read_aa_traj(config_obj.reference)  # create universe and read traj
-    
-    mapping.load_aa_data(ns.aa_universe)
-    ns.all_atoms = mapping.all_atoms
-    ns.all_aa_mols = mapping.all_aa_mols
-    
-    make_aa_traj_whole_for_selected_mols(ns.aa_universe, ns.all_aa_mols)
-
-    # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    mapping.get_beads_MDA_atomgroups(ns.aa_universe)
-    ns.mda_beads_atom_grps = mapping.mda_beads_atom_grps
-    ns.mda_weights_atom_grps = mapping.mda_weights_atom_grps
-
-    print("\nMapping the trajectory from AA to CG representation")
-    ns.aa2cg_universe = initialize_cg_traj(ns.cg_itp)
-    mapping.map_aa2cg_traj(ns.aa_universe, ns.aa2cg_universe, ns.cg_itp)
-    print()
-
+    # Run comparison
     compare_models(ns, manual_mode=True, calc_sasa=False)
 
 
