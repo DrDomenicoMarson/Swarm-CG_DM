@@ -3,6 +3,8 @@ import sys
 
 import MDAnalysis as mda
 
+from swarmcg.context import SwarmCGState
+
 
 def print_stdout_forced(*args, **kwargs):
     """Print forced stdout enabled"""
@@ -10,14 +12,14 @@ def print_stdout_forced(*args, **kwargs):
         print(*args, **kwargs, flush=True)
 
 
-def set_MDA_backend(ns):
+def set_MDA_backend(state: SwarmCGState):
     """Set MDAnalysis backend and number of threads
 
-    ns creates:
+    state creates:
         mda_backend
     """
     # NOTE: this is not used because MDA is not properly parallelized, in fact with OpenMP backend it's slower than in serial
     if mda.lib.distances.USED_OPENMP:  # if MDAnalysis was compiled with OpenMP support
-        ns.mda_backend = 'OpenMP'
+        state.mda_backend = 'OpenMP'
     else:
-        ns.mda_backend = 'serial'
+        state.mda_backend = 'serial'

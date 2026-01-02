@@ -16,7 +16,7 @@ Swarm-CG works with MARTINI version 2 or 3. The AA-to-CG mapping can be interpre
 
 ### Installation & Usage
 
-Swarm-CG has been tested with Python versions >= 3.6.8 and Gromacs versions >= 2018.1.
+Swarm-CG has been tested with Python versions >= 3.11 and Gromacs versions >= 2018.1.
 
     yum install python3-devel        # python dev tools CentOS (optional)
     pip3 install python-dev-tools    # python dev tools Ubuntu (optional)
@@ -101,7 +101,6 @@ Please feel free to open an [Issue](https://github.com/GMPavanLab/SwarmCG/issues
 ### Credits
 
 Swarm-CG makes extensive use of [FST-PSO](https://doi.org/10.1016/j.swevo.2017.09.001) and [MDAnalysis](https://doi.org/10.1002/jcc.21787). We thank [Marco S. Nobile](http://msnobile.it/personal/) for his valuable insights.
-
 
 
 

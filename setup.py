@@ -17,6 +17,7 @@ setup(
     long_description=README,
     long_description_content_type="text/markdown",
     keywords=['gromacs', 'coarse-grain', 'molecular model', 'optimization', 'force field'],
+    python_requires=">=3.11",
     packages=find_packages(include=['swarmcg', 'swarmcg.*']),
     package_data={"": ['data/*']},
     install_requires=[
@@ -29,7 +30,7 @@ setup(
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.11',
     ],
     entry_points={
         'console_scripts': [
@@ -39,6 +40,5 @@ setup(
         ]
     }
 )
-
 
 

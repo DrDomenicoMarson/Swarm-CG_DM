@@ -9,6 +9,7 @@ from matplotlib.ticker import MaxNLocator
 import swarmcg.shared.styling
 import swarmcg.io as io
 from swarmcg import config
+from swarmcg.context import SwarmCGArgs
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.math_utils import forward_fill
 
@@ -16,7 +17,7 @@ from swarmcg.shared.math_utils import forward_fill
 @catch_warnings(DeprecationWarning)  # filter matplotlib warnings
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
-def run(ns):
+def run(args: SwarmCGArgs):
     # TODO: print some text to tell user if opti run finished or not -- then we can only look at the results files, not the running processes on the machine
 
     display_sim_crashes = False
@@ -36,7 +37,7 @@ def run(ns):
     min_nb_cols = 9  # to be sure we have enough columns for opti process plots, even if number of bonds/angles/dihedrals is less than this
 
     # read scores for each geom at each fitness evaluation/simulation
-    iter_indep_scores = np.genfromtxt(ns.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
+    iter_indep_scores = np.genfromtxt(args.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
 
     try:
         for i in range(1, iter_indep_scores.shape[1]):
@@ -49,7 +50,7 @@ def run(ns):
         raise exceptions.IncompleteOptimisationFile(msg)
 
     # process files and plot
-    with open(ns.opti_dirname + "/" + config.opti_perf_recap_file, "r") as fp:
+    with open(args.opti_dirname + "/" + config.opti_perf_recap_file, "r") as fp:
 
         eval_lines = fp.read().split("\n")
         nb_evals = len(eval_lines) - 7
@@ -240,7 +241,7 @@ def run(ns):
     nrow, nrows, ncols = 0, 9, larger_group
     nrows -= sum([nb_constraints == 0, nb_bonds == 0, nb_angles == 0, nb_dihedrals == 0]) * 2
 
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4 * ns.plot_scale, nrows * 3 * ns.plot_scale),
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4 * args.plot_scale, nrows * 3 * args.plot_scale),
                            squeeze=False)
 
     # all evaluations scores and stats
@@ -621,10 +622,10 @@ def run(ns):
                 ax[nrow][i].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(ns.opti_dirname + "/" + ns.plot_filename)
+    plt.savefig(args.opti_dirname + "/" + args.plot_filename)
     print()
     print("Wrote visual optimization summary file at location:\n ",
-          os.path.normpath(ns.opti_dirname + "/" + ns.plot_filename))
+          os.path.normpath(args.opti_dirname + "/" + args.plot_filename))
     print()
 
 
@@ -637,7 +638,7 @@ def main():
         sys.exit()
 
     # arguments handling, display command line if help or no arguments provided
-    ns = args_parser.parse_args()
+    args = SwarmCGArgs.from_namespace(args_parser.parse_args())
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
     print("Working directory:", os.getcwd())
     print("Command line:", input_cmdline)
@@ -648,7 +649,7 @@ def main():
     print(swarmcg.shared.styling.sep_close)
     print()
 
-    run(ns)
+    run(args)
 
 
 if __name__ == "__main__":

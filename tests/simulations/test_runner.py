@@ -3,7 +3,7 @@ import time, os
 import pytest
 
 import swarmcg
-from swarmcg.simulations.runner import generate_steps, SimulationStep, ns_to_runner
+from swarmcg.simulations.runner import generate_steps, SimulationStep, build_simulation_setup
 from swarmcg.simulations.simulation_steps import Minimisation
 from swarmcg.shared import exceptions
 
@@ -11,9 +11,10 @@ TEST_DATA = "tests/data/"
 ROOT_DIR = os.path.dirname(swarmcg.__file__)
 
 
-def test_generate_steps(ns_opt):
+def test_generate_steps(opt_ctx):
     # given:
-    sim_steps = generate_steps(ns_opt(gro_input_basename="./tests/data/start_conf.gro"))
+    args, state = opt_ctx(gro_input_basename="./tests/data/start_conf.gro")
+    sim_steps = generate_steps(args, state)
 
     # when:
     sim1 = next(sim_steps)
@@ -105,16 +106,17 @@ class TestSimulationStep:
         expected = "mpirun -np 1 gmx mdrun -deffnm equi -nt 1"
         assert command == expected
 
-    def test__run_md(self, ns_opt):
+    def test__run_md(self, opt_ctx):
         # given:
-        ns = ns_opt(monitor_file="monitor.log", process_alive_nb_cycles_dead=2, process_alive_time_sleep=1)
+        args, state = opt_ctx(process_alive_nb_cycles_dead=2, process_alive_time_sleep=1)
 
         filename = f"{ROOT_DIR}/data/md.mdp"
         prev_gro = "./test/data/start_conf.gro"
 
         # when:
         sim_config = Minimisation(filename)
-        s = ns_to_runner(ns, sim_config, prev_gro)
+        s = build_simulation_setup(args, state, sim_config, prev_gro)
+        s["monitor_file"] = "monitor.log"
         simstep = SimulationStep(s)
 
         # when:

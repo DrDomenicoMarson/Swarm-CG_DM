@@ -39,13 +39,13 @@ def test_read_itp():
         _ = read_itp(filename)
 
 
-def test_read_cg_itp_file(ns_opt):
+def test_read_cg_itp_file(opt_ctx):
     # when:
     filename = f"tests/data/test.itp"
-    ns = ns_opt(cg_itp_filename=filename)
+    args, _ = opt_ctx(cg_itp_filename=filename)
 
     # then:
-    result = read_cg_itp_file(ns)
+    result = read_cg_itp_file(args)
     assert isinstance(result, dict)
     assert all([field in result for field in required_itp_fields])
     check_ipt_dict(result)
@@ -64,13 +64,13 @@ def test_read_cg_itp_file(ns_opt):
     _ = validate_cg_itp(result, all_beads=all_beads)
 
 
-def test_read_cg_itp_file_basic(ns_opt):
+def test_read_cg_itp_file_basic(opt_ctx):
     # when:
     filename = f"tests/data/cg_model.itp"
-    ns = ns_opt(cg_itp_filename=filename)
+    args, _ = opt_ctx(cg_itp_filename=filename)
 
     # then:
-    result = read_cg_itp_file(ns)
+    result = read_cg_itp_file(args)
     assert len(result["bond"]) == 4
     assert len(result["bond"]) == result["nb_bonds"]
     assert len(result["angle"]) == 5

@@ -1,5 +1,6 @@
-import os, re
+import os
 
+from swarmcg.context import SwarmCGArgs
 from swarmcg.shared import exceptions
 from swarmcg.shared.utils import parse_string_args
 
@@ -20,16 +21,21 @@ class BaseSimulationConfig:
     def read_mdp(filename):
         with open(filename, "r") as f:
             raw_content = f.readlines()
-        SUB_PATTERN = "[\n\t\s]*"
-        SPLIT_PATTER = "(.*)=(.*)"
-        KEEP_PATTERN = "^[^;]*"
-        f_clean = lambda x: re.sub(SUB_PATTERN, "", x)
-        f_split = lambda x: re.match(SPLIT_PATTER, x).groups()
-        f_keep = lambda x: re.match(KEEP_PATTERN, x).group()
-        cleaned = filter(None, map(f_clean, raw_content))
-        split = map(f_split, cleaned)
-        sim_setup = {k: f_keep(v) for k, v in split}
-        return {k: parse_string_args(v) for k, v in sim_setup.items()}
+        sim_setup = {}
+        for raw_line in raw_content:
+            line = raw_line.strip()
+            if not line or line.startswith(";"):
+                continue
+            line = line.split(";", 1)[0].strip()
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            sim_setup[key] = parse_string_args(value)
+        return sim_setup
 
     def to_string(self):
         output_string = ""
@@ -42,8 +48,8 @@ class BaseSimulationConfig:
                                   if i not in self.sim_setup.keys()])
         if missing_args:
             msg = (
-                f"The following arguments are missing form mdp file for {self.name}: {missing_args}. "
-                "Please check you input."
+                f"The following arguments are missing from mdp file for {getattr(self, 'step_name', type(self).__name__)}: {missing_args}. "
+                "Please check your input."
             )
             raise exceptions.MissformattedFile(msg)
 
@@ -56,7 +62,6 @@ class BaseSimulationConfig:
                 new_nsteps = int(self.sim_setup["nsteps"])
 
             self.sim_setup["nsteps"] = new_nsteps
-            self.sim_setup["nb_frames"] = nb_frames
             self.sim_setup["nstlog"] = log_write_freq
             self.sim_setup["nstvout"] = new_nsteps
             self.sim_setup["nstxout"] = new_nsteps
@@ -101,8 +106,8 @@ class Production(BaseSimulationConfig):
     edit_mpd = True
 
 
-def select_class(flag, ns):
-    filename = getattr(ns, flag)
+def select_class(flag, args: SwarmCGArgs):
+    filename = getattr(args, flag)
     if "mdp_md_basename" == flag:
         return Production(filename)
     elif "mdp_equi_basename" == flag:
@@ -110,4 +115,4 @@ def select_class(flag, ns):
     elif "mdp_minimization_basename" == flag:
         return Minimisation(filename)
     else:
-        ValueError(f"Flag {flag} does not correspond to any class.")
+        raise ValueError(f"Flag {flag} does not correspond to any class.")
