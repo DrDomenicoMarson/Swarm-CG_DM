@@ -1,0 +1,255 @@
+import os
+import shutil
+import copy
+import contextlib
+import numpy as np
+from datetime import datetime
+from fstpso import FuzzyPSO
+
+import swarmcg.shared.styling
+import swarmcg.scoring as scores
+from swarmcg.scoring import eval_function
+from swarmcg.simulations import SimulationStep, get_settings, WorkspaceManager
+from swarmcg.scoring.evaluator import SwarmEvaluator
+from swarmcg.scoring.compare import compare_models
+from swarmcg import config
+from swarmcg import forcefield
+from swarmcg import utils
+from swarmcg.shared import exceptions, catch_warnings
+from swarmcg.context import OptimizationContext
+
+class SwarmOptimizer:
+    def __init__(self, config_obj):
+        self.config = config_obj
+        self.ns = OptimizationContext(config=config_obj)
+
+    @catch_warnings(ImportWarning)
+    @catch_warnings(UserWarning)
+    def run(self):
+        """
+        Main execution logic for model optimization.
+        """
+        self._initialize_context()
+        self._setup_execution()
+        
+        print()
+        print(swarmcg.shared.styling.sep_close)
+        print("| PRE-PROCESSING AND CONTROLS                                                                 |")
+        print(swarmcg.shared.styling.sep_close)
+        print()
+        
+        self._validate_environment()
+        self._initialize_optimization()
+        self._create_output_files()
+        
+        # Reference distributions plot
+        self._plot_reference_distributions()
+
+        # Optimization Loops
+        self._run_optimization_cycles()
+
+        self._finalize_optimization()
+
+    def _initialize_context(self):
+        # Default variable initialization
+        self.ns.mismatch_order = False
+        self.ns.row_x_scaling = True
+        self.ns.row_y_scaling = True
+        self.ns.ncols_max = 0
+        self.ns.molname_in = None
+        
+        self.ns.process_alive_time_sleep = 10
+        self.ns.process_alive_nb_cycles_dead = int(
+            self.ns.sim_kill_delay / self.ns.process_alive_time_sleep)
+        self.ns.bonds_rescaling_performed = False
+
+        # file basenames
+        self.ns.cg_itp_basename = os.path.basename(self.ns.cg_itp_filename)
+        self.ns.gro_input_basename = os.path.basename(self.ns.gro_input_filename)
+        self.ns.top_input_basename = os.path.basename(self.ns.top_input_filename)
+        self.ns.mdp_minimization_basename = os.path.basename(self.ns.mdp_minimization_filename)
+        self.ns.mdp_equi_basename = os.path.basename(self.ns.mdp_equi_filename)
+        self.ns.mdp_md_basename = os.path.basename(self.ns.mdp_md_filename)
+
+        # Initialize Managers
+        self.ns.workspace_manager = WorkspaceManager(self.config)
+        self.ns.evaluator = SwarmEvaluator(self.config)
+
+    def _setup_execution(self):
+        try:
+            self.ns.exec_folder = self.ns.workspace_manager.setup_execution_folder(self.ns.output_folder)
+        except exceptions.AvoidOverwritingFolder as e:
+            raise e
+
+    def _validate_environment(self):
+        SimulationStep._validate_exec(self.ns.gmx_path)
+        self.top_includes_filenames = self.ns.workspace_manager.verify_topology_includes()
+
+    def _initialize_optimization(self):
+        self.ns.workspace_manager.prepare_simulation_input(self.top_includes_filenames)
+        
+        self.ns.nb_eval = 0
+        self.ns.start_opti_ts = datetime.now().timestamp()
+        
+        self.ns.evaluator.initialize(self.ns)
+        self.ns.evaluator.compute_reference_distributions()
+        
+        print()
+
+    def _create_output_files(self):
+        with open(os.path.join(self.ns.exec_folder, config.opti_perf_recap_file), "w") as fp:
+            fp.write(f"# nb constraints: {self.ns.cg_itp['nb_constraints']}\n")
+            fp.write(f"# nb bonds: {self.ns.cg_itp['nb_bonds']}\n")
+            fp.write(f"# nb angles: {self.ns.cg_itp['nb_angles']}\n")
+            fp.write(f"# nb dihedrals: {self.ns.cg_itp['nb_dihedrals']}\n")
+            fp.write("#\n")
+            fp.write(
+                "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles fit_score_dihedrals eval_score Rg_AA_mapped Rg_CG parameters_set eval_time current_total_time\n")
+        
+        with open(os.path.join(self.ns.exec_folder, config.opti_pairwise_distances_file), "w"):
+            pass
+            
+        self.ns.gyr_aa_mapped, self.ns.gyr_aa_mapped_std = None, None
+        self.ns.sasa_aa_mapped, self.ns.sasa_aa_mapped_std = None, None
+
+    def _plot_reference_distributions(self):
+        self.ns.atom_only = True
+        self.ns.plot_filename = os.path.join(self.ns.exec_folder, config.ref_distrib_plots)
+        with open(os.devnull, "w") as devnull:
+            with contextlib.redirect_stdout(devnull):
+                compare_models(self.ns, manual_mode=False)
+        print()
+        print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
+              self.ns.plot_filename)
+        self.ns.atom_only = False
+
+    def _run_optimization_cycles(self):
+        sim_types, opti_cycles, sim_cycles, particle_setter = get_settings(self.ns)
+        
+        self.ns.opti_itp = copy.deepcopy(self.ns.cg_itp)
+        self.ns.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}
+
+        # Handle dihedrals case
+        if self.ns.cg_itp["nb_dihedrals"] == 0:
+            opti_cycles = self._remove_dihedrals_from_cycles(opti_cycles)
+
+        self.ns.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
+        self.ns.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
+        self.ns.best_fitness = [np.inf, None]
+
+        # Initialize tracking dictionaries
+        for geom_type in ["constraints", "bonds", "angles", "dihedrals"]:
+            nb_geom = self.ns.cg_itp[f"nb_{geom_type}"]
+            self.ns.all_best_emd_dist_geoms[geom_type] = {i: config.sim_crash_EMD_indep_score for i in range(nb_geom)}
+            self.ns.all_best_params_dist_geoms[geom_type] = {i: {} for i in range(nb_geom)}
+
+        for i, cycle_geoms in enumerate(opti_cycles):
+            self._run_single_cycle(i, cycle_geoms, sim_cycles, sim_types, particle_setter)
+
+    def _remove_dihedrals_from_cycles(self, opti_cycles):
+        # Logic to remove dihedrals if not present
+        new_cycles = []
+        for cycle in opti_cycles:
+            new_cycle = [g for g in cycle if g != "dihedral"]
+            if new_cycle:
+                new_cycles.append(new_cycle)
+        return new_cycles
+
+    def _run_single_cycle(self, i, cycle_geoms, sim_cycles, sim_types, particle_setter):
+        self.ns.opti_cycle = {"nb_cycle": i + 1, "geoms": cycle_geoms,
+                         "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}}
+        self.ns.out_itp = copy.deepcopy(self.ns.opti_itp)
+
+        self.ns.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
+        self.ns.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
+        self.ns.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
+        self.ns.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
+        self.ns.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
+        self.ns.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
+
+        self._update_geom_counts_for_cycle()
+        
+        geoms_display = self._get_geoms_display_string()
+
+        print()
+        print(swarmcg.shared.styling.sep_close)
+        print("| STARTING OPTIMIZATION CYCLE", self.ns.opti_cycle["nb_cycle"],
+              "                                                              |")
+        print("| Optimizing", geoms_display, " " * (95 - 16 - len(geoms_display)), "|")
+        print(swarmcg.shared.styling.sep_close)
+
+        forcefield.perform_BI(self.ns.out_itp, self.ns.opti_cycle, self.ns.data_BI, self.ns.performed_init_BI, self.ns.temp, exec_mode=self.ns.exec_mode)
+
+        search_space_boundaries = forcefield.get_search_space_boundaries(self.ns.cg_itp, self.ns.opti_cycle, self.ns.domains_val, self.ns.exec_mode, optimization_config=self.ns.config.optimization)
+
+        self._calculate_worst_fit_score()
+
+        nb_particles = particle_setter(search_space_boundaries)
+        
+        initial_guess_list = forcefield.get_initial_guess_list(nb_particles, self.ns.opti_cycle, self.ns.cg_itp, self.ns.out_itp, self.ns.domains_val,
+                           self.ns.all_best_emd_dist_geoms, self.ns.all_best_params_dist_geoms,
+                           self.ns.exec_mode, user_input=self.ns.user_input,
+                           config_obj=self.ns.config, 
+                           val_guess_fact=self.ns.val_guess_fact, fct_guess_fact=self.ns.fct_guess_fact)
+
+        # Optimization
+        with open(os.devnull, "w") as devnull:
+            with contextlib.redirect_stdout(devnull):
+                FP = FuzzyPSO()
+                FP.set_search_space(search_space_boundaries)
+                FP.set_swarm_size(nb_particles)
+                FP.set_fitness(fitness=eval_function, arguments=self.ns, skip_test=True)
+                result = FP.solve_with_fstpso(max_iter=self.ns.max_swarm_iter, initial_guess_list=initial_guess_list,
+                                              max_iter_without_new_global_best=self.ns.max_swarm_iter_without_new_global_best)
+
+        forcefield.update_cg_itp_obj(self.ns.out_itp, self.ns.opti_cycle, parameters_set=result[0].X, exec_mode=self.ns.exec_mode)
+
+    def _update_geom_counts_for_cycle(self):
+        if "constraint" in self.ns.opti_cycle["geoms"]:
+            self.ns.opti_cycle["nb_geoms"]["constraint"] = self.ns.cg_itp["nb_constraints"]
+        if "bond" in self.ns.opti_cycle["geoms"]:
+            self.ns.opti_cycle["nb_geoms"]["bond"] = self.ns.cg_itp["nb_bonds"]
+        if "angle" in self.ns.opti_cycle["geoms"]:
+            self.ns.opti_cycle["nb_geoms"]["angle"] = self.ns.cg_itp["nb_angles"]
+        if "dihedral" in self.ns.opti_cycle["geoms"]:
+            self.ns.opti_cycle["nb_geoms"]["dihedral"] = self.ns.cg_itp["nb_dihedrals"]
+
+    def _get_geoms_display_string(self):
+        geoms_display = []
+        if "constraint" in self.ns.opti_cycle["geoms"] or "bond" in self.ns.opti_cycle["geoms"]:
+            geoms_display.append("constraints/bonds")
+        if "angle" in self.ns.opti_cycle["geoms"]:
+            geoms_display.append("angles")
+        if "dihedral" in self.ns.opti_cycle["geoms"]:
+            geoms_display.append("dihedrals")
+        return " & ".join(geoms_display)
+
+    def _calculate_worst_fit_score(self):
+        self.ns.worst_fit_score = round( \
+            np.sqrt((self.ns.cg_itp["nb_constraints"] + self.ns.cg_itp["nb_bonds"]) * config.sim_crash_EMD_indep_score) + \
+            np.sqrt(self.ns.cg_itp["nb_angles"] * config.sim_crash_EMD_indep_score) + \
+            np.sqrt(self.ns.cg_itp["nb_dihedrals"] * config.sim_crash_EMD_indep_score) \
+            , 3)
+
+    def _finalize_optimization(self):
+        shutil.rmtree(os.path.join(self.ns.exec_folder, config.input_sim_files_dirname))
+
+        total_time_sec = datetime.now().timestamp() - self.ns.start_opti_ts
+        total_time = round(total_time_sec / (60 * 60), 2)
+        init_time = round((total_time_sec - self.ns.total_eval_time) / (60 * 60), 2)
+        self.ns.total_gmx_time = round(self.ns.total_gmx_time / (60 * 60), 2)
+        self.ns.total_model_eval_time = round(self.ns.total_model_eval_time / (60 * 60), 2)
+
+        print()
+        print(swarmcg.shared.styling.sep_close)
+        print("|  FINISHED PROPERLY                                                                          |")
+        print(swarmcg.shared.styling.sep_close)
+        print()
+        print("Total nb of evaluation steps:", self.ns.nb_eval)
+        print("Best model obtained at evaluation step number:", self.ns.best_fitness[1])
+        print()
+        print(f"Total execution time : {total_time} h")
+        print(f"Initialization time  : {init_time} h ({round(init_time / total_time * 100, 2)} %)")
+        print(f"Simulations time     : {self.ns.total_gmx_time} h ({round(self.ns.total_gmx_time / total_time * 100, 2)} %)")
+        print(f"Models scoring time  : {self.ns.total_model_eval_time} h ({round(self.ns.total_model_eval_time / total_time * 100, 2)} %)")
+        print()

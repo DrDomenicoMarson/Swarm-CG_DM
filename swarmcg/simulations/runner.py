@@ -85,9 +85,9 @@ class SimulationStep:
         self.sim_setup.get("simulation_config").modify_mdp(sim_time, nb_frames).to_file(exec_path)
         return self
 
-    def _run_prep(self, cmd):
+    def _run_prep(self, cmd, cwd=None):
         with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE) as gmx_process:
+                              stderr=subprocess.PIPE, cwd=cwd) as gmx_process:
             out, err = gmx_process.communicate()
             gmx_out = f"STDOUT:\n{out.decode()}\nSTDERR:\n{err.decode()}"
             gmx_process.kill()
@@ -108,20 +108,23 @@ class SimulationStep:
             )
             raise exceptions.ComputationError(msg)
 
-    def _run_md(self, cmd):
+    def _run_md(self, cmd, cwd=None):
         cycles_check, last_log_file_size = 0, 0
         _run_killed = False
         monitor_file = self.sim_setup.get("monitor_file")
+        if cwd:
+            monitor_file = os.path.join(cwd, monitor_file)
+
         keep_alive_n_cycles = self.sim_setup.get("keep_alive_n_cycles")
         seconds_between_checks = self.sim_setup.get("seconds_between_checks")
         with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, preexec_fn=os.setsid) as gmx_process:
+                              stderr=subprocess.PIPE, preexec_fn=os.setsid, cwd=cwd) as gmx_process:
             while gmx_process.poll() is None:  # while process is alive
                 time.sleep(seconds_between_checks)
                 cycles_check += 1
 
                 if cycles_check % keep_alive_n_cycles == 0:
-
+                    
                     if os.path.isfile(monitor_file):
                         log_file_size = os.path.getsize(monitor_file)
                     else:
@@ -165,17 +168,12 @@ class SimulationStep:
         return gmx_process.returncode
 
     def run(self, exec_path, aux_command=""):
-        # We need to make sure we are operating in the right directory
-        # The exec_path is used as the directory to write the MDP file
-        # The commands are executed via subprocess.Popen(shell=True)
-        # So unless we explicitly change dir or prepend path, it runs in CWD
-        
-        # PRECONDITION: Caller must have chdir'd to the working directory or exec_path needs to be used more effectively
-        # But looking at usage, the caller usually chdirs.
+        # We use exec_path as the working directory for subprocesses
+        # This replaces the need to os.chdir to the directory
         
         prep_cmd = self._prepare_cmd()
         md_cmd = self._run_cmd(aux_command)
-        return self._run_setup(exec_path)._run_prep(prep_cmd)._run_md(md_cmd)
+        return self._run_setup(exec_path)._run_prep(prep_cmd, cwd=exec_path)._run_md(md_cmd, cwd=exec_path)
 
 
 def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, nb_frames=None):
@@ -229,29 +227,22 @@ class SimulationManager:
 
     def run_simulation(self, working_dir, sim_time=None, nb_frames=None):
         """Run the simulation chain in the specified working directory."""
+         
+        # We no longer change global CWD
         
-        # Store original directory
-        original_dir = os.getcwd()
-        try:
-            os.chdir(working_dir)
+        # Initial GRO file (assumed to be in working_dir as basename)
+        prev_gro = os.path.basename(self.config.cg_model.gro_input_filename)
+        
+        steps = ["minimization", "equilibration", "production"]
+        
+        for step_type in steps:
+            sim_config = select_class(step_type, self.config.simulation)
+            simulation_setup = config_to_runner(self.config, sim_config, prev_gro, sim_time, nb_frames)
             
-            # Initial GRO file (assumed to be in working_dir as basename)
-            prev_gro = os.path.basename(self.config.cg_model.gro_input_filename)
+            step = SimulationStep(simulation_setup)
+            step.run(working_dir) # executing in working_dir via cwd argument
             
-            steps = ["minimization", "equilibration", "production"]
-            
-            for step_type in steps:
-                sim_config = select_class(step_type, self.config.simulation)
-                simulation_setup = config_to_runner(self.config, sim_config, prev_gro, sim_time, nb_frames)
-                
-                step = SimulationStep(simulation_setup)
-                step.run(working_dir) # executing in CWD
-                
-                # Update prev_gro for next step
-                prev_gro = step.output_gro
-                
-        finally:
-            os.chdir(original_dir)
+            # Update prev_gro for next step
+            prev_gro = step.output_gro
             
         return True # Success if we got here (exceptions would raise)
-

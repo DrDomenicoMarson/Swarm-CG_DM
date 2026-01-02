@@ -57,11 +57,10 @@ def test_simulation_step_run_md(mock_getsize, mock_isfile, mock_popen, mock_sim_
     assert ret_code == 0
     mock_popen.assert_called()
 
-@patch("os.chdir")
 @patch("swarmcg.simulations.runner.SimulationStep")
 @patch("os.path.isfile", return_value=True)
 @patch("builtins.open", new_callable=mock_open, read_data="nsteps=1000\nnstlog=100\ndt=0.002")
-def test_simulation_manager_run(mock_open, mock_isfile, mock_sim_step_cls, mock_chdir):
+def test_simulation_manager_run(mock_open, mock_isfile, mock_sim_step_cls):
     config = SwarmConfig()
     manager = SimulationManager(config)
     
@@ -73,8 +72,8 @@ def test_simulation_manager_run(mock_open, mock_isfile, mock_sim_step_cls, mock_
     # Run
     manager.run_simulation("/tmp/test_dir")
     
-    # Verify directory change
-    mock_chdir.assert_any_call("/tmp/test_dir")
-    
     # Verify SimulationStep creation (3 times: mini, equi, prod)
     assert mock_sim_step_cls.call_count == 3
+    
+    # Verify we ran the step in the directory
+    mock_step_instance.run.assert_called_with("/tmp/test_dir")
