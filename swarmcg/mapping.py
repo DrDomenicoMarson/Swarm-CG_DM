@@ -133,15 +133,22 @@ class Mapping:
             print("  Interpretation: Center of Geometry (COG)")
 
         # Regular beads
-        coord = np.empty((len(aa_universe.trajectory), len(cg_itp["atoms"]), 3))
-        for bead_id in range(len(cg_itp["atoms"])):
-            if not cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):
-                traj = np.empty((len(aa_universe.trajectory), 3))
-                for ts in aa_universe.trajectory:
-                    traj[ts.frame] = self.mda_beads_atom_grps[bead_id].center(
-                        self.mda_weights_atom_grps[bead_id], compound="group"
-                    )
-                coord[:, bead_id, :] = traj
+        n_frames = len(aa_universe.trajectory)
+        n_beads = len(cg_itp["atoms"])
+        coord = np.empty((n_frames, n_beads, 3))
+        
+        # Pre-calculate processing order
+        regular_beads_ids = [i for i in range(n_beads) if not cg_itp["atoms"][i]["bead_type"].startswith("v")]
+        
+        print(f"  Processing {n_frames} frames...", flush=True)
+        
+        # Iterate trajectory once
+        for ts in aa_universe.trajectory:
+            frame_idx = ts.frame
+            for bead_id in regular_beads_ids:
+                coord[frame_idx, bead_id] = self.mda_beads_atom_grps[bead_id].center(
+                    self.mda_weights_atom_grps[bead_id], compound="group"
+                )
 
         aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
 

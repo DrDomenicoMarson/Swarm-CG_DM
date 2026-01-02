@@ -10,14 +10,18 @@ def get_AA_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
     bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
     bead_pos_3 = np.empty((len(beads_ids), 3), dtype=np.float32)
 
-    for ts in universe.trajectory:
-        for i in range(len(beads_ids)):
-            bead_id_1, bead_id_2, bead_id_3 = beads_ids[i]
-            bead_pos_1[i] = universe.atoms[bead_id_1].position
-            bead_pos_2[i] = universe.atoms[bead_id_2].position
-            bead_pos_3[i] = universe.atoms[bead_id_3].position
+    # Indices
+    indices = np.array(beads_ids)
+    idx1 = indices[:, 0]
+    idx2 = indices[:, 1]
+    idx3 = indices[:, 2]
+    
+    ag1 = universe.atoms[idx1]
+    ag2 = universe.atoms[idx2]
+    ag3 = universe.atoms[idx3]
 
-        mda.lib.distances.calc_angles(bead_pos_1, bead_pos_2, bead_pos_3, backend='serial', box=None,
+    for ts in universe.trajectory:
+        mda.lib.distances.calc_angles(ag1.positions, ag2.positions, ag3.positions, backend='serial', box=None,
                                       result=frame_values)
         angle_values_rad[len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values
 
@@ -39,14 +43,18 @@ def get_CG_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
     bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
     bead_pos_3 = np.empty((len(beads_ids), 3), dtype=np.float32)
 
-    for ts in universe.trajectory:  # no need for PBC handling, trajectories were made wholes for the molecule
-        for i in range(len(beads_ids)):
-            bead_id_1, bead_id_2, bead_id_3 = beads_ids[i]
-            bead_pos_1[i] = universe.atoms[bead_id_1].position
-            bead_pos_2[i] = universe.atoms[bead_id_2].position
-            bead_pos_3[i] = universe.atoms[bead_id_3].position
+    # Indices
+    indices = np.array(beads_ids)
+    idx1 = indices[:, 0]
+    idx2 = indices[:, 1]
+    idx3 = indices[:, 2]
+    
+    ag1 = universe.atoms[idx1]
+    ag2 = universe.atoms[idx2]
+    ag3 = universe.atoms[idx3]
 
-        mda.lib.distances.calc_angles(bead_pos_1, bead_pos_2, bead_pos_3, backend='serial', box=None,
+    for ts in universe.trajectory:  # no need for PBC handling
+        mda.lib.distances.calc_angles(ag1.positions, ag2.positions, ag3.positions, backend='serial', box=None,
                                       result=frame_values)
         angle_values_rad[len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values
 

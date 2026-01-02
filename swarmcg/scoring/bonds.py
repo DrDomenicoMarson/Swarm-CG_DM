@@ -107,13 +107,24 @@ def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmCon
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
     bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
 
-    for ts in universe.trajectory:
-        for i in range(len(beads_ids)):
-            bead_id_1, bead_id_2 = beads_ids[i]
-            bead_pos_1[i] = universe.atoms[bead_id_1].position
-            bead_pos_2[i] = universe.atoms[bead_id_2].position
+    # Pre-calculate indices
+    beads_ids_arr = np.array(beads_ids)
+    idx1 = beads_ids_arr[:, 0]
+    idx2 = beads_ids_arr[:, 1]
+    
+    # Pre-fetch AtomGroups to avoid repeated indexing if allowed, but universe.atoms[idx] is fast enough
+    # Actually, retrieving atoms by index repeatedly in a loop is okay-ish, but pre-selecting might be better.
+    # ag1 = universe.atoms[idx1] 
+    # ag2 = universe.atoms[idx2]
+    # But positions update when TS updates.
+    
+    ag1 = universe.atoms[idx1]
+    ag2 = universe.atoms[idx2]
 
-        mda.lib.distances.calc_bonds(bead_pos_1, bead_pos_2, backend='serial', box=None, result=frame_values)
+    for ts in universe.trajectory:
+        # Direct vectorized access to positions
+        # calc_bonds expects (N, 3) arrays
+        mda.lib.distances.calc_bonds(ag1.positions, ag2.positions, backend='serial', box=None, result=frame_values)
         bond_values[len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values / 10
 
     bond_avg_init = round(np.average(bond_values), 3)
@@ -147,13 +158,16 @@ def get_CG_bonds_distrib(universe, beads_ids, grp_type, bins=None, bandwidth=Non
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
     bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
 
-    for ts in universe.trajectory:
-        for i in range(len(beads_ids)):
-            bead_id_1, bead_id_2 = beads_ids[i]
-            bead_pos_1[i] = universe.atoms[bead_id_1].position
-            bead_pos_2[i] = universe.atoms[bead_id_2].position
+    # Pre-calculate indices
+    beads_ids_arr = np.array(beads_ids)
+    idx1 = beads_ids_arr[:, 0]
+    idx2 = beads_ids_arr[:, 1]
+    
+    ag1 = universe.atoms[idx1]
+    ag2 = universe.atoms[idx2]
 
-        mda.lib.distances.calc_bonds(bead_pos_1, bead_pos_2, backend='serial', box=None, result=frame_values)
+    for ts in universe.trajectory:
+        mda.lib.distances.calc_bonds(ag1.positions, ag2.positions, backend='serial', box=None, result=frame_values)
         bond_values[len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values / 10
 
     bond_avg = round(np.mean(bond_values), 3)
