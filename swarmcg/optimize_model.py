@@ -17,7 +17,7 @@ import swarmcg.io as io
 from swarmcg.scoring import eval_function
 from swarmcg.simulations import SimulationStep, get_settings
 from swarmcg import config
-from swarmcg.shared import exceptions, catch_warnings, input_parameter_validation
+from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.scoring.compare import compare_models
 from swarmcg import utils
 from swarmcg import forcefield
@@ -26,7 +26,6 @@ from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 
 
-@catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
 def run(config_obj: SwarmConfig):
@@ -104,7 +103,9 @@ def run(config_obj: SwarmConfig):
 
     # Validate parameters (Compatibility wrapper)
     # Ideally should be done on config object but input_parameter_validation expects ns-like object
-    input_parameter_validation(ns, config, step="optimisation")
+    # Validate parameters (Compatibility wrapper)
+    # Pydantic validation happened at config creation.
+    # We rely on optimize_model's own file finding logic below for file existence.
 
     # check if we can find files at user-provided location(s)
     # here the order of the args in the 2 lists below is important, be very careful if changing this or adding args

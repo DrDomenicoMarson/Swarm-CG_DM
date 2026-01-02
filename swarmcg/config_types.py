@@ -1,9 +1,9 @@
+
 import os
-from dataclasses import dataclass, field
+from typing import Any, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-
-@dataclass
-class GromacsConfig:
+class GromacsConfig(BaseModel):
     gmx_path: str = "gmx"
     nb_threads: int = 0
     mpi_tasks: int = 0
@@ -12,37 +12,52 @@ class GromacsConfig:
     mini_maxwarn: int = 1
     sim_kill_delay: int = 60
 
-@dataclass
-class ReferenceModelConfig:
+    @model_validator(mode='after')
+    def check_gmx_args_conflict(self):
+        if self.gmx_args_str != "" and (self.nb_threads != 0 or self.gpu_id != ""):
+            print(
+                "Warning: Argument -gmx_args_str is provided together with one of arguments: "
+                "-nb_threads, -gpu_id\nOnly argument -gmx_args_str will be used during this execution"
+            )
+        return self
+
+class ReferenceModelConfig(BaseModel):
     aa_tpr_filename: str = "aa_topol.tpr"
     aa_traj_filename: str = "aa_traj.xtc"
     cg_map_filename: str = "cg_map.ndx"
     mapping_type: str = "COM"
     aa_rg_offset: float = 0.0
 
-@dataclass
-class CGModelConfig:
+    @field_validator('mapping_type')
+    @classmethod
+    def check_mapping_type(cls, v: str) -> str:
+        if v.upper() not in ('COM', 'COG'):
+            raise ValueError(
+                "Mapping type provided via argument '-mapping' must be either COM or COG "
+                "(Center of Mass or Center of Geometry)."
+            )
+        return v.upper()
+
+class CGModelConfig(BaseModel):
     cg_itp_filename: str = "cg_model.itp"
     gro_input_filename: str = "start_conf.gro"
     top_input_filename: str = "system.top"
     cg_tpr_filename: str = "cg_topol.tpr"
     cg_traj_filename: str = "cg_traj.xtc"
     user_input: bool = False
-    
-@dataclass
-class SimulationConfig:
+
+class SimulationConfig(BaseModel):
     # MDP files
-    mdp_minimization_filename: str = "honeycomb/data/mini.mdp" # Placeholder, needs dynamic path
-    mdp_equi_filename: str = "honeycomb/data/equi.mdp" # Placeholder
-    mdp_md_filename: str = "honeycomb/data/md.mdp" # Placeholder
+    mdp_minimization_filename: str = "honeycomb/data/mini.mdp"
+    mdp_equi_filename: str = "honeycomb/data/equi.mdp"
+    mdp_md_filename: str = "honeycomb/data/md.mdp"
     
     # Simulation Parameters
     sim_duration_short: float = 10.0 # ns
     sim_duration_long: float = 25.0 # ns
     temp: float = 300.0 # Kelvin
 
-@dataclass
-class OptimizationConfig:
+class OptimizationConfig(BaseModel):
     exec_mode: int = 1
     sim_type: str = "OPTIMAL"
     
@@ -69,8 +84,47 @@ class OptimizationConfig:
     # Other
     keep_all_sims: bool = False
 
-@dataclass
-class OutputConfig:
+    @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1', 'default_max_fct_angles_opti_f2')
+    @classmethod
+    def check_positive(cls, v: float, info: Any) -> float:
+        if v <= 0:
+            raise ValueError(f"Please provide a value > 0 for argument corresponding to {info.field_name}.")
+        return v
+    
+    @model_validator(mode='after')
+    def check_bonds_scaling_conflicts(self):
+        # We need to know default values to check if they were modified, or rely on logic that inputs were mutually exclusive.
+        # Since we are converting from namespace where defaults are populated if missing, detecting "user provided" vs "default" is hard here
+        # unless we assume defaults.
+        # However, the logic in validation.py checked against 'config' object defaults?
+        # Actually validation.py checked: ns.bonds_scaling != config.bonds_scaling
+        # Here we only have the model. A robust way is ensuring only one is non-default?
+        # For now, let's keep it simple or skip this complex cross-validation if we trust argparse mutual exclusion.
+        # But argparse mutual exclusion wasn't strictly enforced in legacy code, validation.py did it.
+        # Pydantic validation happens *after* population.
+        
+        # If we want to strictly follow validation.py:
+        # "Only one of arguments -bonds_scaling, -bonds_scaling_str and -min_bonds_length can be provided."
+        # This implies checking if more than one is "set".
+        # But here they have values.
+        # We can implement a simplified check:
+        # If bonds_scaling != 1.0, others should be default.
+        # If bonds_scaling_str != "", others should be default.
+        # If min_bonds_length != 0.0, others should be default.
+        
+        set_count = 0
+        if self.bonds_scaling != 1.0: set_count += 1
+        if self.bonds_scaling_str != "": set_count += 1
+        if self.min_bonds_length != 0.0: set_count += 1
+        
+        if set_count > 1:
+            raise ValueError(
+                "Only one of arguments -bonds_scaling, -bonds_scaling_str and -min_bonds_length "
+                "can be provided. Please check your parameters"
+            )
+        return self
+
+class OutputConfig(BaseModel):
     input_folder: str = ""
     output_folder: str = ""
     opti_dirname: str = ""
@@ -82,14 +136,40 @@ class OutputConfig:
     plot_scale: float = 1.0
     verbose: bool = False
 
-@dataclass
-class SwarmConfig:
-    gromacs: GromacsConfig = field(default_factory=GromacsConfig)
-    reference: ReferenceModelConfig = field(default_factory=ReferenceModelConfig)
-    cg_model: CGModelConfig = field(default_factory=CGModelConfig)
-    simulation: SimulationConfig = field(default_factory=SimulationConfig)
-    optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
-    output: OutputConfig = field(default_factory=OutputConfig)
+class SwarmConfig(BaseModel):
+    gromacs: GromacsConfig = Field(default_factory=GromacsConfig)
+    reference: ReferenceModelConfig = Field(default_factory=ReferenceModelConfig)
+    cg_model: CGModelConfig = Field(default_factory=CGModelConfig)
+    simulation: SimulationConfig = Field(default_factory=SimulationConfig)
+    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
+    
+    # We can add a method to validation files existence if desired, 
+    # but Pydantic validators usually validate *data*, not external state (like file existence).
+    # However, for a CLI tool, validating file existence at configuration load is good practice.
+    
+    def validate_files_exist(self):
+        """Check for existence of input files."""
+        # Reference files
+        if not os.path.isfile(self.reference.aa_tpr_filename):
+            raise FileNotFoundError(
+                f"Cannot find topology file of the atomistic simulation at location: {self.reference.aa_tpr_filename}\n"
+                f"(TPR or other portable topology formats supported by MDAnalysis)"
+            )
+        if not os.path.isfile(self.reference.aa_traj_filename):
+            raise FileNotFoundError(
+                f"Cannot find trajectory file of the atomistic simulation at location: {self.reference.aa_traj_filename}\n"
+                f"(XTC, TRR, or other trajectory formats supported by MDAnalysis)"
+            )
+        if not os.path.isfile(self.reference.cg_map_filename):
+            raise FileNotFoundError(
+                f"Cannot find CG beads mapping file at location: {self.reference.cg_map_filename}\n"
+                f"(NDX-like file format)"
+            )
+            
+        # CG Model file
+        if not os.path.isfile(self.cg_model.cg_itp_filename):
+            raise FileNotFoundError(f"Cannot find ITP file of the CG model at location: {self.cg_model.cg_itp_filename}")
 
     @classmethod
     def from_namespace(cls, ns) -> 'SwarmConfig':
@@ -171,7 +251,7 @@ class SwarmConfig:
             verbose=getattr(ns, 'verbose', False)
         )
 
-        return cls(
+        config = cls(
             gromacs=gromacs,
             reference=reference,
             cg_model=cg_model,
@@ -179,4 +259,12 @@ class SwarmConfig:
             optimization=optimization,
             output=output
         )
-
+        # Run file existence validation immediately after creation, 
+        # mimicking the original 'input_parameter_validation' call in main/entry points.
+        # However, for unit tests decoupling, we might want to call this explicitly.
+        # But 'from_namespace' is main entry point util, so it's safe to validate here if files are expected.
+        # NOTE: If unit tests mock files, this will fail if it runs os.path.isfile. 
+        # So we should perhaps call validate_files_exist() explicitly in entry points instead of here.
+        # I will leave it to be called explicitly.
+        
+        return config

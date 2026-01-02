@@ -60,7 +60,7 @@ class Mapping:
             for i in range(len(ndx_lines)):
                 ndx_line = ndx_lines[i]
                 if ndx_line != "":
-                    if bool(re.search("\[.*\]", ndx_line)):
+                    if bool(re.search(r"\[.*\]", ndx_line)):
                         current_section = ndx_line
                         self.all_beads[bead_id] = {"atoms_id": [], "section": current_section, "line_nb": i + 1}
                         current_bead_id = bead_id
@@ -139,7 +139,7 @@ class Mapping:
                 traj = np.empty((len(aa_universe.trajectory), 3))
                 for ts in aa_universe.trajectory:
                     traj[ts.frame] = self.mda_beads_atom_grps[bead_id].center(
-                        self.mda_weights_atom_grps[bead_id], pbc=None, compound="group"
+                        self.mda_weights_atom_grps[bead_id], compound="group"
                     )
                 coord[:, bead_id, :] = traj
 

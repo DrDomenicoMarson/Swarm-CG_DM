@@ -85,10 +85,7 @@ class OptimizationContext:
     bins_bonds: Any = None
     bins_angles: Any = None
     bins_dihedrals: Any = None
-    bw_constraints: Any = None
-    bw_bonds: Any = None
-    bw_angles: Any = None
-    bw_dihedrals: Any = None
+
     bins_constraints_dist_matrix: Any = None
     bins_bonds_dist_matrix: Any = None
     bins_angles_dist_matrix: Any = None

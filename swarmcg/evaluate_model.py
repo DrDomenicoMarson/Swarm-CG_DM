@@ -10,7 +10,7 @@ import swarmcg.io as io
 import swarmcg.scoring as scores
 from swarmcg.scoring.compare import compare_models
 from swarmcg import config
-from swarmcg.shared import catch_warnings, input_parameter_validation
+from swarmcg.shared import catch_warnings
 from swarmcg import utils
 from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols
 from swarmcg.config_types import SwarmConfig
@@ -19,7 +19,6 @@ from swarmcg.context import OptimizationContext
 matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 
 
-@catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 def run(config_obj: SwarmConfig):
     """
     Main execution logic for model evaluation.
@@ -53,7 +52,12 @@ def run(config_obj: SwarmConfig):
     # ns.mapping_type = ns.mapping_type.upper() # Handled by Config usually, or we ensure it
     
     # Ideally should use config object directly, but input_parameter_validation is legacy
-    input_parameter_validation(ns, config)
+    # Validate files existence
+    try:
+        config_obj.validate_files_exist()
+    except FileNotFoundError as e:
+        print(e)
+        sys.exit(1)
 
     # display parameters for function compare_models
     if not os.path.isfile(ns.cg_tpr_filename) or not os.path.isfile(ns.cg_traj_filename):
