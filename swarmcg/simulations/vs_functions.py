@@ -26,8 +26,8 @@ def vs2_func_1(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a = vs_params  # weight
     weights = np.array([1 - a, a])
 
-    for ts in state.aa2cg_universe.trajectory:
-        traj[ts.frame] = state.aa2cg_universe.atoms[[i, j]].center(weights)
+    for ts in state.traj.aa2cg_universe.trajectory:
+        traj[ts.frame] = state.traj.aa2cg_universe.atoms[[i, j]].center(weights)
 
 
 def vs2_func_2(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
@@ -46,9 +46,9 @@ def vs2_func_2(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a = vs_params  # nm
     a = a * 10  # retrieve amgstrom for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
         r_ij = pos_j - pos_i
         traj[ts.frame] = pos_i + a * r_ij / mda.lib.mdamath.norm(r_ij)
 
@@ -69,10 +69,10 @@ def vs3_func_1(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a, b = vs_params  # nm, nm
     a, b = a * 10, b * 10  # retrieve amgstrom for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
-        pos_k = state.aa2cg_universe.atoms[k].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
+        pos_k = state.traj.aa2cg_universe.atoms[k].position
         r_ij = pos_j - pos_i
         r_ik = pos_k - pos_i
         traj[ts.frame] = pos_i + a * r_ij / mda.lib.mdamath.norm(r_ij) / 2 + b * r_ik / mda.lib.mdamath.norm(r_ik) / 2
@@ -93,10 +93,10 @@ def vs3_func_2(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a, b = vs_params  # weight, nm
     b = b * 10  # retrieve amgstrom for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
-        pos_k = state.aa2cg_universe.atoms[k].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
+        pos_k = state.traj.aa2cg_universe.atoms[k].position
         r_ij = pos_j - pos_i
         r_jk = pos_k - pos_j
         comb_ijk = (1 - a) * r_ij + a * r_jk
@@ -117,10 +117,10 @@ def vs3_func_3(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     ang_rad = np.deg2rad(ang_deg)  # retrieve radians
     d = d * 10  # retrieve amgstrom for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
-        pos_k = state.aa2cg_universe.atoms[k].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
+        pos_k = state.traj.aa2cg_universe.atoms[k].position
         r_ij = pos_j - pos_i
         r_jk = pos_k - pos_j
         comb_ijk = r_jk - (np.dot(r_ij, r_jk) / np.dot(r_ij, r_ij)) * r_ij
@@ -140,10 +140,10 @@ def vs3_func_4(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a, b, c = vs_params  # weight, weight, nm**(-1)
     c = c / 10  # retrieve amgstrom**(-1) for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
-        pos_k = state.aa2cg_universe.atoms[k].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
+        pos_k = state.traj.aa2cg_universe.atoms[k].position
         r_ij = pos_j - pos_i
         r_ik = pos_k - pos_i
         traj[ts.frame] = pos_i + a * r_ij + b * r_ik - c * (
@@ -167,11 +167,11 @@ def vs4_func_2(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
     a, b, c = vs_params  # weight, weight, nm
     c = c * 10  # retrieve amgstrom for MDA
 
-    for ts in state.aa2cg_universe.trajectory:
-        pos_i = state.aa2cg_universe.atoms[i].position
-        pos_j = state.aa2cg_universe.atoms[j].position
-        pos_k = state.aa2cg_universe.atoms[k].position
-        pos_l = state.aa2cg_universe.atoms[l].position
+    for ts in state.traj.aa2cg_universe.trajectory:
+        pos_i = state.traj.aa2cg_universe.atoms[i].position
+        pos_j = state.traj.aa2cg_universe.atoms[j].position
+        pos_k = state.traj.aa2cg_universe.atoms[k].position
+        pos_l = state.traj.aa2cg_universe.atoms[l].position
         r_ij = pos_j - pos_i
         r_ik = pos_k - pos_i
         r_il = pos_l - pos_i
@@ -191,8 +191,8 @@ def vsn_func_1(state: SwarmCGState, traj, vs_def_beads_ids):
     state requires:
         aa2cg_universe (edited inplace)
     """
-    for ts in state.aa2cg_universe.trajectory:
-        traj[ts.frame] = state.aa2cg_universe.atoms[vs_def_beads_ids].center_of_geometry(pbc=None)
+    for ts in state.traj.aa2cg_universe.trajectory:
+        traj[ts.frame] = state.traj.aa2cg_universe.atoms[vs_def_beads_ids].center_of_geometry(pbc=None)
 
 
 def vsn_func_2(state: SwarmCGState, traj, vs_def_beads_ids, bead_id):
@@ -207,15 +207,15 @@ def vsn_func_2(state: SwarmCGState, traj, vs_def_beads_ids, bead_id):
     # because this is COM so 0 mass means a bead that was marked for defining the VS is in fact ignored
     zero_mass_beads_ids = []
     for bid in vs_def_beads_ids:
-        if bid in state.cg_itp["virtual_sitesn"]:
-            if state.cg_itp["virtual_sitesn"][bid]["mass"] == 0:
+        if bid in state.model.cg_itp["virtual_sitesn"]:
+            if state.model.cg_itp["virtual_sitesn"][bid]["mass"] == 0:
                 zero_mass_beads_ids.append(bid)
     if len(zero_mass_beads_ids) > 0:
         print("  WARNING: Virtual site ID {} uses function 2 for COM, but its definition contains IDs " + " ".join(
             zero_mass_beads_ids) + "which have no mass".format(bead_id + 1))
 
-    for ts in state.aa2cg_universe.trajectory:
-        traj[ts.frame] = state.aa2cg_universe.atoms[vs_def_beads_ids].center_of_mass(pbc=None)
+    for ts in state.traj.aa2cg_universe.trajectory:
+        traj[ts.frame] = state.traj.aa2cg_universe.atoms[vs_def_beads_ids].center_of_mass(pbc=None)
 
 
 def vsn_func_3(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
@@ -227,6 +227,6 @@ def vsn_func_3(state: SwarmCGState, traj, vs_def_beads_ids, vs_params):
         aa2cg_universe (edited inplace)
     """
     masses_and_weights = np.array(
-        [state.aa2cg_universe.atoms[vs_def_beads_ids[i]].mass * vs_params[i] for i in range(len(vs_def_beads_ids))])
-    for ts in state.aa2cg_universe.trajectory:
-        traj[ts.frame] = state.aa2cg_universe.atoms[vs_def_beads_ids].center(masses_and_weights)
+        [state.traj.aa2cg_universe.atoms[vs_def_beads_ids[i]].mass * vs_params[i] for i in range(len(vs_def_beads_ids))])
+    for ts in state.traj.aa2cg_universe.trajectory:
+        traj[ts.frame] = state.traj.aa2cg_universe.atoms[vs_def_beads_ids].center(masses_and_weights)

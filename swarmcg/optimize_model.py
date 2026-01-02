@@ -35,25 +35,25 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
 
     # context variables not directly linked to CLI arguments for plotting or for global package interpretation
     # TODO: we should not generate new vars here, but before we go into the function
-    args.mismatch_order = False
-    args.row_x_scaling = True
-    args.row_y_scaling = True
-    args.ncols_max = 0  # 0 to display all
-    # state.atom_only = False
-    state.molname_in = None  # if None the first found using TPR atom ordering will be used
-    state.process_alive_time_sleep = 10  # nb of seconds between process alive check cycles
-    state.process_alive_nb_cycles_dead = int(
-        args.sim_kill_delay / state.process_alive_time_sleep)  # nb of cycles without .log file bytes size changes to determine that the MD run is stuck
-    state.bonds_rescaling_performed = False  # for user information display
+    args.plotting.mismatch_order = False
+    args.plotting.row_x_scaling = True
+    args.plotting.row_y_scaling = True
+    args.plotting.ncols_max = 0  # 0 to display all
+    # state.mapping.atom_only = False
+    state.mapping.molname_in = None  # if None the first found using TPR atom ordering will be used
+    state.runtime.process_alive_time_sleep = 10  # nb of seconds between process alive check cycles
+    state.runtime.process_alive_nb_cycles_dead = int(
+        args.runtime.sim_kill_delay / state.runtime.process_alive_time_sleep)  # nb of cycles without .log file bytes size changes to determine that the MD run is stuck
+    state.mapping.bonds_rescaling_performed = False  # for user information display
 
     # get basenames for simulation files
     # TODO: this can be methods of a state object which implements these operations
-    state.cg_itp_basename = os.path.basename(args.cg_itp_filename)
-    state.gro_input_basename = os.path.basename(args.gro_input_filename)
-    state.top_input_basename = os.path.basename(args.top_input_filename)
-    state.mdp_minimization_basename = os.path.basename(args.mdp_minimization_filename)
-    state.mdp_equi_basename = os.path.basename(args.mdp_equi_filename)
-    state.mdp_md_basename = os.path.basename(args.mdp_md_filename)
+    state.files.cg_itp_basename = os.path.basename(args.inputs.cg_itp_filename)
+    state.files.gro_input_basename = os.path.basename(args.inputs.gro_input_filename)
+    state.files.top_input_basename = os.path.basename(args.inputs.top_input_filename)
+    state.files.mdp_minimization_basename = os.path.basename(args.inputs.mdp_minimization_filename)
+    state.files.mdp_equi_basename = os.path.basename(args.inputs.mdp_equi_filename)
+    state.files.mdp_md_basename = os.path.basename(args.inputs.mdp_md_filename)
 
     ####################
     # ARGUMENTS CHECKS #
@@ -71,7 +71,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
 
     # avoid overwriting an output directory of a previous optimization run
     # TODO: this should be function or methods that checks before we go into the function
-    if os.path.isfile(state.exec_folder) or os.path.isdir(state.exec_folder):
+    if os.path.isfile(state.files.exec_folder) or os.path.isdir(state.files.exec_folder):
         msg = (
             "Provided output folder already exists, please delete existing folder "
             "manually or provide another folder name."
@@ -87,13 +87,13 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                   "cg_mdp_md"]
 
     for i in range(len(user_provided_filenames)):
-        filename_out_directory = getattr(args, user_provided_filenames[i])
+        filename_out_directory = getattr(args.inputs, user_provided_filenames[i])
 
         if not os.path.isfile(filename_out_directory):
 
             # if an input folder is specified (default is empty)
-            if args.input_folder not in ("", "."):
-                filename_in_directory = args.input_folder + "/" + getattr(args, user_provided_filenames[i])
+            if args.paths.input_folder not in ("", "."):
+                filename_in_directory = args.paths.input_folder + "/" + getattr(args.inputs, user_provided_filenames[i])
                 if not os.path.isfile(filename_in_directory):
                     msg = (
                         "Cannot find file for argument -{} "
@@ -101,7 +101,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                     )
                     raise FileNotFoundError(msg)
                 else:
-                    setattr(args, user_provided_filenames[i], filename_in_directory)
+                    setattr(args.inputs, user_provided_filenames[i], filename_in_directory)
 
             else:
                 msg = (
@@ -113,14 +113,14 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
     args.validate(step="optimisation")
 
     # check that gromacs alias is correct
-    SimulationStep._validate_exec(args.gmx_path)
+    SimulationStep._validate_exec(args.runtime.gmx_path)
 
     # check that ITP filename for the model to optimize is indeed included in the TOP file of the simulation directory
     # then find all TOP includes for copying files for simulations at each iteration
     top_includes_filenames = []
-    with open(args.top_input_filename, "r") as fp:
+    with open(args.inputs.top_input_filename, "r") as fp:
         all_top_lines = fp.read()
-        if state.cg_itp_basename not in all_top_lines:
+        if state.files.cg_itp_basename not in all_top_lines:
             msg = "The CG ITP model filename you provided is not included in your TOP file."
             raise exceptions.MDSimulationInputError(msg)
 
@@ -130,7 +130,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
             if top_line.startswith("#include"):
                 top_include = top_line.split()[1].replace("'", "").replace("\"",
                                                                            "")  # remove potential single and double quotes around filenames
-                arg_dirname = os.path.dirname(args.top_input_filename)
+                arg_dirname = os.path.dirname(args.inputs.top_input_filename)
                 if arg_dirname == "":
                     arg_dirname = "."
                 top_includes_filenames.append(arg_dirname + "/" + top_include)
@@ -140,34 +140,34 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
     ##################
 
     # scg.set_MDA_backend(args, state)
-    state.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
+    state.runtime.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
 
     # directory to write all files for current execution of optimizations routines
     # TODO: group this operations into a FileManager class
-    os.mkdir(state.exec_folder)
-    os.mkdir(state.exec_folder + "/.internal")
-    os.mkdir(state.exec_folder + "/" + config.distrib_plots_all_evals_dirname)
-    os.mkdir(state.exec_folder + "/" + config.log_files_all_evals_dirname)
-    if args.keep_all_sims:
-        os.mkdir(state.exec_folder + "/" + config.sim_files_all_evals_dirname)
+    os.mkdir(state.files.exec_folder)
+    os.mkdir(state.files.exec_folder + "/.internal")
+    os.mkdir(state.files.exec_folder + "/" + config.distrib_plots_all_evals_dirname)
+    os.mkdir(state.files.exec_folder + "/" + config.log_files_all_evals_dirname)
+    if args.runtime.keep_all_sims:
+        os.mkdir(state.files.exec_folder + "/" + config.sim_files_all_evals_dirname)
 
     # prepare a directory to be copied at each iteration of the optimization, to run the new simulation
-    os.mkdir(state.exec_folder + "/" + config.input_sim_files_dirname)
+    os.mkdir(state.files.exec_folder + "/" + config.input_sim_files_dirname)
 
     # get all TOP file includes copied into input simulation directory
     for top_include in top_includes_filenames:
-        shutil.copy(top_include, state.exec_folder + "/" + config.input_sim_files_dirname)
+        shutil.copy(top_include, state.files.exec_folder + "/" + config.input_sim_files_dirname)
 
     # copy all other simulation files
     user_provided_sim_files = ["cg_itp_filename", "gro_input_filename", "top_input_filename",
                                "mdp_minimization_filename", "mdp_equi_filename", "mdp_md_filename"]
     for sim_file in user_provided_sim_files:
-        shutil.copy(getattr(args, sim_file), state.exec_folder + "/" + config.input_sim_files_dirname)
+        shutil.copy(getattr(args.inputs, sim_file), state.files.exec_folder + "/" + config.input_sim_files_dirname)
 
     # modify the TOP file to adapt includes paths
-    with open(state.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.top_input_basename, "r") as fp:
+    with open(state.files.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.files.top_input_basename, "r") as fp:
         all_top_lines = fp.read().split("\n")
-    with open(state.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.top_input_basename, "w+") as fp:
+    with open(state.files.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.files.top_input_basename, "w+") as fp:
         nb_includes = 0
         for i in range(len(all_top_lines)):
             if all_top_lines[i].startswith("#include"):
@@ -175,16 +175,16 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                 nb_includes += 1
         fp.writelines("\n".join(all_top_lines))
 
-    state.nb_eval = 0  # global count of evaluation steps
-    state.start_opti_ts = datetime.now().timestamp()
-    state.total_eval_time, state.total_gmx_time, state.total_model_eval_time = 0, 0, 0
+    state.opti.nb_eval = 0  # global count of evaluation steps
+    state.opti.start_opti_ts = datetime.now().timestamp()
+    state.opti.total_eval_time, state.opti.total_gmx_time, state.opti.total_model_eval_time = 0, 0, 0
 
     scores.create_bins_and_dist_matrices(args, state)  # bins for EMD calculations
     scg.read_ndx_atoms2beads(args, state)  # read mapping, get atoms accurences in beads
     scg.get_atoms_weights_in_beads(args, state)  # get weights of atoms within beads
 
-    state.cg_itp = swarmcg.io.read.read_cg_itp_file(args)  # load the ITP object and find out geoms grouping
-    io.validate_cg_itp(state.cg_itp)  # check ITP object is correct
+    state.model.cg_itp = swarmcg.io.read.read_cg_itp_file(args)  # load the ITP object and find out geoms grouping
+    io.validate_cg_itp(state.model.cg_itp)  # check ITP object is correct
     scg.process_scaling_str(args, state)  # process the bonds scaling specified by user
 
     print()
@@ -214,146 +214,146 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                         sp_itp_line = itp_line.split()
                         b_type, b_mass, b_sitetype = sp_itp_line[0], float(sp_itp_line[1]), sp_itp_line[3]
                         if b_sitetype in ["A", "V", "D"]:  # atom, virtual site, dummy (old virtual site)
-                            for bead_id in range(len(state.cg_itp["atoms"])):
-                                if state.cg_itp["atoms"][bead_id]["bead_type"] == b_type:
-                                    if state.cg_itp["atoms"][bead_id]["mass"] == None:
-                                        state.cg_itp["atoms"][bead_id]["mass"] = b_mass
+                            for bead_id in range(len(state.model.cg_itp["atoms"])):
+                                if state.model.cg_itp["atoms"][bead_id]["bead_type"] == b_type:
+                                    if state.model.cg_itp["atoms"][bead_id]["mass"] == None:
+                                        state.model.cg_itp["atoms"][bead_id]["mass"] = b_mass
                     except (IndexError, ValueError):
                         pass
 
     print("\nMapping the trajectory from AA to CG representation")
-    state.aa2cg_universe = scg.initialize_cg_traj(state.cg_itp)
+    state.traj.aa2cg_universe = scg.initialize_cg_traj(state.model.cg_itp)
     scg.map_aa2cg_traj(args, state)
     print()
 
     # touch results files to be appended to later
-    with open(state.exec_folder + "/" + config.opti_perf_recap_file, "w") as fp:
+    with open(state.files.exec_folder + "/" + config.opti_perf_recap_file, "w") as fp:
         # TODO: print that file has been generated with Swarm-CG etc -- do this for basically all files
-        fp.write(f"# nb constraints: {state.cg_itp['nb_constraints']}\n")
-        fp.write(f"# nb bonds: {state.cg_itp['nb_bonds']}\n")
-        fp.write(f"# nb angles: {state.cg_itp['nb_angles']}\n")
-        fp.write(f"# nb dihedrals: {state.cg_itp['nb_dihedrals']}\n")
+        fp.write(f"# nb constraints: {state.model.cg_itp['nb_constraints']}\n")
+        fp.write(f"# nb bonds: {state.model.cg_itp['nb_bonds']}\n")
+        fp.write(f"# nb angles: {state.model.cg_itp['nb_angles']}\n")
+        fp.write(f"# nb dihedrals: {state.model.cg_itp['nb_dihedrals']}\n")
         fp.write("#\n")
         fp.write(
             "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles fit_score_dihedrals eval_score Rg_AA_mapped Rg_CG parameters_set eval_time current_total_time\n")
-    with open(state.exec_folder + "/" + config.opti_pairwise_distances_file, "w"):
+    with open(state.files.exec_folder + "/" + config.opti_pairwise_distances_file, "w"):
         pass
 
     # set these to None to then check the variables have been filled (is not None), so we will do these calculations
     # one single time in function compare_models that is called at each iteration during optimization
-    state.gyr_aa_mapped, state.gyr_aa_mapped_std = None, None
-    state.sasa_aa_mapped, state.sasa_aa_mapped_std = None, None
+    state.model.gyr_aa_mapped, state.model.gyr_aa_mapped_std = None, None
+    state.model.sasa_aa_mapped, state.model.sasa_aa_mapped_std = None, None
 
     print("Calculating bonds, angles and dihedrals distributions in the reference AA-mapped model")
 
-    state.domains_val = {"constraint": [], "bond": [], "angle": [], "dihedral": []}
-    state.data_BI = {"bond": [], "angle": [], "dihedral": []}  # store hists for BI, std and possibly some other stats
+    state.opti.domains_val = {"constraint": [], "bond": [], "angle": [], "dihedral": []}
+    state.opti.data_BI = {"bond": [], "angle": [], "dihedral": []}  # store hists for BI, std and possibly some other stats
 
     # create all ref atom histograms to be used for pairwise distributions comparisons + find average geoms values as first guesses (without BI at this point)
     # get ref atom hists + find very first distances guesses for constraints groups
-    for grp_constraint in range(state.cg_itp["nb_constraints"]):
+    for grp_constraint in range(state.model.cg_itp["nb_constraints"]):
 
         constraint_avg, constraint_hist, constraint_values = scores.get_AA_bonds_distrib(
             args, state,
-            beads_ids=state.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint group",
+            beads_ids=state.model.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint group",
             grp_nb=grp_constraint
         )
-        if args.exec_mode == 1:
-            state.cg_itp["constraint"][grp_constraint]["value"] = constraint_avg
-        state.cg_itp["constraint"][grp_constraint]["avg"] = constraint_avg
-        state.cg_itp["constraint"][grp_constraint]["hist"] = constraint_hist
+        if args.runtime.exec_mode == 1:
+            state.model.cg_itp["constraint"][grp_constraint]["value"] = constraint_avg
+        state.model.cg_itp["constraint"][grp_constraint]["avg"] = constraint_avg
+        state.model.cg_itp["constraint"][grp_constraint]["hist"] = constraint_hist
 
-        state.domains_val["constraint"].append([round(np.min(constraint_values), 3),
+        state.opti.domains_val["constraint"].append([round(np.min(constraint_values), 3),
                                              round(np.max(constraint_values), 3)])  # boundaries of equilibrium values
         print(f"  Constraint grp {grp_constraint + 1} -- Average value: " + str(
             round(constraint_avg, 2)) + " nm -- Initial equilibrium value: " + str(
-            round(state.cg_itp["constraint"][grp_constraint]["value"], 2)) + " nm")
+            round(state.model.cg_itp["constraint"][grp_constraint]["value"], 2)) + " nm")
 
     # get ref atom hists + find very first distances and force constants guesses for bonds groups
-    for grp_bond in range(state.cg_itp["nb_bonds"]):
+    for grp_bond in range(state.model.cg_itp["nb_bonds"]):
 
         bond_avg, bond_hist, bond_values = scores.get_AA_bonds_distrib(
             args, state,
-            beads_ids=state.cg_itp["bond"][grp_bond]["beads"], grp_type="bond group", grp_nb=grp_bond
+            beads_ids=state.model.cg_itp["bond"][grp_bond]["beads"], grp_type="bond group", grp_nb=grp_bond
         )
-        if args.exec_mode == 1:
-            state.cg_itp["bond"][grp_bond]["value"] = bond_avg
-        state.cg_itp["bond"][grp_bond]["avg"] = bond_avg
-        state.cg_itp["bond"][grp_bond]["hist"] = bond_hist
+        if args.runtime.exec_mode == 1:
+            state.model.cg_itp["bond"][grp_bond]["value"] = bond_avg
+        state.model.cg_itp["bond"][grp_bond]["avg"] = bond_avg
+        state.model.cg_itp["bond"][grp_bond]["hist"] = bond_hist
 
-        xmin, xmax = min(np.inf, state.bins_bonds[np.min(np.nonzero(bond_hist))]), max(-np.inf, state.bins_bonds[
+        xmin, xmax = min(np.inf, state.bins.bins_bonds[np.min(np.nonzero(bond_hist))]), max(-np.inf, state.bins.bins_bonds[
             np.max(np.nonzero(bond_hist)) + 1])
-        xmin, xmax = xmin - args.bw_bonds, xmax + args.bw_bonds
-        state.data_BI["bond"].append(
+        xmin, xmax = xmin - args.optimization.bw_bonds, xmax + args.optimization.bw_bonds
+        state.opti.data_BI["bond"].append(
             [np.histogram(bond_values, range=(xmin, xmax), bins=config.bi_nb_bins)[0], np.std(bond_values),
              np.mean(bond_values), (xmin, xmax)])
 
-        state.domains_val["bond"].append(
+        state.opti.domains_val["bond"].append(
             [round(np.min(bond_values), 3), round(np.max(bond_values), 3)])  # boundaries of equilibrium values
         print(f"  Bond grp {grp_bond + 1} -- Average value: " + str(
             round(bond_avg, 2)) + " nm -- Initial equilibrium value: " + str(
-            round(state.cg_itp["bond"][grp_bond]["value"], 2)) + " nm")
+            round(state.model.cg_itp["bond"][grp_bond]["value"], 2)) + " nm")
 
     # get ref atom hists + find very first values and force constants guesses for angles groups
-    for grp_angle in range(state.cg_itp["nb_angles"]):
+    for grp_angle in range(state.model.cg_itp["nb_angles"]):
 
         angle_avg, angle_hist, angle_values_deg, angle_values_rad = scores.get_AA_angles_distrib(
-            args, state, beads_ids=state.cg_itp["angle"][grp_angle]["beads"]
+            args, state, beads_ids=state.model.cg_itp["angle"][grp_angle]["beads"]
         )
-        if args.exec_mode == 1:
-            state.cg_itp["angle"][grp_angle]["value"] = angle_avg
-        state.cg_itp["angle"][grp_angle]["avg"] = angle_avg
-        state.cg_itp["angle"][grp_angle]["hist"] = angle_hist
+        if args.runtime.exec_mode == 1:
+            state.model.cg_itp["angle"][grp_angle]["value"] = angle_avg
+        state.model.cg_itp["angle"][grp_angle]["avg"] = angle_avg
+        state.model.cg_itp["angle"][grp_angle]["hist"] = angle_hist
 
-        xmin, xmax = min(np.inf, state.bins_angles[np.min(np.nonzero(angle_hist))]), max(-np.inf, state.bins_angles[
+        xmin, xmax = min(np.inf, state.bins.bins_angles[np.min(np.nonzero(angle_hist))]), max(-np.inf, state.bins.bins_angles[
             np.max(np.nonzero(angle_hist)) + 1])
-        xmin, xmax = xmin + args.bw_angles / 2, xmax - args.bw_angles / 2
-        state.data_BI["angle"].append(
+        xmin, xmax = xmin + args.optimization.bw_angles / 2, xmax - args.optimization.bw_angles / 2
+        state.opti.data_BI["angle"].append(
             [np.histogram(angle_values_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=config.bi_nb_bins)[0],
              np.std(angle_values_rad), (xmin, xmax)])
 
-        state.domains_val["angle"].append([round(np.min(angle_values_deg), 2),
+        state.opti.domains_val["angle"].append([round(np.min(angle_values_deg), 2),
                                         round(np.max(angle_values_deg), 2)])  # boundaries of equilibrium values
         print(f"  Angle grp {grp_angle + 1} -- Average value: " + str(
             round(angle_avg, 2)) + " degrees -- Initial equilibrium value: " + str(
-            round(state.cg_itp["angle"][grp_angle]["value"], 2)) + " degrees")
+            round(state.model.cg_itp["angle"][grp_angle]["value"], 2)) + " degrees")
 
     # get ref atom hists + find very first values and force constants guesses for dihedrals groups
-    for grp_dihedral in range(state.cg_itp["nb_dihedrals"]):
+    for grp_dihedral in range(state.model.cg_itp["nb_dihedrals"]):
 
         dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad = scores.get_AA_dihedrals_distrib(
             args, state,
-            beads_ids=state.cg_itp["dihedral"][grp_dihedral]["beads"]
+            beads_ids=state.model.cg_itp["dihedral"][grp_dihedral]["beads"]
         )
-        if args.exec_mode == 1:  # the dihedral equi value will be calculated from the BI fit, because for dihedrals it makes no sense to use the average
-            state.cg_itp["dihedral"][grp_dihedral]["value"] = dihedral_avg
-        state.cg_itp["dihedral"][grp_dihedral]["avg"] = dihedral_avg
-        state.cg_itp["dihedral"][grp_dihedral]["hist"] = dihedral_hist
+        if args.runtime.exec_mode == 1:  # the dihedral equi value will be calculated from the BI fit, because for dihedrals it makes no sense to use the average
+            state.model.cg_itp["dihedral"][grp_dihedral]["value"] = dihedral_avg
+        state.model.cg_itp["dihedral"][grp_dihedral]["avg"] = dihedral_avg
+        state.model.cg_itp["dihedral"][grp_dihedral]["hist"] = dihedral_hist
 
         xmin, xmax = -180, 180
-        state.data_BI["dihedral"].append([np.histogram(dihedral_values_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)),
+        state.opti.data_BI["dihedral"].append([np.histogram(dihedral_values_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)),
                                                     bins=2 * config.bi_nb_bins)[0], np.std(dihedral_values_rad),
                                        np.mean(dihedral_values_rad), (xmin, xmax)])
 
-        state.domains_val["dihedral"].append([round(np.min(dihedral_values_deg), 2),
+        state.opti.domains_val["dihedral"].append([round(np.min(dihedral_values_deg), 2),
                                            round(np.max(dihedral_values_deg), 2)])  # boundaries of equilibrium values
         print(f"  Dihedral grp {grp_dihedral + 1} -- Average value: " + str(
             round(dihedral_avg, 2)) + " degrees -- Initial equilibrium value: " + str(
-            round(state.cg_itp["dihedral"][grp_dihedral]["value"], 2)) + " degrees")
+            round(state.model.cg_itp["dihedral"][grp_dihedral]["value"], 2)) + " degrees")
 
-    if not state.bonds_rescaling_performed:
+    if not state.mapping.bonds_rescaling_performed:
         print("  No bonds rescaling performed")
 
     # output png with all the reference distributions, so the user can check
-    state.atom_only = True
-    args.plot_filename = state.exec_folder + "/" + config.ref_distrib_plots
+    state.mapping.atom_only = True
+    args.paths.plot_filename = state.files.exec_folder + "/" + config.ref_distrib_plots
     with open(os.devnull, "w") as devnull:
         with contextlib.redirect_stdout(devnull):
             scg.compare_models(args, state, manual_mode=False)
     print()
     print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
-          state.exec_folder + "/" + config.ref_distrib_plots)
-    state.atom_only = False
+          state.files.exec_folder + "/" + config.ref_distrib_plots)
+    state.mapping.atom_only = False
 
     ##################################
     # ITERATIVE OPTIMIZATION PROCESS #
@@ -363,12 +363,12 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
 
     # NOTE: currently, due to an issue in FST-PSO, number of swarm iterations performed is +2 when compared to the numbers we feed
 
-    state.opti_itp = copy.deepcopy(
-        state.cg_itp)  # the ITP object that will be optimized stepwise, at the end of each optimization cycle (geom type wise)
-    state.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}  # geoms to optimize at each step
+    state.opti.opti_itp = copy.deepcopy(
+        state.model.cg_itp)  # the ITP object that will be optimized stepwise, at the end of each optimization cycle (geom type wise)
+    state.opti.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}  # geoms to optimize at each step
 
     # remove dihedrals from cycles if CG ITP file does NOT contain dihedrals
-    if state.cg_itp["nb_dihedrals"] == 0:
+    if state.model.cg_itp["nb_dihedrals"] == 0:
         opti_cycles_cp, sim_cycles_cp = [], []
         nb_poped = 0
         for i in range(len(opti_cycles)):
@@ -384,25 +384,25 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         opti_cycles, sim_cycles = opti_cycles_cp, sim_cycles_cp
 
     # state variables for the cycles of optimization
-    state.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
-    state.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
-    state.best_fitness = [np.inf, None]  # fitness_score, eval_step_best_score
+    state.opti.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
+    state.opti.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
+    state.opti.best_fitness = [np.inf, None]  # fitness_score, eval_step_best_score
 
     # storage for best independent set of parameters by geom, for initialization of a (few ?) special particle after 1st opti cycle
-    state.all_best_emd_dist_geoms = {"constraints": {}, "bonds": {}, "angles": {}, "dihedrals": {}}
-    state.all_best_params_dist_geoms = {"constraints": {}, "bonds": {}, "angles": {}, "dihedrals": {}}
-    for i in range(state.cg_itp["nb_constraints"]):
-        state.all_best_emd_dist_geoms["constraints"][i] = config.sim_crash_EMD_indep_score
-        state.all_best_params_dist_geoms["constraints"][i] = {}
-    for i in range(state.cg_itp["nb_bonds"]):
-        state.all_best_emd_dist_geoms["bonds"][i] = config.sim_crash_EMD_indep_score
-        state.all_best_params_dist_geoms["bonds"][i] = {}
-    for i in range(state.cg_itp["nb_angles"]):
-        state.all_best_emd_dist_geoms["angles"][i] = config.sim_crash_EMD_indep_score
-        state.all_best_params_dist_geoms["angles"][i] = {}
-    for i in range(state.cg_itp["nb_dihedrals"]):
-        state.all_best_emd_dist_geoms["dihedrals"][i] = config.sim_crash_EMD_indep_score
-        state.all_best_params_dist_geoms["dihedrals"][i] = {}
+    state.opti.all_best_emd_dist_geoms = {"constraints": {}, "bonds": {}, "angles": {}, "dihedrals": {}}
+    state.opti.all_best_params_dist_geoms = {"constraints": {}, "bonds": {}, "angles": {}, "dihedrals": {}}
+    for i in range(state.model.cg_itp["nb_constraints"]):
+        state.opti.all_best_emd_dist_geoms["constraints"][i] = config.sim_crash_EMD_indep_score
+        state.opti.all_best_params_dist_geoms["constraints"][i] = {}
+    for i in range(state.model.cg_itp["nb_bonds"]):
+        state.opti.all_best_emd_dist_geoms["bonds"][i] = config.sim_crash_EMD_indep_score
+        state.opti.all_best_params_dist_geoms["bonds"][i] = {}
+    for i in range(state.model.cg_itp["nb_angles"]):
+        state.opti.all_best_emd_dist_geoms["angles"][i] = config.sim_crash_EMD_indep_score
+        state.opti.all_best_params_dist_geoms["angles"][i] = {}
+    for i in range(state.model.cg_itp["nb_dihedrals"]):
+        state.opti.all_best_emd_dist_geoms["dihedrals"][i] = config.sim_crash_EMD_indep_score
+        state.opti.all_best_params_dist_geoms["dihedrals"][i] = {}
 
     #############################
     # START OPTIMIZATION CYCLES #
@@ -410,42 +410,42 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
 
     for i in range(len(opti_cycles)):
 
-        state.opti_cycle = {"nb_cycle": i + 1, "geoms": opti_cycles[i],
+        state.opti.opti_cycle = {"nb_cycle": i + 1, "geoms": opti_cycles[i],
                          "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}}
-        state.out_itp = copy.deepcopy(
-            state.opti_itp)  # input ITP copy, on which we might perform BI, and that is the object we will modify at each evaluation step to store the values from FST-PSO
+        state.opti.out_itp = copy.deepcopy(
+            state.opti.opti_itp)  # input ITP copy, on which we might perform BI, and that is the object we will modify at each evaluation step to store the values from FST-PSO
 
         # model selection based on fitness + Rg during last optimization cycle
-        # state.all_rg_last_cycle, state.all_fitness_last_cycle = np.array([]), np.array([])
-        # state.best_fitness_Rg_combined = 0  # id of the best model based on bonded fitness + Rg selection
+        # state.opti.all_rg_last_cycle, state.opti.all_fitness_last_cycle = np.array([]), np.array([])
+        # state.opti.best_fitness_Rg_combined = 0  # id of the best model based on bonded fitness + Rg selection
 
-        state.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
-        state.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
+        state.opti.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
+        state.opti.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
 
-        state.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
-        state.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
-        state.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
-        state.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
+        state.opti.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
+        state.opti.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
+        state.opti.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
+        state.opti.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
 
         # adapt number of geoms according to the optimization cycle
         geoms_display = []
-        if "constraint" in state.opti_cycle["geoms"] or "bond" in state.opti_cycle["geoms"]:
+        if "constraint" in state.opti.opti_cycle["geoms"] or "bond" in state.opti.opti_cycle["geoms"]:
             geoms_display.append("constraints/bonds")
-        if "constraint" in state.opti_cycle["geoms"]:
-            state.opti_cycle["nb_geoms"]["constraint"] = state.cg_itp["nb_constraints"]
-        if "bond" in state.opti_cycle["geoms"]:
-            state.opti_cycle["nb_geoms"]["bond"] = state.cg_itp["nb_bonds"]
-        if "angle" in state.opti_cycle["geoms"]:
-            state.opti_cycle["nb_geoms"]["angle"] = state.cg_itp["nb_angles"]
+        if "constraint" in state.opti.opti_cycle["geoms"]:
+            state.opti.opti_cycle["nb_geoms"]["constraint"] = state.model.cg_itp["nb_constraints"]
+        if "bond" in state.opti.opti_cycle["geoms"]:
+            state.opti.opti_cycle["nb_geoms"]["bond"] = state.model.cg_itp["nb_bonds"]
+        if "angle" in state.opti.opti_cycle["geoms"]:
+            state.opti.opti_cycle["nb_geoms"]["angle"] = state.model.cg_itp["nb_angles"]
             geoms_display.append("angles")
-        if "dihedral" in state.opti_cycle["geoms"]:
-            state.opti_cycle["nb_geoms"]["dihedral"] = state.cg_itp["nb_dihedrals"]
+        if "dihedral" in state.opti.opti_cycle["geoms"]:
+            state.opti.opti_cycle["nb_geoms"]["dihedral"] = state.model.cg_itp["nb_dihedrals"]
             geoms_display.append("dihedrals")
         geoms_display = " & ".join(geoms_display)
 
         print()
         print(swarmcg.shared.styling.sep_close)
-        print("| STARTING OPTIMIZATION CYCLE", state.opti_cycle["nb_cycle"],
+        print("| STARTING OPTIMIZATION CYCLE", state.opti.opti_cycle["nb_cycle"],
               "                                                              |")
         print("| Optimizing", geoms_display, " " * (95 - 16 - len(geoms_display)), "|")
         print(swarmcg.shared.styling.sep_close)
@@ -454,16 +454,16 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         # BI is performed:
         # -- exec_mode 1: all equilibrium values and force constants
         # -- exec_mode 2: equilibrium values are not touched for bonds, angles and dihedrals, but all their force constants are optimized
-        scg.perform_BI(args, state)  # performed on object state.out_itp
+        scg.perform_BI(args, state)  # performed on object state.opti.out_itp
 
         # build vector for search space boundaries + create variations around the BI initial guesses
         search_space_boundaries = scg.get_search_space_boundaries(args, state)
 
-        # state.worst_fit_score = round(len(search_space_boundaries) * config.sim_crash_EMD_indep_score, 3)
-        state.worst_fit_score = round( \
-            np.sqrt((state.cg_itp["nb_constraints"] + state.cg_itp["nb_bonds"]) * config.sim_crash_EMD_indep_score) + \
-            np.sqrt(state.cg_itp["nb_angles"] * config.sim_crash_EMD_indep_score) + \
-            np.sqrt(state.cg_itp["nb_dihedrals"] * config.sim_crash_EMD_indep_score) \
+        # state.opti.worst_fit_score = round(len(search_space_boundaries) * config.sim_crash_EMD_indep_score, 3)
+        state.opti.worst_fit_score = round( \
+            np.sqrt((state.model.cg_itp["nb_constraints"] + state.model.cg_itp["nb_bonds"]) * config.sim_crash_EMD_indep_score) + \
+            np.sqrt(state.model.cg_itp["nb_angles"] * config.sim_crash_EMD_indep_score) + \
+            np.sqrt(state.model.cg_itp["nb_dihedrals"] * config.sim_crash_EMD_indep_score) \
             , 3)
         # nb_particles = int(10 + 2*np.sqrt(len(search_space_boundaries)))  # formula used by FST-PSO to choose nb of particles, which defines the number of initial guesses we can use
         nb_particles = particle_setter(
@@ -477,35 +477,35 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                 FP.set_search_space(search_space_boundaries)
                 FP.set_swarm_size(nb_particles)
                 FP.set_fitness(fitness=eval_function, arguments=(args, state), skip_test=True)
-                result = FP.solve_with_fstpso(max_iter=state.max_swarm_iter, initial_guess_list=initial_guess_list,
-                                              max_iter_without_new_global_best=state.max_swarm_iter_without_new_global_best)
+                result = FP.solve_with_fstpso(max_iter=state.opti.max_swarm_iter, initial_guess_list=initial_guess_list,
+                                              max_iter_without_new_global_best=state.opti.max_swarm_iter_without_new_global_best)
 
         # update ITP object with the best solution using geoms considered at this given optimization step
         scg.update_cg_itp_obj(args, state, parameters_set=result[0].X, update_type=2)
 
     # clean temporary copied directory with user"s input files
-    shutil.rmtree(state.exec_folder + "/" + config.input_sim_files_dirname)
+    shutil.rmtree(state.files.exec_folder + "/" + config.input_sim_files_dirname)
 
     # print some stats
-    total_time_sec = datetime.now().timestamp() - state.start_opti_ts
+    total_time_sec = datetime.now().timestamp() - state.opti.start_opti_ts
     total_time = round(total_time_sec / (60 * 60), 2)
-    fitness_eval_time = round(state.total_eval_time / (60 * 60), 2)
-    init_time = round((total_time_sec - state.total_eval_time) / (60 * 60), 2)
-    state.total_gmx_time = round(state.total_gmx_time / (60 * 60), 2)
-    state.total_model_eval_time = round(state.total_model_eval_time / (60 * 60), 2)
+    fitness_eval_time = round(state.opti.total_eval_time / (60 * 60), 2)
+    init_time = round((total_time_sec - state.opti.total_eval_time) / (60 * 60), 2)
+    state.opti.total_gmx_time = round(state.opti.total_gmx_time / (60 * 60), 2)
+    state.opti.total_model_eval_time = round(state.opti.total_model_eval_time / (60 * 60), 2)
     print()
     print(swarmcg.shared.styling.sep_close)
     print("|  FINISHED PROPERLY                                                                          |")
     print(swarmcg.shared.styling.sep_close)
     print()
-    print("Total nb of evaluation steps:", state.nb_eval)
-    print("Best model obtained at evaluation step number:", state.best_fitness[1])
+    print("Total nb of evaluation steps:", state.opti.nb_eval)
+    print("Best model obtained at evaluation step number:", state.opti.best_fitness[1])
     print()
     print(f"Total execution time : {total_time} h")
     print(f"Initialization time  : {init_time} h ({round(init_time / total_time * 100, 2)} %)")
-    print(f"Simulations time     : {state.total_gmx_time} h ({round(state.total_gmx_time / total_time * 100, 2)} %)")
+    print(f"Simulations time     : {state.opti.total_gmx_time} h ({round(state.opti.total_gmx_time / total_time * 100, 2)} %)")
     print(
-        f"Models scoring time  : {state.total_model_eval_time} h ({round(state.total_model_eval_time / total_time * 100, 2)} %)")
+        f"Models scoring time  : {state.opti.total_model_eval_time} h ({round(state.opti.total_model_eval_time / total_time * 100, 2)} %)")
     print()
 
 
@@ -523,18 +523,18 @@ def main():
     state = SwarmCGState()
 
     # do NOT display the stack by default
-    if not args.verbose:
+    if not args.runtime.verbose:
         sys.tracebacklimit = 0
 
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
-    state.exec_folder = time.strftime(
+    state.files.exec_folder = time.strftime(
         "MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")  # default folder name for all files of this optimization run, in case none is provided
-    if args.output_folder != "":
-        state.exec_folder = args.output_folder
+    if args.paths.output_folder != "":
+        state.files.exec_folder = args.paths.output_folder
 
     print("Working directory:", os.getcwd())
     print("Command line:", input_cmdline)
-    print("Results directory:", state.exec_folder)
+    print("Results directory:", state.files.exec_folder)
 
     run(args, state)
 

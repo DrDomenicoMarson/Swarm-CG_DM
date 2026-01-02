@@ -33,26 +33,26 @@ def load_aa_data(args: SwarmCGArgs, state: SwarmCGState):
         all_atoms
         all_aa_mols
     """
-    state.all_atoms = dict()  # atom centered connectivity + atom type + heavy atom boolean + bead(s) to which the atom belongs (can belong to multiple beads depending on mapping)
-    state.all_aa_mols = []  # atom groups for each molecule of interest, in case we use several and average the distributions across many molecules, as we would do for membranes analysis
+    state.mapping.all_atoms = dict()  # atom centered connectivity + atom type + heavy atom boolean + bead(s) to which the atom belongs (can belong to multiple beads depending on mapping)
+    state.mapping.all_aa_mols = []  # atom groups for each molecule of interest, in case we use several and average the distributions across many molecules, as we would do for membranes analysis
 
-    if state.molname_in == None:
+    if state.mapping.molname_in == None:
 
-        molname_atom_group = state.aa_universe.atoms[
+        molname_atom_group = state.traj.aa_universe.atoms[
             0].fragment  # select the AA connected graph for the first moltype found in TPR
-        state.all_aa_mols.append(molname_atom_group)
+        state.mapping.all_aa_mols.append(molname_atom_group)
 
         # atoms and their attributes
         for i in range(len(molname_atom_group)):
 
-            atom_id = state.aa_universe.atoms[i].id
-            atom_type = state.aa_universe.atoms[i].type[0]  # this was to check for hydrogens but we don"t need it atm
-            atom_charge = state.aa_universe.atoms[i].charge
+            atom_id = state.traj.aa_universe.atoms[i].id
+            atom_type = state.traj.aa_universe.atoms[i].type[0]  # this was to check for hydrogens but we don"t need it atm
+            atom_charge = state.traj.aa_universe.atoms[i].charge
             atom_heavy = True
             if atom_type[0].upper() == "H":
                 atom_heavy = False
 
-            state.all_atoms[atom_id] = {"conn": set(), "atom_type": atom_type, "atom_charge": atom_charge,
+            state.mapping.all_atoms[atom_id] = {"conn": set(), "atom_type": atom_type, "atom_charge": atom_charge,
                                      "heavy": atom_heavy, "beads_ids": set(), "beads_types": set(),
                                      "residue_names": set()}
 
@@ -72,13 +72,13 @@ def read_ndx_atoms2beads(args: SwarmCGArgs, state: SwarmCGState):
         atoms_occ_total
         all_beads
     """
-    with open(args.cg_map_filename, "r") as fp:
+    with open(args.inputs.cg_map_filename, "r") as fp:
 
         ndx_lines = fp.read().split("\n")
         ndx_lines = [ndx_line.strip().split(";")[0] for ndx_line in ndx_lines]  # split for comments
 
-        state.atoms_occ_total = collections.Counter()
-        state.all_beads = dict()  # atoms id mapped to each bead
+        state.mapping.atoms_occ_total = collections.Counter()
+        state.mapping.all_beads = dict()  # atoms id mapped to each bead
         bead_id = 0
         current_section = "Beginning of file"
 
@@ -88,7 +88,7 @@ def read_ndx_atoms2beads(args: SwarmCGArgs, state: SwarmCGState):
 
                 if bool(re.search("\[.*\]", ndx_line)):
                     current_section = ndx_line
-                    state.all_beads[bead_id] = {"atoms_id": [], "section": current_section, "line_nb": i + 1}
+                    state.mapping.all_beads[bead_id] = {"atoms_id": [], "section": current_section, "line_nb": i + 1}
                     current_bead_id = bead_id
                     bead_id += 1
 
@@ -96,11 +96,11 @@ def read_ndx_atoms2beads(args: SwarmCGArgs, state: SwarmCGState):
                     try:
                         bead_atoms_id = [int(atom_id) - 1 for atom_id in
                                          ndx_line.split()]  # retrieve indexing from 0 for atoms IDs for MDAnalysis
-                        state.all_beads[current_bead_id]["atoms_id"].extend(
+                        state.mapping.all_beads[current_bead_id]["atoms_id"].extend(
                             bead_atoms_id)  # all atoms included in current bead
 
                         for atom_id in bead_atoms_id:  # bead to which each atom belongs (one atom can belong to multiple beads if there is split-mapping)
-                            state.atoms_occ_total[atom_id] += 1
+                            state.mapping.atoms_occ_total[atom_id] += 1
 
                     except NameError:
                         msg = (
@@ -118,10 +118,10 @@ def read_ndx_atoms2beads(args: SwarmCGArgs, state: SwarmCGState):
                         )
                         raise exceptions.MissformattedFile(msg)
 
-    for bead_id in state.all_beads:
-        if len(state.all_beads[bead_id]["atoms_id"]) == 0:
+    for bead_id in state.mapping.all_beads:
+        if len(state.mapping.all_beads[bead_id]["atoms_id"]) == 0:
             msg = (
-                f"The ITP file contains an empty section named {state.all_beads[bead_id]['section']} starting at line {state.all_beads[bead_id]['line_nb']}."
+                f"The ITP file contains an empty section named {state.mapping.all_beads[bead_id]['section']} starting at line {state.mapping.all_beads[bead_id]['line_nb']}."
                 f"Empty sections are NOT allowed, please fill or delete it."
             )
             raise exceptions.MissformattedFile(msg)
@@ -143,19 +143,19 @@ def get_atoms_weights_in_beads(args: SwarmCGArgs, state: SwarmCGState):
     state creates:
         atom_w
     """
-    state.atom_w = dict()
-    if args.verbose:
+    state.mapping.atom_w = dict()
+    if args.runtime.verbose:
         print("Calculating atoms weights ratio within mapped CG beads")
-    for bead_id in state.all_beads:
+    for bead_id in state.mapping.all_beads:
         # print("Weighting bead_id", bead_id)
-        state.atom_w[bead_id] = dict()
-        beads_atoms_counts = collections.Counter(state.all_beads[bead_id]["atoms_id"])
+        state.mapping.atom_w[bead_id] = dict()
+        beads_atoms_counts = collections.Counter(state.mapping.all_beads[bead_id]["atoms_id"])
         for atom_id in beads_atoms_counts:
-            state.atom_w[bead_id][atom_id] = round(beads_atoms_counts[atom_id] / state.atoms_occ_total[atom_id], 3)
-            if args.verbose and args.mapping_type == "COM":
+            state.mapping.atom_w[bead_id][atom_id] = round(beads_atoms_counts[atom_id] / state.mapping.atoms_occ_total[atom_id], 3)
+            if args.runtime.verbose and args.inputs.mapping_type == "COM":
                 print("  CG bead ID", bead_id + 1, "-- Atom ID", atom_id + 1, "has weight ratio =",
-                      state.atom_w[bead_id][atom_id])
-    if args.verbose:
+                      state.mapping.atom_w[bead_id][atom_id])
+    if args.runtime.verbose:
         print()
 
 
@@ -174,20 +174,20 @@ def get_beads_MDA_atomgroups(args: SwarmCGArgs, state: SwarmCGState):
         mda_beads_atom_grps
         mda_weights_atom_grps
     """
-    state.mda_beads_atom_grps, state.mda_weights_atom_grps = dict(), dict()
-    for bead_id in state.atom_w:
+    state.mapping.mda_beads_atom_grps, state.mapping.mda_weights_atom_grps = dict(), dict()
+    for bead_id in state.mapping.atom_w:
         try:
-            # print("Created bead_id", bead_id, "using atoms", [atom_id for atom_id in state.atom_w[bead_id]])
-            if args.mapping_type == "COM":
-                state.mda_beads_atom_grps[bead_id] = mda.AtomGroup([atom_id for atom_id in state.atom_w[bead_id]],
-                                                                state.aa_universe)
-                state.mda_weights_atom_grps[bead_id] = np.array(
-                    [state.atom_w[bead_id][atom_id] * state.aa_universe.atoms[atom_id].mass for atom_id in
-                     state.atom_w[bead_id]])
-            elif args.mapping_type == "COG":
-                state.mda_beads_atom_grps[bead_id] = mda.AtomGroup([atom_id for atom_id in state.atom_w[bead_id]],
-                                                                state.aa_universe)
-                state.mda_weights_atom_grps[bead_id] = np.array([1 for _ in state.atom_w[bead_id]])
+            # print("Created bead_id", bead_id, "using atoms", [atom_id for atom_id in state.mapping.atom_w[bead_id]])
+            if args.inputs.mapping_type == "COM":
+                state.mapping.mda_beads_atom_grps[bead_id] = mda.AtomGroup([atom_id for atom_id in state.mapping.atom_w[bead_id]],
+                                                                state.traj.aa_universe)
+                state.mapping.mda_weights_atom_grps[bead_id] = np.array(
+                    [state.mapping.atom_w[bead_id][atom_id] * state.traj.aa_universe.atoms[atom_id].mass for atom_id in
+                     state.mapping.atom_w[bead_id]])
+            elif args.inputs.mapping_type == "COG":
+                state.mapping.mda_beads_atom_grps[bead_id] = mda.AtomGroup([atom_id for atom_id in state.mapping.atom_w[bead_id]],
+                                                                state.traj.aa_universe)
+                state.mapping.mda_weights_atom_grps[bead_id] = np.array([1 for _ in state.mapping.atom_w[bead_id]])
 
         except IndexError as e:
             msg = (
@@ -209,9 +209,9 @@ def update_cg_itp_obj(args: SwarmCGArgs, state: SwarmCGState, parameters_set, up
         opti_cycle
     """
     if update_type == 1:  # intermediary
-        itp_obj = state.out_itp
+        itp_obj = state.opti.out_itp
     elif update_type == 2:  # cycles optimized
-        itp_obj = state.opti_itp
+        itp_obj = state.opti.opti_itp
     else:
         msg = (
             f"Code error in function update_cg_itp_obj.\nPlease consider opening an issue on GitHub "
@@ -219,47 +219,47 @@ def update_cg_itp_obj(args: SwarmCGArgs, state: SwarmCGState, parameters_set, up
         )
         raise exceptions.InputArgumentError(msg)
 
-    for i in range(state.opti_cycle["nb_geoms"]["constraint"]):
-        if args.exec_mode == 1:
+    for i in range(state.opti.opti_cycle["nb_geoms"]["constraint"]):
+        if args.runtime.exec_mode == 1:
             itp_obj["constraint"][i]["value"] = round(parameters_set[i], 3)  # constraint - distance
 
-    for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-        if args.exec_mode == 1:
-            itp_obj["bond"][i]["value"] = round(parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + i],
+    for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+        if args.runtime.exec_mode == 1:
+            itp_obj["bond"][i]["value"] = round(parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + i],
                                                 3)  # bond - distance
             itp_obj["bond"][i]["fct"] = round(
-                parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + state.opti_cycle["nb_geoms"]["bond"] + i],
+                parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + state.opti.opti_cycle["nb_geoms"]["bond"] + i],
                 3)  # bond - force constant
         else:
             itp_obj["bond"][i]["fct"] = round(parameters_set[i], 3)  # bond - force constant
 
-    for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-        if args.exec_mode == 1:
+    for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+        if args.runtime.exec_mode == 1:
             itp_obj["angle"][i]["value"] = round(
-                parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + 2 * state.opti_cycle["nb_geoms"]["bond"] + i],
+                parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + 2 * state.opti.opti_cycle["nb_geoms"]["bond"] + i],
                 2)  # angle - value
-            itp_obj["angle"][i]["fct"] = round(parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + 2 *
-                                                              state.opti_cycle["nb_geoms"]["bond"] +
-                                                              state.opti_cycle["nb_geoms"]["angle"] + i],
+            itp_obj["angle"][i]["fct"] = round(parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + 2 *
+                                                              state.opti.opti_cycle["nb_geoms"]["bond"] +
+                                                              state.opti.opti_cycle["nb_geoms"]["angle"] + i],
                                                2)  # angle - force constant
         else:
-            itp_obj["angle"][i]["fct"] = round(parameters_set[state.opti_cycle["nb_geoms"]["bond"] + i],
+            itp_obj["angle"][i]["fct"] = round(parameters_set[state.opti.opti_cycle["nb_geoms"]["bond"] + i],
                                                2)  # angle - force constant
 
-    for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-        if args.exec_mode == 1:
-            itp_obj["dihedral"][i]["value"] = round(parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + 2 *
-                                                                   state.opti_cycle["nb_geoms"]["bond"] + 2 *
-                                                                   state.opti_cycle["nb_geoms"]["angle"] + i],
+    for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+        if args.runtime.exec_mode == 1:
+            itp_obj["dihedral"][i]["value"] = round(parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + 2 *
+                                                                   state.opti.opti_cycle["nb_geoms"]["bond"] + 2 *
+                                                                   state.opti.opti_cycle["nb_geoms"]["angle"] + i],
                                                     2)  # dihedral - value
-            itp_obj["dihedral"][i]["fct"] = round(parameters_set[state.opti_cycle["nb_geoms"]["constraint"] + 2 *
-                                                                 state.opti_cycle["nb_geoms"]["bond"] + 2 *
-                                                                 state.opti_cycle["nb_geoms"]["angle"] +
-                                                                 state.opti_cycle["nb_geoms"]["dihedral"] + i],
+            itp_obj["dihedral"][i]["fct"] = round(parameters_set[state.opti.opti_cycle["nb_geoms"]["constraint"] + 2 *
+                                                                 state.opti.opti_cycle["nb_geoms"]["bond"] + 2 *
+                                                                 state.opti.opti_cycle["nb_geoms"]["angle"] +
+                                                                 state.opti.opti_cycle["nb_geoms"]["dihedral"] + i],
                                                   2)  # dihedral - force constant
         else:
             itp_obj["dihedral"][i]["fct"] = round(
-                parameters_set[state.opti_cycle["nb_geoms"]["bond"] + state.opti_cycle["nb_geoms"]["angle"] + i],
+                parameters_set[state.opti.opti_cycle["nb_geoms"]["bond"] + state.opti.opti_cycle["nb_geoms"]["angle"] + i],
                 2)  # dihedral - force constant
 
 
@@ -282,37 +282,37 @@ def get_search_space_boundaries(args: SwarmCGArgs, state: SwarmCGState):
     """
     search_space_boundaries = []
 
-    if state.opti_cycle["nb_geoms"]["constraint"] > 0:
-        if args.exec_mode == 1:
-            search_space_boundaries.extend(state.domains_val["constraint"])  # constraints equilibrium values
+    if state.opti.opti_cycle["nb_geoms"]["constraint"] > 0:
+        if args.runtime.exec_mode == 1:
+            search_space_boundaries.extend(state.opti.domains_val["constraint"])  # constraints equilibrium values
 
-    if state.opti_cycle["nb_geoms"]["bond"] > 0:
-        if args.exec_mode == 1:
-            search_space_boundaries.extend(state.domains_val["bond"])  # bonds equilibrium values
+    if state.opti.opti_cycle["nb_geoms"]["bond"] > 0:
+        if args.runtime.exec_mode == 1:
+            search_space_boundaries.extend(state.opti.domains_val["bond"])  # bonds equilibrium values
         search_space_boundaries.extend(
-            [[0, args.default_max_fct_bonds_opti]] * state.opti_cycle["nb_geoms"]["bond"])  # bonds force constants
+            [[0, args.optimization.default_max_fct_bonds_opti]] * state.opti.opti_cycle["nb_geoms"]["bond"])  # bonds force constants
 
-    if state.opti_cycle["nb_geoms"]["angle"] > 0:
-        if args.exec_mode == 1:
-            search_space_boundaries.extend(state.domains_val["angle"])  # angles equilibrium values
+    if state.opti.opti_cycle["nb_geoms"]["angle"] > 0:
+        if args.runtime.exec_mode == 1:
+            search_space_boundaries.extend(state.opti.domains_val["angle"])  # angles equilibrium values
 
-        for grp_angle in range(state.opti_cycle["nb_geoms"]["angle"]):  # angles force constants
-            if state.cg_itp["angle"][grp_angle]["func"] == 1:
-                search_space_boundaries.extend([[0, args.default_max_fct_angles_opti_f1]])
-            elif state.cg_itp["angle"][grp_angle]["func"] == 2:
-                search_space_boundaries.extend([[0, args.default_max_fct_angles_opti_f2]])
+        for grp_angle in range(state.opti.opti_cycle["nb_geoms"]["angle"]):  # angles force constants
+            if state.model.cg_itp["angle"][grp_angle]["func"] == 1:
+                search_space_boundaries.extend([[0, args.optimization.default_max_fct_angles_opti_f1]])
+            elif state.model.cg_itp["angle"][grp_angle]["func"] == 2:
+                search_space_boundaries.extend([[0, args.optimization.default_max_fct_angles_opti_f2]])
 
-    if state.opti_cycle["nb_geoms"]["dihedral"] > 0:
-        if args.exec_mode == 1:
-            search_space_boundaries.extend(state.domains_val["dihedral"])  # dihedrals equilibrium values
+    if state.opti.opti_cycle["nb_geoms"]["dihedral"] > 0:
+        if args.runtime.exec_mode == 1:
+            search_space_boundaries.extend(state.opti.domains_val["dihedral"])  # dihedrals equilibrium values
 
-        for grp_dihedral in range(state.opti_cycle["nb_geoms"]["dihedral"]):  # dihedrals force constants
-            if state.cg_itp["dihedral"][grp_dihedral]["func"] == 2:
-                search_space_boundaries.extend([[-args.default_abs_range_fct_dihedrals_opti_func_without_mult,
-                                                 args.default_abs_range_fct_dihedrals_opti_func_without_mult]])
-            elif state.cg_itp["dihedral"][grp_dihedral]["func"] in config.dihedral_func_with_mult:
-                search_space_boundaries.extend([[-args.default_abs_range_fct_dihedrals_opti_func_with_mult,
-                                                 args.default_abs_range_fct_dihedrals_opti_func_with_mult]])
+        for grp_dihedral in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):  # dihedrals force constants
+            if state.model.cg_itp["dihedral"][grp_dihedral]["func"] == 2:
+                search_space_boundaries.extend([[-args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
+                                                 args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult]])
+            elif state.model.cg_itp["dihedral"][grp_dihedral]["func"] in config.dihedral_func_with_mult:
+                search_space_boundaries.extend([[-args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
+                                                 args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult]])
 
     return search_space_boundaries
 
@@ -354,46 +354,46 @@ def get_initial_guess_list(args: SwarmCGArgs, state: SwarmCGState, nb_particles)
     # for bonds lengths and angles/dihedrals values, we perform no checks
     input_guess = []
 
-    if args.exec_mode == 1:
-        for i in range(state.opti_cycle["nb_geoms"]["constraint"]):
-            input_guess.append(min(max(state.out_itp["constraint"][i]["value"], state.domains_val["constraint"][i][0]),
-                                   state.domains_val["constraint"][i][1]))  # constraints equilibrium values
+    if args.runtime.exec_mode == 1:
+        for i in range(state.opti.opti_cycle["nb_geoms"]["constraint"]):
+            input_guess.append(min(max(state.opti.out_itp["constraint"][i]["value"], state.opti.domains_val["constraint"][i][0]),
+                                   state.opti.domains_val["constraint"][i][1]))  # constraints equilibrium values
 
-        for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-            input_guess.append(min(max(state.out_itp["bond"][i]["value"], state.domains_val["bond"][i][0]),
-                                   state.domains_val["bond"][i][1]))  # bonds equilibrium values
+        for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+            input_guess.append(min(max(state.opti.out_itp["bond"][i]["value"], state.opti.domains_val["bond"][i][0]),
+                                   state.opti.domains_val["bond"][i][1]))  # bonds equilibrium values
 
-    for i in range(state.opti_cycle["nb_geoms"]["bond"]):
+    for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
         input_guess.append(
-            min(max(state.out_itp["bond"][i]["fct"], 0), args.default_max_fct_bonds_opti))  # bonds force constants
+            min(max(state.opti.out_itp["bond"][i]["fct"], 0), args.optimization.default_max_fct_bonds_opti))  # bonds force constants
 
-    if args.exec_mode == 1:
-        for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-            input_guess.append(min(max(state.out_itp["angle"][i]["value"], state.domains_val["angle"][i][0]),
-                                   state.domains_val["angle"][i][1]))  # angles equilibrium values
+    if args.runtime.exec_mode == 1:
+        for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+            input_guess.append(min(max(state.opti.out_itp["angle"][i]["value"], state.opti.domains_val["angle"][i][0]),
+                                   state.opti.domains_val["angle"][i][1]))  # angles equilibrium values
 
-    for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-        if state.cg_itp["angle"][i]["func"] == 1:
+    for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+        if state.model.cg_itp["angle"][i]["func"] == 1:
             input_guess.append(
-                min(max(state.out_itp["angle"][i]["fct"], 0), args.default_max_fct_angles_opti_f1))  # angles force constants
-        elif state.cg_itp["angle"][i]["func"] == 2:
+                min(max(state.opti.out_itp["angle"][i]["fct"], 0), args.optimization.default_max_fct_angles_opti_f1))  # angles force constants
+        elif state.model.cg_itp["angle"][i]["func"] == 2:
             input_guess.append(
-                min(max(state.out_itp["angle"][i]["fct"], 0), args.default_max_fct_angles_opti_f2))  # angles force constants
+                min(max(state.opti.out_itp["angle"][i]["fct"], 0), args.optimization.default_max_fct_angles_opti_f2))  # angles force constants
 
-    if args.exec_mode == 1:
-        for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-            input_guess.append(min(max(state.out_itp["dihedral"][i]["value"], state.domains_val["dihedral"][i][0]),
-                                   state.domains_val["dihedral"][i][1]))  # dihedrals equilibrium values
+    if args.runtime.exec_mode == 1:
+        for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+            input_guess.append(min(max(state.opti.out_itp["dihedral"][i]["value"], state.opti.domains_val["dihedral"][i][0]),
+                                   state.opti.domains_val["dihedral"][i][1]))  # dihedrals equilibrium values
 
-    for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-        if state.cg_itp["dihedral"][i]["func"] == 2:
+    for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+        if state.model.cg_itp["dihedral"][i]["func"] == 2:
             input_guess.append(
-                min(max(state.out_itp["dihedral"][i]["fct"], -args.default_abs_range_fct_dihedrals_opti_func_without_mult),
-                    args.default_abs_range_fct_dihedrals_opti_func_without_mult))  # dihedrals force constants
+                min(max(state.opti.out_itp["dihedral"][i]["fct"], -args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult),
+                    args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult))  # dihedrals force constants
         else:
             input_guess.append(
-                min(max(state.out_itp["dihedral"][i]["fct"], -args.default_abs_range_fct_dihedrals_opti_func_with_mult),
-                    args.default_abs_range_fct_dihedrals_opti_func_with_mult))  # dihedrals force constants
+                min(max(state.opti.out_itp["dihedral"][i]["fct"], -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult),
+                    args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult))  # dihedrals force constants
 
     initial_guess_list.append(input_guess)
     num_particle_random_start = 1  # first particle is DBI
@@ -404,131 +404,131 @@ def get_initial_guess_list(args: SwarmCGArgs, state: SwarmCGState, nb_particles)
     # is recorded for a given geom (dihedrals in fact), values are taken from best optimized model until now.
     # (2) If we are in opti cycle 1 and -user_params is provided, then this particle is instead
     # initialized as the users parameters.
-    if state.opti_cycle["nb_cycle"] > 1:
+    if state.opti.opti_cycle["nb_cycle"] > 1:
 
         num_particle_random_start += 1
         input_guess = []
 
         # constraints equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["constraint"]):
-                if state.all_best_emd_dist_geoms["constraints"][i] != config.sim_crash_EMD_indep_score:
-                    input_guess.append(state.all_best_params_dist_geoms["constraints"][i]["params"][0])
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["constraint"]):
+                if state.opti.all_best_emd_dist_geoms["constraints"][i] != config.sim_crash_EMD_indep_score:
+                    input_guess.append(state.opti.all_best_params_dist_geoms["constraints"][i]["params"][0])
                 else:
                     input_guess.append(
-                        min(max(state.out_itp["constraint"][i]["value"], state.domains_val["constraint"][i][0]),
-                            state.domains_val["constraint"][i][1]))
+                        min(max(state.opti.out_itp["constraint"][i]["value"], state.opti.domains_val["constraint"][i][0]),
+                            state.opti.domains_val["constraint"][i][1]))
 
         # bonds equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-                if state.all_best_emd_dist_geoms["bonds"][i] != config.sim_crash_EMD_indep_score:
-                    input_guess.append(state.all_best_params_dist_geoms["bonds"][i]["params"][0])
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+                if state.opti.all_best_emd_dist_geoms["bonds"][i] != config.sim_crash_EMD_indep_score:
+                    input_guess.append(state.opti.all_best_params_dist_geoms["bonds"][i]["params"][0])
                 else:
-                    input_guess.append(min(max(state.out_itp["bond"][i]["value"], state.domains_val["bond"][i][0]),
-                                           state.domains_val["bond"][i][1]))
+                    input_guess.append(min(max(state.opti.out_itp["bond"][i]["value"], state.opti.domains_val["bond"][i][0]),
+                                           state.opti.domains_val["bond"][i][1]))
         # bonds force constants
-        for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-            if state.all_best_emd_dist_geoms["bonds"][i] != config.sim_crash_EMD_indep_score:
-                input_guess.append(state.all_best_params_dist_geoms["bonds"][i]["params"][1])
+        for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+            if state.opti.all_best_emd_dist_geoms["bonds"][i] != config.sim_crash_EMD_indep_score:
+                input_guess.append(state.opti.all_best_params_dist_geoms["bonds"][i]["params"][1])
             else:
-                input_guess.append(min(max(state.out_itp["bond"][i]["fct"], 0), args.default_max_fct_bonds_opti))
+                input_guess.append(min(max(state.opti.out_itp["bond"][i]["fct"], 0), args.optimization.default_max_fct_bonds_opti))
 
         # angles equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-                if state.all_best_emd_dist_geoms["angles"][i] != config.sim_crash_EMD_indep_score:
-                    input_guess.append(state.all_best_params_dist_geoms["angles"][i]["params"][0])
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+                if state.opti.all_best_emd_dist_geoms["angles"][i] != config.sim_crash_EMD_indep_score:
+                    input_guess.append(state.opti.all_best_params_dist_geoms["angles"][i]["params"][0])
                 else:
-                    input_guess.append(min(max(state.out_itp["angle"][i]["value"], state.domains_val["angle"][i][0]),
-                                           state.domains_val["angle"][i][1]))
+                    input_guess.append(min(max(state.opti.out_itp["angle"][i]["value"], state.opti.domains_val["angle"][i][0]),
+                                           state.opti.domains_val["angle"][i][1]))
         # angles force constants
-        for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-            if state.all_best_emd_dist_geoms["angles"][i] != config.sim_crash_EMD_indep_score:
-                input_guess.append(state.all_best_params_dist_geoms["angles"][i]["params"][1])
+        for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+            if state.opti.all_best_emd_dist_geoms["angles"][i] != config.sim_crash_EMD_indep_score:
+                input_guess.append(state.opti.all_best_params_dist_geoms["angles"][i]["params"][1])
             else:
-                if state.cg_itp["angle"][i]["func"] == 1:
-                    input_guess.append(min(max(state.out_itp["angle"][i]["fct"], 0), args.default_max_fct_angles_opti_f1))
-                elif state.cg_itp["angle"][i]["func"] == 2:
-                    input_guess.append(min(max(state.out_itp["angle"][i]["fct"], 0), args.default_max_fct_angles_opti_f2))
+                if state.model.cg_itp["angle"][i]["func"] == 1:
+                    input_guess.append(min(max(state.opti.out_itp["angle"][i]["fct"], 0), args.optimization.default_max_fct_angles_opti_f1))
+                elif state.model.cg_itp["angle"][i]["func"] == 2:
+                    input_guess.append(min(max(state.opti.out_itp["angle"][i]["fct"], 0), args.optimization.default_max_fct_angles_opti_f2))
 
         # dihedrals equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-                if state.all_best_emd_dist_geoms["dihedrals"][i] != config.sim_crash_EMD_indep_score:
-                    input_guess.append(state.all_best_params_dist_geoms["dihedrals"][i]["params"][0])
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+                if state.opti.all_best_emd_dist_geoms["dihedrals"][i] != config.sim_crash_EMD_indep_score:
+                    input_guess.append(state.opti.all_best_params_dist_geoms["dihedrals"][i]["params"][0])
                 else:
-                    input_guess.append(min(max(state.out_itp["dihedral"][i]["value"], state.domains_val["dihedral"][i][0]),
-                                           state.domains_val["dihedral"][i][1]))
+                    input_guess.append(min(max(state.opti.out_itp["dihedral"][i]["value"], state.opti.domains_val["dihedral"][i][0]),
+                                           state.opti.domains_val["dihedral"][i][1]))
         # dihedrals force constants
-        for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-            if state.all_best_emd_dist_geoms["dihedrals"][i] != config.sim_crash_EMD_indep_score:
-                input_guess.append(state.all_best_params_dist_geoms["dihedrals"][i]["params"][1])
+        for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+            if state.opti.all_best_emd_dist_geoms["dihedrals"][i] != config.sim_crash_EMD_indep_score:
+                input_guess.append(state.opti.all_best_params_dist_geoms["dihedrals"][i]["params"][1])
             else:
-                if state.cg_itp["dihedral"][i]["func"] == 2:
+                if state.model.cg_itp["dihedral"][i]["func"] == 2:
                     input_guess.append(
-                        min(max(state.out_itp["dihedral"][i]["fct"],
-                                -args.default_abs_range_fct_dihedrals_opti_func_without_mult),
-                            args.default_abs_range_fct_dihedrals_opti_func_without_mult))
+                        min(max(state.opti.out_itp["dihedral"][i]["fct"],
+                                -args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult),
+                            args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult))
                 else:
                     input_guess.append(min(
-                        max(state.out_itp["dihedral"][i]["fct"], -args.default_abs_range_fct_dihedrals_opti_func_with_mult),
-                        args.default_abs_range_fct_dihedrals_opti_func_with_mult))
+                        max(state.opti.out_itp["dihedral"][i]["fct"], -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult),
+                        args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult))
 
         initial_guess_list.append(input_guess)
 
     # optionally second particle is initialized as input parameters ONLY at start of opti cycle 1
-    elif args.user_input:
+    elif args.inputs.user_input:
 
         num_particle_random_start += 1
         input_guess = []
 
         # constraints equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["constraint"]):
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["constraint"]):
                 input_guess.append(
-                    min(max(state.out_itp["constraint"][i]["value_user"], state.domains_val["constraint"][i][0]),
-                        state.domains_val["constraint"][i][1]))
+                    min(max(state.opti.out_itp["constraint"][i]["value_user"], state.opti.domains_val["constraint"][i][0]),
+                        state.opti.domains_val["constraint"][i][1]))
 
         # bonds equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-                input_guess.append(min(max(state.out_itp["bond"][i]["value_user"], state.domains_val["bond"][i][0]),
-                                       state.domains_val["bond"][i][1]))
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+                input_guess.append(min(max(state.opti.out_itp["bond"][i]["value_user"], state.opti.domains_val["bond"][i][0]),
+                                       state.opti.domains_val["bond"][i][1]))
 
         # bonds force constants
-        for i in range(state.opti_cycle["nb_geoms"]["bond"]):
-            input_guess.append(min(max(state.out_itp["bond"][i]["fct_user"], 0), args.default_max_fct_bonds_opti))
+        for i in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
+            input_guess.append(min(max(state.opti.out_itp["bond"][i]["fct_user"], 0), args.optimization.default_max_fct_bonds_opti))
 
         # angles equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-                input_guess.append(min(max(state.out_itp["angle"][i]["value_user"], state.domains_val["angle"][i][0]),
-                                       state.domains_val["angle"][i][1]))
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+                input_guess.append(min(max(state.opti.out_itp["angle"][i]["value_user"], state.opti.domains_val["angle"][i][0]),
+                                       state.opti.domains_val["angle"][i][1]))
 
         # angles force constants
-        for i in range(state.opti_cycle["nb_geoms"]["angle"]):
-            if state.cg_itp["angle"][i]["func"] == 1:
-                input_guess.append(min(max(state.out_itp["angle"][i]["fct_user"], 0), args.default_max_fct_angles_opti_f1))
-            elif state.cg_itp["angle"][i]["func"] == 2:
-                input_guess.append(min(max(state.out_itp["angle"][i]["fct_user"], 0), args.default_max_fct_angles_opti_f2))
+        for i in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
+            if state.model.cg_itp["angle"][i]["func"] == 1:
+                input_guess.append(min(max(state.opti.out_itp["angle"][i]["fct_user"], 0), args.optimization.default_max_fct_angles_opti_f1))
+            elif state.model.cg_itp["angle"][i]["func"] == 2:
+                input_guess.append(min(max(state.opti.out_itp["angle"][i]["fct_user"], 0), args.optimization.default_max_fct_angles_opti_f2))
 
         # dihedrals equilibrium values
-        if args.exec_mode == 1:
-            for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-                input_guess.append(min(max(state.out_itp["dihedral"][i]["value_user"], state.domains_val["dihedral"][i][0]),
-                                       state.domains_val["dihedral"][i][1]))
+        if args.runtime.exec_mode == 1:
+            for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+                input_guess.append(min(max(state.opti.out_itp["dihedral"][i]["value_user"], state.opti.domains_val["dihedral"][i][0]),
+                                       state.opti.domains_val["dihedral"][i][1]))
         # dihedrals force constants
-        for i in range(state.opti_cycle["nb_geoms"]["dihedral"]):
-            if state.cg_itp["dihedral"][i]["func"] == 2:
+        for i in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
+            if state.model.cg_itp["dihedral"][i]["func"] == 2:
                 input_guess.append(
-                    min(max(state.out_itp["dihedral"][i]["fct_user"],
-                            -args.default_abs_range_fct_dihedrals_opti_func_without_mult),
-                        args.default_abs_range_fct_dihedrals_opti_func_without_mult))
+                    min(max(state.opti.out_itp["dihedral"][i]["fct_user"],
+                            -args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult),
+                        args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult))
             else:
                 input_guess.append(min(
-                    max(state.out_itp["dihedral"][i]["fct_user"], -args.default_abs_range_fct_dihedrals_opti_func_with_mult),
-                    args.default_abs_range_fct_dihedrals_opti_func_with_mult))
+                    max(state.opti.out_itp["dihedral"][i]["fct_user"], -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult),
+                    args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult))
 
         initial_guess_list.append(input_guess)
 
@@ -540,134 +540,134 @@ def get_initial_guess_list(args: SwarmCGArgs, state: SwarmCGState, nb_particles)
         init_guess = []
 
         # constraints equilibrium values
-        if args.exec_mode == 1:
-            for j in range(state.opti_cycle["nb_geoms"]["constraint"]):
+        if args.runtime.exec_mode == 1:
+            for j in range(state.opti.opti_cycle["nb_geoms"]["constraint"]):
                 try:
-                    emd_err_fact = max(1, state.all_emd_dist_geoms["constraints"][j] / 2)
+                    emd_err_fact = max(1, state.opti.all_emd_dist_geoms["constraints"][j] / 2)
                 except:
                     emd_err_fact = 1
-                draw_low = max(state.out_itp["constraint"][j][
-                                   "value"] - config.bond_dist_guess_variation * state.val_guess_fact * emd_err_fact,
-                               state.domains_val["constraint"][j][0])
-                draw_high = min(state.out_itp["constraint"][j][
-                                    "value"] + config.bond_dist_guess_variation * state.val_guess_fact * emd_err_fact,
-                                state.domains_val["constraint"][j][1])
+                draw_low = max(state.opti.out_itp["constraint"][j][
+                                   "value"] - config.bond_dist_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                               state.opti.domains_val["constraint"][j][0])
+                draw_high = min(state.opti.out_itp["constraint"][j][
+                                    "value"] + config.bond_dist_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                                state.opti.domains_val["constraint"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
 
         # bonds equilibrium values
-        if args.exec_mode == 1:
-            for j in range(state.opti_cycle["nb_geoms"]["bond"]):
+        if args.runtime.exec_mode == 1:
+            for j in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
                 try:
-                    emd_err_fact = max(1, state.all_emd_dist_geoms["bonds"][j] / 2)
+                    emd_err_fact = max(1, state.opti.all_emd_dist_geoms["bonds"][j] / 2)
                 except:
                     emd_err_fact = 1
-                draw_low = max(state.out_itp["bond"][j][
-                                   "value"] - config.bond_dist_guess_variation * state.val_guess_fact * emd_err_fact,
-                               state.domains_val["bond"][j][0])
-                draw_high = min(state.out_itp["bond"][j][
-                                    "value"] + config.bond_dist_guess_variation * state.val_guess_fact * emd_err_fact,
-                                state.domains_val["bond"][j][1])
+                draw_low = max(state.opti.out_itp["bond"][j][
+                                   "value"] - config.bond_dist_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                               state.opti.domains_val["bond"][j][0])
+                draw_high = min(state.opti.out_itp["bond"][j][
+                                    "value"] + config.bond_dist_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                                state.opti.domains_val["bond"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
             # print("Particle", i+1, "-- BOND", j+1, "-- VALUE RANGE", draw_low, draw_high)
 
         # bonds force constants
-        for j in range(state.opti_cycle["nb_geoms"]["bond"]):
+        for j in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
             try:
-                emd_err_fact = max(1, state.all_emd_dist_geoms["bonds"][j] / 2)
+                emd_err_fact = max(1, state.opti.all_emd_dist_geoms["bonds"][j] / 2)
             except:
                 emd_err_fact = 1
-            draw_low = max(min(state.out_itp["bond"][j]["fct"] * (1 - state.fct_guess_fact * emd_err_fact),
-                               state.out_itp["bond"][j]["fct"] - config.fct_guess_min_flat_diff_bonds), 0)
-            draw_high = min(max(state.out_itp["bond"][j]["fct"] * (1 + state.fct_guess_fact * emd_err_fact),
-                                state.out_itp["bond"][j]["fct"] + config.fct_guess_min_flat_diff_bonds),
-                            args.default_max_fct_bonds_opti)
+            draw_low = max(min(state.opti.out_itp["bond"][j]["fct"] * (1 - state.opti.fct_guess_fact * emd_err_fact),
+                               state.opti.out_itp["bond"][j]["fct"] - config.fct_guess_min_flat_diff_bonds), 0)
+            draw_high = min(max(state.opti.out_itp["bond"][j]["fct"] * (1 + state.opti.fct_guess_fact * emd_err_fact),
+                                state.opti.out_itp["bond"][j]["fct"] + config.fct_guess_min_flat_diff_bonds),
+                            args.optimization.default_max_fct_bonds_opti)
             init_guess.append(draw_float(draw_low, draw_high, 3))
         # print("Particle", i+1, "-- BOND", j+1, "-- FCT RANGE", draw_low, draw_high)
 
         # angles equilibrium values
-        if args.exec_mode == 1:
-            for j in range(state.opti_cycle["nb_geoms"]["angle"]):
+        if args.runtime.exec_mode == 1:
+            for j in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
                 try:
-                    emd_err_fact = max(1, state.all_emd_dist_geoms["angles"][j] / 2)
+                    emd_err_fact = max(1, state.opti.all_emd_dist_geoms["angles"][j] / 2)
                 except:
                     emd_err_fact = 1
-                draw_low = max(state.out_itp["angle"][j][
-                                   "value"] - config.angle_value_guess_variation * state.val_guess_fact * emd_err_fact,
-                               state.domains_val["angle"][j][0])
-                draw_high = min(state.out_itp["angle"][j][
-                                    "value"] + config.angle_value_guess_variation * state.val_guess_fact * emd_err_fact,
-                                state.domains_val["angle"][j][1])
+                draw_low = max(state.opti.out_itp["angle"][j][
+                                   "value"] - config.angle_value_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                               state.opti.domains_val["angle"][j][0])
+                draw_high = min(state.opti.out_itp["angle"][j][
+                                    "value"] + config.angle_value_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                                state.opti.domains_val["angle"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
             # print("Particle", i+1, "-- ANGLE", j+1, "-- VALUE RANGE", draw_low, draw_high)
 
         # angles force constants
-        for j in range(state.opti_cycle["nb_geoms"]["angle"]):
+        for j in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
             try:
-                emd_err_fact = max(1, state.all_emd_dist_geoms["angles"][j] / 2)
+                emd_err_fact = max(1, state.opti.all_emd_dist_geoms["angles"][j] / 2)
             except:
                 emd_err_fact = 1
-            draw_low = max(min(state.out_itp["angle"][j]["fct"] * (1 - state.fct_guess_fact * emd_err_fact),
-                               state.out_itp["angle"][j]["fct"] - config.fct_guess_min_flat_diff_angles), 0)
-            if state.cg_itp["angle"][j]["func"] == 1:
-                draw_high = min(max(state.out_itp["angle"][j]["fct"] * (1 + state.fct_guess_fact * emd_err_fact),
-                                    state.out_itp["angle"][j]["fct"] + config.fct_guess_min_flat_diff_angles),
-                                args.default_max_fct_angles_opti_f1)
-            elif state.cg_itp["angle"][j]["func"] == 2:
-                draw_high = min(max(state.out_itp["angle"][j]["fct"] * (1 + state.fct_guess_fact * emd_err_fact),
-                                    state.out_itp["angle"][j]["fct"] + config.fct_guess_min_flat_diff_angles),
-                                args.default_max_fct_angles_opti_f2)
+            draw_low = max(min(state.opti.out_itp["angle"][j]["fct"] * (1 - state.opti.fct_guess_fact * emd_err_fact),
+                               state.opti.out_itp["angle"][j]["fct"] - config.fct_guess_min_flat_diff_angles), 0)
+            if state.model.cg_itp["angle"][j]["func"] == 1:
+                draw_high = min(max(state.opti.out_itp["angle"][j]["fct"] * (1 + state.opti.fct_guess_fact * emd_err_fact),
+                                    state.opti.out_itp["angle"][j]["fct"] + config.fct_guess_min_flat_diff_angles),
+                                args.optimization.default_max_fct_angles_opti_f1)
+            elif state.model.cg_itp["angle"][j]["func"] == 2:
+                draw_high = min(max(state.opti.out_itp["angle"][j]["fct"] * (1 + state.opti.fct_guess_fact * emd_err_fact),
+                                    state.opti.out_itp["angle"][j]["fct"] + config.fct_guess_min_flat_diff_angles),
+                                args.optimization.default_max_fct_angles_opti_f2)
             init_guess.append(draw_float(draw_low, draw_high, 3))
         # print("Particle", i+1, "-- ANGLE", j+1, "-- FCT RANGE", draw_low, draw_high)
 
         # dihedrals equilibrium values
-        if args.exec_mode == 1:
-            for j in range(state.opti_cycle["nb_geoms"]["dihedral"]):
+        if args.runtime.exec_mode == 1:
+            for j in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
                 try:
-                    emd_err_fact = max(1, state.all_emd_dist_geoms["dihedrals"][j] / 5)
+                    emd_err_fact = max(1, state.opti.all_emd_dist_geoms["dihedrals"][j] / 5)
                 except:
                     emd_err_fact = 1
-                draw_low = max(state.out_itp["dihedral"][j][
-                                   "value"] - config.dihedral_value_guess_variation * state.val_guess_fact * emd_err_fact,
-                               state.domains_val["dihedral"][j][0])
-                draw_high = min(state.out_itp["dihedral"][j][
-                                    "value"] + config.dihedral_value_guess_variation * state.val_guess_fact * emd_err_fact,
-                                state.domains_val["dihedral"][j][1])
+                draw_low = max(state.opti.out_itp["dihedral"][j][
+                                   "value"] - config.dihedral_value_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                               state.opti.domains_val["dihedral"][j][0])
+                draw_high = min(state.opti.out_itp["dihedral"][j][
+                                    "value"] + config.dihedral_value_guess_variation * state.opti.val_guess_fact * emd_err_fact,
+                                state.opti.domains_val["dihedral"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
             # print("Particle", i+1, "-- DIHEDRAL", j+1, "-- VALUE RANGE", draw_low, draw_high)
 
         # dihedrals force constants
-        for j in range(state.opti_cycle["nb_geoms"]["dihedral"]):
+        for j in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
 
             try:
-                emd_err_fact = max(1, state.all_emd_dist_geoms["dihedrals"][j] / 5)
+                emd_err_fact = max(1, state.opti.all_emd_dist_geoms["dihedrals"][j] / 5)
             except:
                 emd_err_fact = 1
 
             # here force constants can be negative, proceed accordingly
-            if state.out_itp["dihedral"][j]["fct"] > 0:  # if positive
+            if state.opti.out_itp["dihedral"][j]["fct"] > 0:  # if positive
                 # initial variations range
-                draw_low = state.out_itp["dihedral"][j]["fct"] * (1 - state.fct_guess_fact * emd_err_fact)
-                draw_high = state.out_itp["dihedral"][j]["fct"] * (1 + state.fct_guess_fact * emd_err_fact)
+                draw_low = state.opti.out_itp["dihedral"][j]["fct"] * (1 - state.opti.fct_guess_fact * emd_err_fact)
+                draw_high = state.opti.out_itp["dihedral"][j]["fct"] * (1 + state.opti.fct_guess_fact * emd_err_fact)
             else:
                 # initial variations range
-                draw_low = state.out_itp["dihedral"][j]["fct"] * (1 + state.fct_guess_fact * emd_err_fact)
-                draw_high = state.out_itp["dihedral"][j]["fct"] * (1 - state.fct_guess_fact * emd_err_fact)
+                draw_low = state.opti.out_itp["dihedral"][j]["fct"] * (1 + state.opti.fct_guess_fact * emd_err_fact)
+                draw_high = state.opti.out_itp["dihedral"][j]["fct"] * (1 - state.opti.fct_guess_fact * emd_err_fact)
 
             # make sure the minimal variation range is enforced + stay within defined boundaries
-            if state.cg_itp["dihedral"][j]["func"] == 2:
-                draw_low = max(min(draw_low, state.out_itp["dihedral"][j][
+            if state.model.cg_itp["dihedral"][j]["func"] == 2:
+                draw_low = max(min(draw_low, state.opti.out_itp["dihedral"][j][
                     "fct"] - config.fct_guess_min_flat_diff_dihedrals_without_mult),
-                               args.default_abs_range_fct_dihedrals_opti_func_without_mult)
-                draw_high = min(max(draw_high, state.out_itp["dihedral"][j][
+                               args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult)
+                draw_high = min(max(draw_high, state.opti.out_itp["dihedral"][j][
                     "fct"] + config.fct_guess_min_flat_diff_dihedrals_without_mult),
-                                args.default_abs_range_fct_dihedrals_opti_func_without_mult)
+                                args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult)
             else:
-                draw_low = max(min(draw_low, state.out_itp["dihedral"][j][
+                draw_low = max(min(draw_low, state.opti.out_itp["dihedral"][j][
                     "fct"] - config.fct_guess_min_flat_diff_dihedrals_with_mult),
-                               -args.default_abs_range_fct_dihedrals_opti_func_with_mult)
-                draw_high = min(max(draw_high, state.out_itp["dihedral"][j][
+                               -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult)
+                draw_high = min(max(draw_high, state.opti.out_itp["dihedral"][j][
                     "fct"] + config.fct_guess_min_flat_diff_dihedrals_with_mult),
-                                args.default_abs_range_fct_dihedrals_opti_func_with_mult)
+                                args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult)
             init_guess.append(draw_float(draw_low, draw_high, 3))
         # print("Particle", i+1, "-- DIHEDRAL", j+1, "-- FCT RANGE", draw_low, draw_high)
 
@@ -723,76 +723,76 @@ def map_aa2cg_traj(args: SwarmCGArgs, state: SwarmCGState):
         vs3_func_4
         vs4_func_2
     """
-    if args.mapping_type == "COM":
+    if args.inputs.mapping_type == "COM":
         print("  Interpretation: Center of Mass (COM)")
-    elif args.mapping_type == "COG":
+    elif args.inputs.mapping_type == "COG":
         print("  Interpretation: Center of Geometry (COG)")
 
     # regular beads are mapped using center of mass of groups of atoms
-    coord = np.empty((len(state.aa_universe.trajectory), len(state.cg_itp["atoms"]), 3))
-    for bead_id in range(len(state.cg_itp["atoms"])):
-        if not state.cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):  # bead is NOT a virtual site
-            traj = np.empty((len(state.aa_universe.trajectory), 3))
-            for ts in state.aa_universe.trajectory:
-                traj[ts.frame] = state.mda_beads_atom_grps[bead_id].center(
-                    state.mda_weights_atom_grps[bead_id], pbc=None, compound="group"
+    coord = np.empty((len(state.traj.aa_universe.trajectory), len(state.model.cg_itp["atoms"]), 3))
+    for bead_id in range(len(state.model.cg_itp["atoms"])):
+        if not state.model.cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):  # bead is NOT a virtual site
+            traj = np.empty((len(state.traj.aa_universe.trajectory), 3))
+            for ts in state.traj.aa_universe.trajectory:
+                traj[ts.frame] = state.mapping.mda_beads_atom_grps[bead_id].center(
+                    state.mapping.mda_weights_atom_grps[bead_id], pbc=None, compound="group"
                 )  # no need for PBC handling, trajectories were made wholes for the molecule
             coord[:, bead_id, :] = traj
 
-    state.aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
+    state.traj.aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
 
     # virtual sites are mapped using previously defined regular beads positions and appropriate virtual sites functions
     # it is also possible to use a VS for defining another VS position, if the VS used for definition is defined before
     # no need to check if the functions used for VS definition are correct here, this has been done already
-    for bead_id in range(len(state.cg_itp["atoms"])):
-        if state.cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):
+    for bead_id in range(len(state.model.cg_itp["atoms"])):
+        if state.model.cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):
 
-            traj = np.empty((len(state.aa2cg_universe.trajectory), 3))
+            traj = np.empty((len(state.traj.aa2cg_universe.trajectory), 3))
 
-            if state.cg_itp["atoms"][bead_id]["vs_type"] == 2:
-                vs_def_beads_ids = state.cg_itp["virtual_sites2"][bead_id]["vs_def_beads_ids"]
-                vs_params = state.cg_itp["virtual_sites2"][bead_id]["vs_params"]
+            if state.model.cg_itp["atoms"][bead_id]["vs_type"] == 2:
+                vs_def_beads_ids = state.model.cg_itp["virtual_sites2"][bead_id]["vs_def_beads_ids"]
+                vs_params = state.model.cg_itp["virtual_sites2"][bead_id]["vs_params"]
 
-                if state.cg_itp["virtual_sites2"][bead_id]["func"] == 1:
+                if state.model.cg_itp["virtual_sites2"][bead_id]["func"] == 1:
                     vsf.vs2_func_1(state, traj, vs_def_beads_ids, vs_params)
-                elif state.cg_itp["virtual_sites2"][bead_id]["func"] == 2:
+                elif state.model.cg_itp["virtual_sites2"][bead_id]["func"] == 2:
                     vsf.vs2_func_2(state, traj, vs_def_beads_ids, vs_params)
 
-            if state.cg_itp["atoms"][bead_id]["vs_type"] == 3:
-                vs_def_beads_ids = state.cg_itp["virtual_sites3"][bead_id]["vs_def_beads_ids"]
-                vs_params = state.cg_itp["virtual_sites3"][bead_id]["vs_params"]
+            if state.model.cg_itp["atoms"][bead_id]["vs_type"] == 3:
+                vs_def_beads_ids = state.model.cg_itp["virtual_sites3"][bead_id]["vs_def_beads_ids"]
+                vs_params = state.model.cg_itp["virtual_sites3"][bead_id]["vs_params"]
 
-                if state.cg_itp["virtual_sites3"][bead_id]["func"] == 1:
+                if state.model.cg_itp["virtual_sites3"][bead_id]["func"] == 1:
                     vsf.vs3_func_1(state, traj, vs_def_beads_ids, vs_params)
-                elif state.cg_itp["virtual_sites3"][bead_id]["func"] == 2:
+                elif state.model.cg_itp["virtual_sites3"][bead_id]["func"] == 2:
                     vsf.vs3_func_2(state, traj, vs_def_beads_ids, vs_params)
-                elif state.cg_itp["virtual_sites3"][bead_id]["func"] == 3:
+                elif state.model.cg_itp["virtual_sites3"][bead_id]["func"] == 3:
                     vsf.vs3_func_3(state, traj, vs_def_beads_ids, vs_params)
-                elif state.cg_itp["virtual_sites3"][bead_id]["func"] == 4:
+                elif state.model.cg_itp["virtual_sites3"][bead_id]["func"] == 4:
                     vsf.vs3_func_4(state, traj, vs_def_beads_ids, vs_params)
 
             # here it"s normal there is only function 2, that"s the only one that exists in gromacs for some reason
-            if state.cg_itp["atoms"][bead_id]["vs_type"] == 4:
-                vs_def_beads_ids = state.cg_itp["virtual_sites4"][bead_id]["vs_def_beads_ids"]
-                vs_params = state.cg_itp["virtual_sites4"][bead_id]["vs_params"]
+            if state.model.cg_itp["atoms"][bead_id]["vs_type"] == 4:
+                vs_def_beads_ids = state.model.cg_itp["virtual_sites4"][bead_id]["vs_def_beads_ids"]
+                vs_params = state.model.cg_itp["virtual_sites4"][bead_id]["vs_params"]
 
-                if state.cg_itp["virtual_sites4"][bead_id]["func"] == 2:
+                if state.model.cg_itp["virtual_sites4"][bead_id]["func"] == 2:
                     vsf.vs4_func_2(state, traj, vs_def_beads_ids, vs_params)
 
-            if state.cg_itp["atoms"][bead_id]["vs_type"] == "n":
-                vs_def_beads_ids = state.cg_itp["virtual_sitesn"][bead_id]["vs_def_beads_ids"]
-                vs_params = state.cg_itp["virtual_sitesn"][bead_id]["vs_params"]
+            if state.model.cg_itp["atoms"][bead_id]["vs_type"] == "n":
+                vs_def_beads_ids = state.model.cg_itp["virtual_sitesn"][bead_id]["vs_def_beads_ids"]
+                vs_params = state.model.cg_itp["virtual_sitesn"][bead_id]["vs_params"]
 
-                if state.cg_itp["virtual_sitesn"][bead_id]["func"] == 1:
+                if state.model.cg_itp["virtual_sitesn"][bead_id]["func"] == 1:
                     vsf.vsn_func_1(state, traj, vs_def_beads_ids)
-                elif state.cg_itp["virtual_sitesn"][bead_id]["func"] == 2:
+                elif state.model.cg_itp["virtual_sitesn"][bead_id]["func"] == 2:
                     vsf.vsn_func_2(state, traj, vs_def_beads_ids, bead_id)
-                elif state.cg_itp["virtual_sitesn"][bead_id]["func"] == 3:
+                elif state.model.cg_itp["virtual_sitesn"][bead_id]["func"] == 3:
                     vsf.vsn_func_3(state, traj, vs_def_beads_ids, vs_params)
 
             coord[:, bead_id, :] = traj
 
-    state.aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
+    state.traj.aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
 
 
 def make_aa_traj_whole_for_selected_mols(args: SwarmCGArgs, state: SwarmCGState):
@@ -805,8 +805,8 @@ def make_aa_traj_whole_for_selected_mols(args: SwarmCGArgs, state: SwarmCGState)
     # TODO: add an option to NOT read the PBC in case user would feed a trajectory that is already unwrapped for
     #       molecule and their trajectory does NOT contain box dimensions (universe.dimensions)
     #       (this was an issue I encountered with Davide B3T traj GRO)
-    for _ in state.aa_universe.trajectory:
-        for aa_mol in state.all_aa_mols:
+    for _ in state.traj.aa_universe.trajectory:
+        for aa_mol in state.mapping.all_aa_mols:
             mda.lib.mdamath.make_whole(aa_mol, inplace=True)
 
 
@@ -833,15 +833,15 @@ def perform_BI(args: SwarmCGArgs, state: SwarmCGState):
     # TODO: other dihedrals functions
     # TODO: If the first opti run of BI fails, lower force constants by 10% and retry, again and again until it works, or tell the user something is very wrong after 20 tries with 50% of the force constants that all did NOT work
 
-    if not state.performed_init_BI["bond"] and state.opti_cycle["nb_geoms"]["bond"] > 0:
+    if not state.opti.performed_init_BI["bond"] and state.opti.opti_cycle["nb_geoms"]["bond"] > 0:
 
-        if args.verbose:
+        if args.runtime.verbose:
             print()
             print("Performing Direct Boltzmann Inversion (DBI) to estimate bonds force constants")
 
-        for grp_bond in range(state.opti_cycle["nb_geoms"]["bond"]):
+        for grp_bond in range(state.opti.opti_cycle["nb_geoms"]["bond"]):
 
-            hists_geoms_bi, std_grp_bond, avg_grp_bond, bi_xrange = state.data_BI["bond"][grp_bond]
+            hists_geoms_bi, std_grp_bond, avg_grp_bond, bi_xrange = state.opti.data_BI["bond"][grp_bond]
             hist_geoms_modif = hists_geoms_bi ** 2 * (max(hists_geoms_bi) / max(hists_geoms_bi ** 2))
 
             nb_passes = 3
@@ -849,9 +849,9 @@ def perform_BI(args: SwarmCGArgs, state: SwarmCGState):
             for _ in range(nb_passes):
                 hist_geoms_modif = math_utils.ewma(hist_geoms_modif, alpha, int(config.bi_nb_bins / 10))
 
-            y = -config.kB * args.temp * np.log(hist_geoms_modif + 1)
+            y = -config.kB * args.optimization.temp * np.log(hist_geoms_modif + 1)
             x = np.linspace(bi_xrange[0], bi_xrange[1], config.bi_nb_bins, endpoint=True)
-            k = config.kB * args.temp / std_grp_bond / std_grp_bond * 100 / 2
+            k = config.kB * args.optimization.temp / std_grp_bond / std_grp_bond * 100 / 2
 
             params_guess = [k, avg_grp_bond * 10, min(y)]  # multiply for amgstrom for BI
 
@@ -874,38 +874,38 @@ def perform_BI(args: SwarmCGArgs, state: SwarmCGState):
                                    absolute_sigma=False)  # multiply for amgstrom for BI
 
             # here we just update the force constant, bond length is already set to the average of distribution
-            state.out_itp["bond"][grp_bond]["fct"] = popt[0] * 100
+            state.opti.out_itp["bond"][grp_bond]["fct"] = popt[0] * 100
 
             # stay within limits in case user requires low force constants
-            if not 0 <= state.out_itp["bond"][grp_bond]["fct"] <= min(config.default_max_fct_bonds_bi,
-                                                                   args.default_max_fct_bonds_opti):
-                state.out_itp["bond"][grp_bond]["fct"] = min(config.default_max_fct_bonds_bi,
-                                                          args.default_max_fct_bonds_opti) / 2
+            if not 0 <= state.opti.out_itp["bond"][grp_bond]["fct"] <= min(config.default_max_fct_bonds_bi,
+                                                                   args.optimization.default_max_fct_bonds_opti):
+                state.opti.out_itp["bond"][grp_bond]["fct"] = min(config.default_max_fct_bonds_bi,
+                                                          args.optimization.default_max_fct_bonds_opti) / 2
 
-            if args.verbose:
+            if args.runtime.verbose:
                 print("  Bond group", grp_bond + 1, "estimated force constant:",
-                      round(state.out_itp["bond"][grp_bond]["fct"], 2))
+                      round(state.opti.out_itp["bond"][grp_bond]["fct"], 2))
 
-        state.performed_init_BI["bond"] = True
+        state.opti.performed_init_BI["bond"] = True
 
-    if not state.performed_init_BI["angle"] and state.opti_cycle["nb_geoms"]["angle"] > 0:
+    if not state.opti.performed_init_BI["angle"] and state.opti.opti_cycle["nb_geoms"]["angle"] > 0:
 
-        if args.verbose:
+        if args.runtime.verbose:
             print()
             print("Performing Direct Boltzmann Inversion (DBI) to estimate angles force constants")
 
-        for grp_angle in range(state.opti_cycle["nb_geoms"]["angle"]):
+        for grp_angle in range(state.opti.opti_cycle["nb_geoms"]["angle"]):
 
-            hists_geoms_bi, std_rad_grp_angle, bi_xrange = state.data_BI["angle"][grp_angle]
-            y = -config.kB * args.temp * np.log(hists_geoms_bi + 1)
+            hists_geoms_bi, std_rad_grp_angle, bi_xrange = state.opti.data_BI["angle"][grp_angle]
+            y = -config.kB * args.optimization.temp * np.log(hists_geoms_bi + 1)
             x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), config.bi_nb_bins, endpoint=True)
-            k = config.kB * args.temp / std_rad_grp_angle / std_rad_grp_angle * 100 / 2
+            k = config.kB * args.optimization.temp / std_rad_grp_angle / std_rad_grp_angle * 100 / 2
 
             sigma = np.where(y < max(y), 0.1,
                              np.inf)  # this is definitely better when angles have bimodal distributions
 
             # use appropriate angle function
-            func = state.cg_itp["angle"][grp_angle]["func"]
+            func = state.model.cg_itp["angle"][grp_angle]["func"]
 
             if func == 1:
                 params_guess = [k, std_rad_grp_angle, min(y)]
@@ -923,58 +923,58 @@ def perform_BI(args: SwarmCGArgs, state: SwarmCGState):
                         0] < 0:  # correct the negative force constant that can result from the fit of stiff angles at values close to 180
                         popt[
                             0] = config.default_max_fct_angles_bi * 0.8  # stiff is most probably max fct value, so get close to it
-                    elif bi_xrange[1] == 180 - args.bw_angles / 2:
+                    elif bi_xrange[1] == 180 - args.optimization.bw_angles / 2:
                         popt[0] += 10
                 except RuntimeError:  # curve fit did not converge
                     popt[0] = 30
 
             # here we just update the force constant, angle value is already set to the average of distribution
-            state.out_itp["angle"][grp_angle]["fct"] = popt[0]
+            state.opti.out_itp["angle"][grp_angle]["fct"] = popt[0]
 
             # stay within limits in case user requires low force constants
             if func == 1:
-                if not 0 <= state.out_itp["angle"][grp_angle]["fct"] <= min(config.default_max_fct_angles_bi,
-                                                                         args.default_max_fct_angles_opti_f1):
-                    state.out_itp["angle"][grp_angle]["fct"] = min(config.default_max_fct_angles_bi,
-                                                                args.default_max_fct_angles_opti_f1) / 2
+                if not 0 <= state.opti.out_itp["angle"][grp_angle]["fct"] <= min(config.default_max_fct_angles_bi,
+                                                                         args.optimization.default_max_fct_angles_opti_f1):
+                    state.opti.out_itp["angle"][grp_angle]["fct"] = min(config.default_max_fct_angles_bi,
+                                                                args.optimization.default_max_fct_angles_opti_f1) / 2
             elif func == 2:
-                if not 0 <= state.out_itp["angle"][grp_angle]["fct"] <= min(config.default_max_fct_angles_bi,
-                                                                         args.default_max_fct_angles_opti_f2):
-                    state.out_itp["angle"][grp_angle]["fct"] = min(config.default_max_fct_angles_bi,
-                                                                args.default_max_fct_angles_opti_f2) / 2
+                if not 0 <= state.opti.out_itp["angle"][grp_angle]["fct"] <= min(config.default_max_fct_angles_bi,
+                                                                         args.optimization.default_max_fct_angles_opti_f2):
+                    state.opti.out_itp["angle"][grp_angle]["fct"] = min(config.default_max_fct_angles_bi,
+                                                                args.optimization.default_max_fct_angles_opti_f2) / 2
 
-            if args.verbose:
+            if args.runtime.verbose:
                 print("  Angle group", grp_angle + 1, "estimated force constant:",
-                      round(state.out_itp["angle"][grp_angle]["fct"], 2))
+                      round(state.opti.out_itp["angle"][grp_angle]["fct"], 2))
 
-        state.performed_init_BI["angle"] = True
+        state.opti.performed_init_BI["angle"] = True
 
-    if not state.performed_init_BI["dihedral"] and state.opti_cycle["nb_geoms"]["dihedral"] > 0:
+    if not state.opti.performed_init_BI["dihedral"] and state.opti.opti_cycle["nb_geoms"]["dihedral"] > 0:
 
-        if args.verbose:
+        if args.runtime.verbose:
             print()
             print("Performing Direct Boltzmann Inversion (DBI) to estimate dihedrals force constants")
 
-        for grp_dihedral in range(state.opti_cycle["nb_geoms"]["dihedral"]):
+        for grp_dihedral in range(state.opti.opti_cycle["nb_geoms"]["dihedral"]):
 
             # TODO: clearly the initial fit of dihedrals could be done better -- initial guesses are pretty bad
 
-            hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = state.data_BI["dihedral"][grp_dihedral]
-            y = -config.kB * args.temp * np.log(hists_geoms_bi + 1)
+            hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = state.opti.data_BI["dihedral"][grp_dihedral]
+            y = -config.kB * args.optimization.temp * np.log(hists_geoms_bi + 1)
             x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), 2 * config.bi_nb_bins, endpoint=True)
-            k = config.kB * args.temp / std_rad_grp_dihedral / std_rad_grp_dihedral
+            k = config.kB * args.optimization.temp / std_rad_grp_dihedral / std_rad_grp_dihedral
 
             sigma = np.where(y < max(y), 0.1, np.inf)
 
             # use appropriate dihedral function
-            func = state.cg_itp["dihedral"][grp_dihedral]["func"]
+            func = state.model.cg_itp["dihedral"][grp_dihedral]["func"]
 
-            if args.exec_mode == 2:  # in Mode 2, make the fit according to the equilibrium value provided by user
-                avg_rad_grp_dihedral = np.deg2rad(state.cg_itp["dihedral"][grp_dihedral]["value_user"])
+            if args.runtime.exec_mode == 2:  # in Mode 2, make the fit according to the equilibrium value provided by user
+                avg_rad_grp_dihedral = np.deg2rad(state.model.cg_itp["dihedral"][grp_dihedral]["value_user"])
             # NOTE: this could trigger some convergence issue of scipy"s curve_fit
 
             if func in config.dihedral_func_with_mult:
-                multiplicity = state.cg_itp["dihedral"][grp_dihedral][
+                multiplicity = state.model.cg_itp["dihedral"][grp_dihedral][
                     "mult"]  # multiplicity stays the same as in input CG ITP, it"s only during model_prep that we could compare between different multiplicities
                 params_guess = [max(y) - min(y), avg_rad_grp_dihedral, min(y)]
                 popt, pcov = curve_fit(gmx_dihedrals_func_1(mult=multiplicity), x, y, p0=params_guess, sigma=sigma,
@@ -985,41 +985,41 @@ def perform_BI(args: SwarmCGArgs, state: SwarmCGState):
                 popt, pcov = curve_fit(gmx_dihedrals_func_2, x, y, p0=params_guess, sigma=sigma, maxfev=99999,
                                        absolute_sigma=False)
 
-            if args.exec_mode == 1:  # in Mode 1, use the fitted value as equilibrium value (but stay within range)
-                # state.out_itp["dihedral"][grp_dihedral]["value"] = max(min(np.rad2deg(popt[1]), state.domains_val["dihedral"][grp_dihedral][1]), state.domains_val["dihedral"][grp_dihedral][0])
-                state.out_itp["dihedral"][grp_dihedral]["value"] = np.rad2deg(
+            if args.runtime.exec_mode == 1:  # in Mode 1, use the fitted value as equilibrium value (but stay within range)
+                # state.opti.out_itp["dihedral"][grp_dihedral]["value"] = max(min(np.rad2deg(popt[1]), state.opti.domains_val["dihedral"][grp_dihedral][1]), state.opti.domains_val["dihedral"][grp_dihedral][0])
+                state.opti.out_itp["dihedral"][grp_dihedral]["value"] = np.rad2deg(
                     popt[1])  # we will apply limits of equilibrium values later
 
             print("  Dihedral group", grp_dihedral + 1, "estimated force constant BEFORE MODIFIER:", round(popt[0], 2))
-            state.out_itp["dihedral"][grp_dihedral]["fct"] = popt[0]
+            state.opti.out_itp["dihedral"][grp_dihedral]["fct"] = popt[0]
 
             # stay within limits in case user requires low force constants
             if func in config.dihedral_func_with_mult:
                 if not max(-config.default_abs_range_fct_dihedrals_bi_func_with_mult,
-                           -args.default_abs_range_fct_dihedrals_opti_func_with_mult) <= \
-                       state.out_itp["dihedral"][grp_dihedral]["fct"] <= min(
+                           -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult) <= \
+                       state.opti.out_itp["dihedral"][grp_dihedral]["fct"] <= min(
                         -config.default_abs_range_fct_dihedrals_bi_func_with_mult,
-                        -args.default_abs_range_fct_dihedrals_opti_func_with_mult):
-                    state.out_itp["dihedral"][grp_dihedral]["fct"] = np.sign(
-                        state.out_itp["dihedral"][grp_dihedral]["fct"]) * min(
+                        -args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult):
+                    state.opti.out_itp["dihedral"][grp_dihedral]["fct"] = np.sign(
+                        state.opti.out_itp["dihedral"][grp_dihedral]["fct"]) * min(
                         config.default_abs_range_fct_dihedrals_bi_func_with_mult,
-                        args.default_abs_range_fct_dihedrals_opti_func_with_mult) / 2
+                        args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult) / 2
             else:
                 if not max(-config.default_abs_range_fct_dihedrals_bi_func_without_mult,
-                           -args.default_abs_range_fct_dihedrals_opti_func_without_mult) <= \
-                       state.out_itp["dihedral"][grp_dihedral]["fct"] <= min(
+                           -args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult) <= \
+                       state.opti.out_itp["dihedral"][grp_dihedral]["fct"] <= min(
                         -config.default_abs_range_fct_dihedrals_bi_func_without_mult,
-                        -args.default_abs_range_fct_dihedrals_opti_func_without_mult):
-                    state.out_itp["dihedral"][grp_dihedral]["fct"] = np.sign(
-                        state.out_itp["dihedral"][grp_dihedral]["fct"]) * min(
+                        -args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult):
+                    state.opti.out_itp["dihedral"][grp_dihedral]["fct"] = np.sign(
+                        state.opti.out_itp["dihedral"][grp_dihedral]["fct"]) * min(
                         config.default_abs_range_fct_dihedrals_bi_func_without_mult,
-                        args.default_abs_range_fct_dihedrals_opti_func_without_mult) / 2
+                        args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult) / 2
 
-            if args.verbose:
+            if args.runtime.verbose:
                 print("  Dihedral group", grp_dihedral + 1, "estimated force constant:",
-                      round(state.out_itp["dihedral"][grp_dihedral]["fct"], 2))
+                      round(state.opti.out_itp["dihedral"][grp_dihedral]["fct"], 2))
 
-        state.performed_init_BI["dihedral"] = True
+        state.opti.performed_init_BI["dihedral"] = True
 
 
 def process_scaling_str(args: SwarmCGArgs, state: SwarmCGState):
@@ -1031,44 +1031,44 @@ def process_scaling_str(args: SwarmCGArgs, state: SwarmCGState):
     state creates:
         bonds_scaling_specific
     """
-    state.bonds_scaling_specific = None
-    if args.bonds_scaling_str != config.bonds_scaling_str:
-        sp_str = args.bonds_scaling_str.split()
+    state.mapping.bonds_scaling_specific = None
+    if args.optimization.bonds_scaling_str != config.bonds_scaling_str:
+        sp_str = args.optimization.bonds_scaling_str.split()
         if len(sp_str) % 2 != 0:
-            raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str)
+            raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str)
 
-        state.bonds_scaling_specific = dict()
+        state.mapping.bonds_scaling_specific = dict()
         i = 0
         try:
             while i < len(sp_str):
                 geom_id = sp_str[i][1:]
                 if sp_str[i][0].upper() == "C":
-                    if int(geom_id) > state.cg_itp["nb_constraints"]:
+                    if int(geom_id) > state.model.cg_itp["nb_constraints"]:
                         info = "A constraint group id exceeds the number of constraints groups defined in the input CG ITP file."
-                        raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
-                    if not "C" + geom_id in state.bonds_scaling_specific:
+                        raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
+                    if not "C" + geom_id in state.mapping.bonds_scaling_specific:
                         if float(sp_str[i + 1]) < 0:
                             info = "You cannot provide negative values for average distribution length."
-                            raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
-                        state.bonds_scaling_specific["C" + geom_id] = float(sp_str[i + 1])
+                            raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
+                        state.mapping.bonds_scaling_specific["C" + geom_id] = float(sp_str[i + 1])
                     else:
                         info = f"A constraint group id is provided multiple times (id: {geom_id})"
-                        raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
+                        raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
                 elif sp_str[i][0].upper() == "B":
-                    if int(geom_id) > state.cg_itp["nb_bonds"]:
+                    if int(geom_id) > state.model.cg_itp["nb_bonds"]:
                         info = "A bond group id exceeds the number of bonds groups defined in the input CG ITP file."
-                        raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
-                    if not "B" + geom_id in state.bonds_scaling_specific:
+                        raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
+                    if not "B" + geom_id in state.mapping.bonds_scaling_specific:
                         if float(sp_str[i + 1]) < 0:
                             info = "You cannot provide negative values for average distribution length."
-                            raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
-                        state.bonds_scaling_specific["B" + geom_id] = float(sp_str[i + 1])
+                            raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
+                        state.mapping.bonds_scaling_specific["B" + geom_id] = float(sp_str[i + 1])
                     else:
                         info = f"A bond group id is provided multiple times (id: {geom_id})"
-                        raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str, info)
+                        raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str, info)
                 i += 2
         except ValueError:
-            raise exceptions.InvalidArgument("bonds_scaling_str", args.bonds_scaling_str)
+            raise exceptions.InvalidArgument("bonds_scaling_str", args.optimization.bonds_scaling_str)
 
 
 def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ignore_dihedrals=False, calc_sasa=False, record_best_indep_params=False):
@@ -1112,57 +1112,57 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
     row_wise_ranges["max_range_constraints"], row_wise_ranges["max_range_bonds"], row_wise_ranges["max_range_angles"], \
     row_wise_ranges["max_range_dihedrals"] = 0, 0, 0, 0
 
-    if state.atom_only:
+    if state.mapping.atom_only:
         scores.compute_Rg(args, state, traj_type="AA")
-        print("Radius of gyration (AA reference, NOT CG-mapped):", state.gyr_aa, "nm")
+        print("Radius of gyration (AA reference, NOT CG-mapped):", state.model.gyr_aa, "nm")
 
     # proceed with CG data
-    if not state.atom_only:
+    if not state.mapping.atom_only:
 
         print("Reading CG trajectory")
-        state.cg_universe = mda.Universe(args.cg_tpr_filename, args.cg_traj_filename, in_memory=True, refresh_offsets=True,
+        state.traj.cg_universe = mda.Universe(args.inputs.cg_tpr_filename, args.inputs.cg_traj_filename, in_memory=True, refresh_offsets=True,
                                       guess_bonds=False)
-        print("  Found", len(state.cg_universe.trajectory), "frames")
+        print("  Found", len(state.traj.cg_universe.trajectory), "frames")
 
         if manual_mode:
             # here we read the CG beads masses + actualize the mapped trajectory object
-            for bead_id in range(len(state.cg_itp["atoms"])):
-                state.cg_itp["atoms"][bead_id]["mass"] = state.cg_universe.atoms[bead_id].mass
-            masses = np.array([val["mass"] for val in state.cg_itp["atoms"]])
-            state.aa2cg_universe._topology.masses.values = np.array(masses)
+            for bead_id in range(len(state.model.cg_itp["atoms"])):
+                state.model.cg_itp["atoms"][bead_id]["mass"] = state.traj.cg_universe.atoms[bead_id].mass
+            masses = np.array([val["mass"] for val in state.model.cg_itp["atoms"]])
+            state.traj.aa2cg_universe._topology.masses.values = np.array(masses)
 
         # create fake bonds in the CG MDA universe, that will be used only for making the molecule whole
         # we make bonds between each VS and their beads definition, so we retrieve the connectivity
         # iteratively towards the real CG beads, that are all connected
-        if len(state.cg_itp["vs_beads_ids"]) > 0:
+        if len(state.model.cg_itp["vs_beads_ids"]) > 0:
             fake_bonds = []
             for vs_type in ["2", "3", "4", "n"]:
                 try:
-                    for bead_id in state.cg_itp["virtual_sites" + vs_type]:
-                        for vs_def_bead_id in state.cg_itp["virtual_sites" + vs_type][bead_id]["vs_def_beads_ids"]:
+                    for bead_id in state.model.cg_itp["virtual_sites" + vs_type]:
+                        for vs_def_bead_id in state.model.cg_itp["virtual_sites" + vs_type][bead_id]["vs_def_beads_ids"]:
                             fake_bonds.append([bead_id, vs_def_bead_id])
                 except (IndexError, ValueError):
                     pass
-            state.cg_universe.add_bonds(fake_bonds, guessed=False)
+            state.traj.cg_universe.add_bonds(fake_bonds, guessed=False)
 
         # select the whole molecule as an MDA atomgroup and make its coordinates whole, inplace, across the complete trajectory
-        ag_mol = mda.AtomGroup([bead_id for bead_id in range(len(state.cg_itp["atoms"]))], state.cg_universe)
-        for _ in state.cg_universe.trajectory:
+        ag_mol = mda.AtomGroup([bead_id for bead_id in range(len(state.model.cg_itp["atoms"]))], state.traj.cg_universe)
+        for _ in state.traj.cg_universe.trajectory:
             mda.lib.mdamath.make_whole(ag_mol, inplace=True)
 
         # this requires CG data for mapping -- especially, masses are taken from the CG TPR but the CG ITP is also used atm
-        if state.gyr_aa_mapped == None:
+        if state.model.gyr_aa_mapped == None:
             scores.compute_Rg(args, state, traj_type="AA_mapped")
             print()
-            print("Radius of gyration (AA reference, CG-mapped, no bonds scaling):", state.gyr_aa_mapped, "+/-",
-                  state.gyr_aa_mapped_std, "nm")
+            print("Radius of gyration (AA reference, CG-mapped, no bonds scaling):", state.model.gyr_aa_mapped, "+/-",
+                  state.model.gyr_aa_mapped_std, "nm")
 
         scores.compute_Rg(args, state, traj_type="CG")
-        print("Radius of gyration (CG model):", state.gyr_cg, "+/-", state.gyr_cg_std, "nm")
+        print("Radius of gyration (CG model):", state.model.gyr_cg, "+/-", state.model.gyr_cg_std, "nm")
 
         if calc_sasa:
 
-            if state.sasa_aa_mapped == None:
+            if state.model.sasa_aa_mapped == None:
                 scores.compute_SASA(args, state, traj_type="AA_mapped")
 
             scores.compute_SASA(args, state, traj_type="CG")
@@ -1171,8 +1171,8 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
             # this line checks that gmx trjconv could read the md.xtc trajectory from the opti
             # this is to catch bugged simulation that actually finished and produced the files,
             # but the .gro is a 2D bugged file for example, or trjactory is unreadable by gmx
-            if state.sasa_cg == None:
-                return 0, 0, 0, 0, 0, None  # state.sasa_cg == None will be checked in eval_function and worst score will be attributed
+            if state.model.sasa_cg == None:
+                return 0, 0, 0, 0, 0, None  # state.model.sasa_cg == None will be checked in eval_function and worst score will be attributed
 
     print()
     print(styling.sep_close, flush=True)
@@ -1184,59 +1184,59 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
 
     # constraints
     print("Processing constraints ...", flush=True)
-    diff_ordered_grp_constraints = list(range(state.cg_itp["nb_constraints"]))
+    diff_ordered_grp_constraints = list(range(state.model.cg_itp["nb_constraints"]))
     avg_diff_grp_constraints, row_wise_ranges["constraints"] = [], {}
     constraints = {}
 
-    for grp_constraint in range(state.cg_itp["nb_constraints"]):
+    for grp_constraint in range(state.model.cg_itp["nb_constraints"]):
 
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
             constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(args, state, beads_ids=
-            state.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint)
+            state.model.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint)
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            constraints[grp_constraint]["AA"]["avg"] = state.cg_itp["constraint"][grp_constraint]["avg"]
-            constraints[grp_constraint]["AA"]["hist"] = state.cg_itp["constraint"][grp_constraint]["hist"]
+            constraints[grp_constraint]["AA"]["avg"] = state.model.cg_itp["constraint"][grp_constraint]["avg"]
+            constraints[grp_constraint]["AA"]["hist"] = state.model.cg_itp["constraint"][grp_constraint]["hist"]
 
         for i in range(1, len(constraints[grp_constraint]["AA"]["hist"]) - 1):
             if constraints[grp_constraint]["AA"]["hist"][i - 1] > 0 or constraints[grp_constraint]["AA"]["hist"][
                 i] > 0 or constraints[grp_constraint]["AA"]["hist"][i + 1] > 0:
-                constraints[grp_constraint]["AA"]["x"].append(np.mean(state.bins_constraints[i:i + 2]))
+                constraints[grp_constraint]["AA"]["x"].append(np.mean(state.bins.bins_constraints[i:i + 2]))
                 constraints[grp_constraint]["AA"]["y"].append(constraints[grp_constraint]["AA"]["hist"][i])
 
-        if not state.atom_only:
+        if not state.mapping.atom_only:
             try:
                 constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(args, state, beads_ids=
-                state.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint")
+                state.model.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint")
                 constraints[grp_constraint]["CG"]["avg"] = constraint_avg
                 constraints[grp_constraint]["CG"]["hist"] = constraint_hist
 
                 for i in range(1, len(constraint_hist) - 1):
                     if constraint_hist[i - 1] > 0 or constraint_hist[i] > 0 or constraint_hist[
                         i + 1] > 0:  # TODO: find real min/max correctly, currently this code is garbage (here or nearby) and not robust to changes in bandwidth, in particular for small bandwidths
-                        constraints[grp_constraint]["CG"]["x"].append(np.mean(state.bins_constraints[i:i + 2]))
+                        constraints[grp_constraint]["CG"]["x"].append(np.mean(state.bins.bins_constraints[i:i + 2]))
                         constraints[grp_constraint]["CG"]["y"].append(constraint_hist[i])
 
                 domain_min = min(constraints[grp_constraint]["AA"]["x"][0], constraints[grp_constraint]["CG"]["x"][0])
                 domain_max = max(constraints[grp_constraint]["AA"]["x"][-1], constraints[grp_constraint]["CG"]["x"][-1])
                 avg_diff_grp_constraints.append(
                     emd(constraints[grp_constraint]["AA"]["hist"], constraints[grp_constraint]["CG"]["hist"],
-                        state.bins_constraints_dist_matrix) * args.bonds2angles_scoring_factor)
+                        state.bins.bins_constraints_dist_matrix) * args.optimization.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
-                    f"exceed {args.bonded_max_range} nm.\nIncrease bins range for bonds and "
+                    f"exceed {args.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
                     f"constraints and retry!\nSee argument -bonds_max_range."
                 )
                 raise ValueError(msg)
         else:
             avg_diff_grp_constraints.append(constraints[grp_constraint]["AA"]["avg"])
 
-        if args.row_x_scaling:
-            if state.atom_only:
+        if args.plotting.row_x_scaling:
+            if state.mapping.atom_only:
                 row_wise_ranges["constraints"][grp_constraint] = [constraints[grp_constraint]["AA"]["x"][0],
                                                                   constraints[grp_constraint]["AA"]["x"][-1]]
             else:
@@ -1247,64 +1247,64 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                                            row_wise_ranges["constraints"][grp_constraint][0]
 
     # constraint groups ordered by mean difference between atomistic-mapped and CG models
-    if args.mismatch_order and not state.atom_only:
+    if args.plotting.mismatch_order and not state.mapping.atom_only:
         diff_ordered_grp_constraints = [x for _, x in
                                         sorted(zip(avg_diff_grp_constraints, diff_ordered_grp_constraints),
                                                key=lambda pair: pair[0], reverse=True)]
 
     # bonds
     print("Processing bonds ...", flush=True)
-    diff_ordered_grp_bonds = list(range(state.cg_itp["nb_bonds"]))
+    diff_ordered_grp_bonds = list(range(state.model.cg_itp["nb_bonds"]))
     avg_diff_grp_bonds, row_wise_ranges["bonds"] = [], {}
     bonds = {}
 
-    for grp_bond in range(state.cg_itp["nb_bonds"]):
+    for grp_bond in range(state.model.cg_itp["nb_bonds"]):
 
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(args, state, beads_ids=state.cg_itp["bond"][grp_bond]["beads"],
+            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(args, state, beads_ids=state.model.cg_itp["bond"][grp_bond]["beads"],
                                                                  grp_type="bonds group", grp_nb=grp_bond)
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            bonds[grp_bond]["AA"]["avg"] = state.cg_itp["bond"][grp_bond]["avg"]
-            bonds[grp_bond]["AA"]["hist"] = state.cg_itp["bond"][grp_bond]["hist"]
+            bonds[grp_bond]["AA"]["avg"] = state.model.cg_itp["bond"][grp_bond]["avg"]
+            bonds[grp_bond]["AA"]["hist"] = state.model.cg_itp["bond"][grp_bond]["hist"]
 
         for i in range(1, len(bonds[grp_bond]["AA"]["hist"]) - 1):
             if bonds[grp_bond]["AA"]["hist"][i - 1] > 0 or bonds[grp_bond]["AA"]["hist"][i] > 0 or \
                     bonds[grp_bond]["AA"]["hist"][i + 1] > 0:
-                bonds[grp_bond]["AA"]["x"].append(np.mean(state.bins_bonds[i:i + 2]))
+                bonds[grp_bond]["AA"]["x"].append(np.mean(state.bins.bins_bonds[i:i + 2]))
                 bonds[grp_bond]["AA"]["y"].append(bonds[grp_bond]["AA"]["hist"][i])
 
-        if not state.atom_only:
+        if not state.mapping.atom_only:
             try:
-                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(args, state, beads_ids=state.cg_itp["bond"][grp_bond]["beads"],
+                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(args, state, beads_ids=state.model.cg_itp["bond"][grp_bond]["beads"],
                                                                      grp_type="bond")
                 bonds[grp_bond]["CG"]["avg"] = bond_avg
                 bonds[grp_bond]["CG"]["hist"] = bond_hist
 
                 for i in range(1, len(bond_hist) - 1):
                     if bond_hist[i - 1] > 0 or bond_hist[i] > 0 or bond_hist[i + 1] > 0:
-                        bonds[grp_bond]["CG"]["x"].append(np.mean(state.bins_bonds[i:i + 2]))
+                        bonds[grp_bond]["CG"]["x"].append(np.mean(state.bins.bins_bonds[i:i + 2]))
                         bonds[grp_bond]["CG"]["y"].append(bond_hist[i])
 
                 domain_min = min(bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["CG"]["x"][0])
                 domain_max = max(bonds[grp_bond]["AA"]["x"][-1], bonds[grp_bond]["CG"]["x"][-1])
                 avg_diff_grp_bonds.append(emd(bonds[grp_bond]["AA"]["hist"], bonds[grp_bond]["CG"]["hist"],
-                                              state.bins_bonds_dist_matrix) * args.bonds2angles_scoring_factor)
+                                              state.bins.bins_bonds_dist_matrix) * args.optimization.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
-                    f"exceed {args.bonded_max_range} nm.\nIncrease bins range for bonds and "
+                    f"exceed {args.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
                     f"constraints and retry!\nSee argument -bonds_max_range."
                 )
                 raise ValueError(msg)
         else:
             avg_diff_grp_bonds.append(bonds[grp_bond]["AA"]["avg"])
 
-        if args.row_x_scaling:
-            if state.atom_only:
+        if args.plotting.row_x_scaling:
+            if state.mapping.atom_only:
                 row_wise_ranges["bonds"][grp_bond] = [bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["AA"]["x"][-1]]
             else:
                 row_wise_ranges["bonds"][grp_bond] = [domain_min, domain_max]
@@ -1314,56 +1314,56 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                                      row_wise_ranges["bonds"][grp_bond][0]
 
     # bond groups ordered by mean difference between atomistic-mapped and CG models
-    if args.mismatch_order and not state.atom_only:
+    if args.plotting.mismatch_order and not state.mapping.atom_only:
         diff_ordered_grp_bonds = [x for _, x in
                                   sorted(zip(avg_diff_grp_bonds, diff_ordered_grp_bonds), key=lambda pair: pair[0],
                                          reverse=True)]
 
     # angles
     print("Processing angles ...", flush=True)
-    diff_ordered_grp_angles = list(range(state.cg_itp["nb_angles"]))
+    diff_ordered_grp_angles = list(range(state.model.cg_itp["nb_angles"]))
     avg_diff_grp_angles, row_wise_ranges["angles"] = [], {}
     angles = {}
 
-    for grp_angle in range(state.cg_itp["nb_angles"]):
+    for grp_angle in range(state.model.cg_itp["nb_angles"]):
 
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
             angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(args, state,
-                                                                       beads_ids=state.cg_itp["angle"][grp_angle]["beads"])
+                                                                       beads_ids=state.model.cg_itp["angle"][grp_angle]["beads"])
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            angles[grp_angle]["AA"]["avg"] = state.cg_itp["angle"][grp_angle]["avg"]
-            angles[grp_angle]["AA"]["hist"] = state.cg_itp["angle"][grp_angle]["hist"]
+            angles[grp_angle]["AA"]["avg"] = state.model.cg_itp["angle"][grp_angle]["avg"]
+            angles[grp_angle]["AA"]["hist"] = state.model.cg_itp["angle"][grp_angle]["hist"]
 
         for i in range(1, len(angles[grp_angle]["AA"]["hist"]) - 1):
             if angles[grp_angle]["AA"]["hist"][i - 1] > 0 or angles[grp_angle]["AA"]["hist"][i] > 0 or \
                     angles[grp_angle]["AA"]["hist"][i + 1] > 0:
-                angles[grp_angle]["AA"]["x"].append(np.mean(state.bins_angles[i:i + 2]))
+                angles[grp_angle]["AA"]["x"].append(np.mean(state.bins.bins_angles[i:i + 2]))
                 angles[grp_angle]["AA"]["y"].append(angles[grp_angle]["AA"]["hist"][i])
 
-        if not state.atom_only:
+        if not state.mapping.atom_only:
             angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(args, state,
-                                                                       beads_ids=state.cg_itp["angle"][grp_angle]["beads"])
+                                                                       beads_ids=state.model.cg_itp["angle"][grp_angle]["beads"])
             angles[grp_angle]["CG"]["avg"] = angle_avg
             angles[grp_angle]["CG"]["hist"] = angle_hist
 
             for i in range(1, len(angle_hist) - 1):
                 if angle_hist[i - 1] > 0 or angle_hist[i] > 0 or angle_hist[i + 1] > 0:
-                    angles[grp_angle]["CG"]["x"].append(np.mean(state.bins_angles[i:i + 2]))
+                    angles[grp_angle]["CG"]["x"].append(np.mean(state.bins.bins_angles[i:i + 2]))
                     angles[grp_angle]["CG"]["y"].append(angle_hist[i])
 
             domain_min = min(angles[grp_angle]["AA"]["x"][0], angles[grp_angle]["CG"]["x"][0])
             domain_max = max(angles[grp_angle]["AA"]["x"][-1], angles[grp_angle]["CG"]["x"][-1])
             avg_diff_grp_angles.append(
-                emd(angles[grp_angle]["AA"]["hist"], angles[grp_angle]["CG"]["hist"], state.bins_angles_dist_matrix))
+                emd(angles[grp_angle]["AA"]["hist"], angles[grp_angle]["CG"]["hist"], state.bins.bins_angles_dist_matrix))
         else:
             avg_diff_grp_angles.append(angles[grp_angle]["AA"]["avg"])
 
-        if args.row_x_scaling:
-            if state.atom_only:
+        if args.plotting.row_x_scaling:
+            if state.mapping.atom_only:
                 row_wise_ranges["angles"][grp_angle] = [angles[grp_angle]["AA"]["x"][0],
                                                         angles[grp_angle]["AA"]["x"][-1]]
             else:
@@ -1374,57 +1374,57 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                                       row_wise_ranges["angles"][grp_angle][0]
 
     # angle groups ordered by mean difference between atomistic-mapped and CG models
-    if args.mismatch_order and not state.atom_only:
+    if args.plotting.mismatch_order and not state.mapping.atom_only:
         diff_ordered_grp_angles = [x for _, x in
                                    sorted(zip(avg_diff_grp_angles, diff_ordered_grp_angles), key=lambda pair: pair[0],
                                           reverse=True)]
 
     # dihedrals
     print("Processing dihedrals ...", flush=True)
-    diff_ordered_grp_dihedrals = list(range(state.cg_itp["nb_dihedrals"]))
+    diff_ordered_grp_dihedrals = list(range(state.model.cg_itp["nb_dihedrals"]))
     avg_diff_grp_dihedrals, row_wise_ranges["dihedrals"] = [], {}
     dihedrals = {}
 
-    for grp_dihedral in range(state.cg_itp["nb_dihedrals"]):
+    for grp_dihedral in range(state.model.cg_itp["nb_dihedrals"]):
 
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
             dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(args, state, beads_ids=
-            state.cg_itp["dihedral"][grp_dihedral]["beads"])
+            state.model.cg_itp["dihedral"][grp_dihedral]["beads"])
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            dihedrals[grp_dihedral]["AA"]["avg"] = state.cg_itp["dihedral"][grp_dihedral]["avg"]
-            dihedrals[grp_dihedral]["AA"]["hist"] = state.cg_itp["dihedral"][grp_dihedral]["hist"]
+            dihedrals[grp_dihedral]["AA"]["avg"] = state.model.cg_itp["dihedral"][grp_dihedral]["avg"]
+            dihedrals[grp_dihedral]["AA"]["hist"] = state.model.cg_itp["dihedral"][grp_dihedral]["hist"]
 
         for i in range(1, len(dihedrals[grp_dihedral]["AA"]["hist"]) - 1):
             if dihedrals[grp_dihedral]["AA"]["hist"][i - 1] > 0 or dihedrals[grp_dihedral]["AA"]["hist"][i] > 0 or \
                     dihedrals[grp_dihedral]["AA"]["hist"][i + 1] > 0:
-                dihedrals[grp_dihedral]["AA"]["x"].append(np.mean(state.bins_dihedrals[i:i + 2]))
+                dihedrals[grp_dihedral]["AA"]["x"].append(np.mean(state.bins.bins_dihedrals[i:i + 2]))
                 dihedrals[grp_dihedral]["AA"]["y"].append(dihedrals[grp_dihedral]["AA"]["hist"][i])
 
-        if not state.atom_only:
+        if not state.mapping.atom_only:
             dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(args, state, beads_ids=
-            state.cg_itp["dihedral"][grp_dihedral]["beads"])
+            state.model.cg_itp["dihedral"][grp_dihedral]["beads"])
             dihedrals[grp_dihedral]["CG"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["CG"]["hist"] = dihedral_hist
 
             for i in range(1, len(dihedral_hist) - 1):
                 if dihedral_hist[i - 1] > 0 or dihedral_hist[i] > 0 or dihedral_hist[i + 1] > 0:
-                    dihedrals[grp_dihedral]["CG"]["x"].append(np.mean(state.bins_dihedrals[i:i + 2]))
+                    dihedrals[grp_dihedral]["CG"]["x"].append(np.mean(state.bins.bins_dihedrals[i:i + 2]))
                     dihedrals[grp_dihedral]["CG"]["y"].append(dihedral_hist[i])
 
             domain_min = min(dihedrals[grp_dihedral]["AA"]["x"][0], dihedrals[grp_dihedral]["CG"]["x"][0])
             domain_max = max(dihedrals[grp_dihedral]["AA"]["x"][-1], dihedrals[grp_dihedral]["CG"]["x"][-1])
             avg_diff_grp_dihedrals.append(
                 emd(dihedrals[grp_dihedral]["AA"]["hist"], dihedrals[grp_dihedral]["CG"]["hist"],
-                    state.bins_dihedrals_dist_matrix))
+                    state.bins.bins_dihedrals_dist_matrix))
         else:
             avg_diff_grp_dihedrals.append(dihedrals[grp_dihedral]["AA"]["avg"])
 
-        if args.row_x_scaling:
-            if state.atom_only:
+        if args.plotting.row_x_scaling:
+            if state.mapping.atom_only:
                 row_wise_ranges["dihedrals"][grp_dihedral] = [dihedrals[grp_dihedral]["AA"]["x"][0],
                                                               dihedrals[grp_dihedral]["AA"]["x"][-1]]
             else:
@@ -1435,7 +1435,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                                          row_wise_ranges["dihedrals"][grp_dihedral][0]
 
     # dihedral groups ordered by mean difference between atomistic-mapped and CG models
-    if args.mismatch_order and not state.atom_only:
+    if args.plotting.mismatch_order and not state.mapping.atom_only:
         diff_ordered_grp_dihedrals = [x for _, x in sorted(zip(avg_diff_grp_dihedrals, diff_ordered_grp_dihedrals),
                                                            key=lambda pair: pair[0], reverse=True)]
 
@@ -1446,18 +1446,18 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
     # DISPLAY DISTRIBUTIONS PLOTS #
     ###############################
 
-    larger_group = max(state.cg_itp["nb_constraints"], state.cg_itp["nb_bonds"], state.cg_itp["nb_angles"],
-                       state.cg_itp["nb_dihedrals"])
-    nrow, nrows, ncols = -1, 4, min(args.ncols_max, larger_group)
-    if args.ncols_max == 0:
+    larger_group = max(state.model.cg_itp["nb_constraints"], state.model.cg_itp["nb_bonds"], state.model.cg_itp["nb_angles"],
+                       state.model.cg_itp["nb_dihedrals"])
+    nrow, nrows, ncols = -1, 4, min(args.plotting.ncols_max, larger_group)
+    if args.plotting.ncols_max == 0:
         ncols = larger_group
     if larger_group > ncols:
         hidden_cols = larger_group - ncols
-        if state.atom_only:
+        if state.mapping.atom_only:
             print(
                 f"Displaying max {ncols} distributions per row using the CG ITP file ordering of distributions groups ({hidden_cols} more are hidden)")
         else:
-            if not args.mismatch_order:
+            if not args.plotting.mismatch_order:
                 print(
                     f"{styling.header_warning}Displaying max {ncols} distributions groups per row and this can be MISLEADING because ordering by pairwise AA-mapped vs. CG distributions mismatch is DISABLED ({hidden_cols} more are hidden)")
             else:
@@ -1465,13 +1465,13 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                     f"Displaying max {ncols} distributions groups per row ordered by pairwise AA-mapped vs. CG distributions difference ({hidden_cols} more are hidden)")
     else:
         print()
-        if not args.mismatch_order:
+        if not args.plotting.mismatch_order:
             print("Distributions groups will be displayed using the CG ITP file groups ordering")
         else:
             print(
                 "Distributions groups will be displayed using ranked mismatch score between pairwise AA-mapped and CG distributions")
-    nrows -= sum([state.cg_itp["nb_constraints"] == 0, state.cg_itp["nb_bonds"] == 0, state.cg_itp["nb_angles"] == 0,
-                  state.cg_itp["nb_dihedrals"] == 0])
+    nrows -= sum([state.model.cg_itp["nb_constraints"] == 0, state.model.cg_itp["nb_bonds"] == 0, state.model.cg_itp["nb_angles"] == 0,
+                  state.model.cg_itp["nb_dihedrals"] == 0])
 
     # fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols*3, nrows*3), squeeze=False)
     # this fucking line was responsible of the big memory leak (figures were not closing) so I let this here for memory
@@ -1483,11 +1483,11 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
     constraints_max_y, bonds_max_y, angles_max_y, dihedrals_max_y = 0, 0, 0, 0
 
     # constraints
-    if state.cg_itp["nb_constraints"] != 0:
+    if state.model.cg_itp["nb_constraints"] != 0:
         print()
         nrow += 1
         for i in range(ncols):
-            if i < state.cg_itp["nb_constraints"]:
+            if i < state.model.cg_itp["nb_constraints"]:
                 grp_constraint = diff_ordered_grp_constraints[i]
 
                 if config.use_hists:
@@ -1504,7 +1504,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                              alpha=config.fill_alpha)
                 ax[nrow][i].plot(constraints[grp_constraint]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not state.atom_only:
+                if not state.mapping.atom_only:
                     ax[nrow][i].set_title(
                         f"Constraint grp {grp_constraint + 1} - EMD Δ {round(avg_diff_grp_constraints[grp_constraint], 3)}")
                     if config.use_hists:
@@ -1528,7 +1528,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                     print(
                         f"Constraint {grp_constraint + 1} -- AA Avg: {round(constraints[grp_constraint]['AA']['avg'], 3)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if args.row_x_scaling:
+                if args.plotting.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["constraints"][grp_constraint]) - row_wise_ranges[
                         "max_range_constraints"] / 2 * 1.1,
                                          np.mean(row_wise_ranges["constraints"][grp_constraint]) + row_wise_ranges[
@@ -1544,11 +1544,11 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                 ax[nrow][i].set_visible(False)
 
     # bonds
-    if state.cg_itp["nb_bonds"] != 0:
+    if state.model.cg_itp["nb_bonds"] != 0:
         print()
         nrow += 1
         for i in range(ncols):
-            if i < state.cg_itp["nb_bonds"]:
+            if i < state.model.cg_itp["nb_bonds"]:
                 grp_bond = diff_ordered_grp_bonds[i]
 
                 if config.use_hists:
@@ -1563,7 +1563,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(bonds[grp_bond]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not state.atom_only:
+                if not state.mapping.atom_only:
                     ax[nrow][i].set_title(f"Bond grp {grp_bond + 1} - EMD Δ {round(avg_diff_grp_bonds[grp_bond], 3)}")
                     if config.use_hists:
                         ax[nrow][i].step(bonds[grp_bond]["CG"]["x"], bonds[grp_bond]["CG"]["y"], label="CG",
@@ -1582,7 +1582,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                     ax[nrow][i].set_title(f"Bond grp {grp_bond + 1} - Avg {round(avg_diff_grp_bonds[grp_bond], 3)} nm")
                     print(f"Bond {grp_bond + 1} -- AA Avg: {round(bonds[grp_bond]['AA']['avg'], 3)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if args.row_x_scaling:
+                if args.plotting.row_x_scaling:
                     ax[nrow][i].set_xlim(
                         np.mean(row_wise_ranges["bonds"][grp_bond]) - row_wise_ranges["max_range_bonds"] / 2 * 1.1,
                         np.mean(row_wise_ranges["bonds"][grp_bond]) + row_wise_ranges["max_range_bonds"] / 2 * 1.1)
@@ -1597,11 +1597,11 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                 ax[nrow][i].set_visible(False)
 
     # angles
-    if state.cg_itp["nb_angles"] != 0:
+    if state.model.cg_itp["nb_angles"] != 0:
         print()
         nrow += 1
         for i in range(ncols):
-            if i < state.cg_itp["nb_angles"]:
+            if i < state.model.cg_itp["nb_angles"]:
                 grp_angle = diff_ordered_grp_angles[i]
 
                 if config.use_hists:
@@ -1616,7 +1616,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(angles[grp_angle]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not state.atom_only:
+                if not state.mapping.atom_only:
                     ax[nrow][i].set_title(
                         f"Angle grp {grp_angle + 1} - EMD Δ {round(avg_diff_grp_angles[grp_angle], 3)}")
                     if config.use_hists:
@@ -1637,7 +1637,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                         f"Angle grp {grp_angle + 1} - Avg {round(avg_diff_grp_angles[grp_angle], 1)}°")
                     print(f"Angle {grp_angle + 1} -- AA Avg: {round(angles[grp_angle]['AA']['avg'], 1)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if args.row_x_scaling:
+                if args.plotting.row_x_scaling:
                     ax[nrow][i].set_xlim(
                         np.mean(row_wise_ranges["angles"][grp_angle]) - row_wise_ranges["max_range_angles"] / 2 * 1.1,
                         np.mean(row_wise_ranges["angles"][grp_angle]) + row_wise_ranges["max_range_angles"] / 2 * 1.1)
@@ -1652,11 +1652,11 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                 ax[nrow][i].set_visible(False)
 
     # dihedrals
-    if state.cg_itp["nb_dihedrals"] != 0:
+    if state.model.cg_itp["nb_dihedrals"] != 0:
         print()
         nrow += 1
         for i in range(ncols):
-            if i < state.cg_itp["nb_dihedrals"]:
+            if i < state.model.cg_itp["nb_dihedrals"]:
                 grp_dihedral = diff_ordered_grp_dihedrals[i]
 
                 if config.use_hists:
@@ -1671,7 +1671,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(dihedrals[grp_dihedral]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not state.atom_only:
+                if not state.mapping.atom_only:
                     ax[nrow][i].set_title(
                         f"Dihedral grp {grp_dihedral + 1} - EMD Δ {round(avg_diff_grp_dihedrals[grp_dihedral], 3)}")
                     if config.use_hists:
@@ -1692,7 +1692,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                         f"Dihedral grp {grp_dihedral + 1} - Avg {round(avg_diff_grp_dihedrals[grp_dihedral], 1)}°")
                     print(f"Dihedral {grp_dihedral + 1} -- AA Avg: {round(dihedrals[grp_dihedral]['AA']['avg'], 1)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if args.row_x_scaling:
+                if args.plotting.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["dihedrals"][grp_dihedral]) - row_wise_ranges[
                         "max_range_dihedrals"] / 2 * 1.1,
                                          np.mean(row_wise_ranges["dihedrals"][grp_dihedral]) + row_wise_ranges[
@@ -1708,88 +1708,88 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
                 ax[nrow][i].set_visible(False)
 
     # now we have all the ylims, so make them all consistent
-    if args.row_y_scaling:
+    if args.plotting.row_y_scaling:
         nrow = -1
-        if state.cg_itp["nb_constraints"] != 0:
+        if state.model.cg_itp["nb_constraints"] != 0:
             nrow += 1
-            for i in range(state.cg_itp["nb_constraints"]):
+            for i in range(state.model.cg_itp["nb_constraints"]):
                 ax[nrow][i].set_ylim(bottom=constraints_min_y, top=constraints_max_y)
-        if state.cg_itp["nb_bonds"] != 0:
+        if state.model.cg_itp["nb_bonds"] != 0:
             nrow += 1
-            for i in range(state.cg_itp["nb_bonds"]):
+            for i in range(state.model.cg_itp["nb_bonds"]):
                 ax[nrow][i].set_ylim(bottom=bonds_min_y, top=bonds_max_y)
-        if state.cg_itp["nb_angles"] != 0:
+        if state.model.cg_itp["nb_angles"] != 0:
             nrow += 1
-            for i in range(state.cg_itp["nb_angles"]):
+            for i in range(state.model.cg_itp["nb_angles"]):
                 ax[nrow][i].set_ylim(bottom=angles_min_y, top=angles_max_y)
-        if state.cg_itp["nb_dihedrals"] != 0:
+        if state.model.cg_itp["nb_dihedrals"] != 0:
             nrow += 1
-            for i in range(state.cg_itp["nb_dihedrals"]):
+            for i in range(state.model.cg_itp["nb_dihedrals"]):
                 ax[nrow][i].set_ylim(bottom=dihedrals_min_y, top=dihedrals_max_y)
 
     # calculate global fitness score and contributions from each geom type
     all_dist_pairwise = ""  # for global optimization plotting
     all_emd_dist_geoms = {"constraints": [], "bonds": [], "angles": [], "dihedrals": []}
 
-    if not state.atom_only:
+    if not state.mapping.atom_only:
         fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals = 0, 0, 0, 0
 
-        for i in range(state.cg_itp["nb_constraints"]):
+        for i in range(state.model.cg_itp["nb_constraints"]):
             dist_pairwise = avg_diff_grp_constraints[diff_ordered_grp_constraints[i]]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["constraints"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < state.all_best_emd_dist_geoms["constraints"][i]:
-                    state.all_best_emd_dist_geoms["constraints"][i] = dist_pairwise
-                    state.all_best_params_dist_geoms["constraints"][i]["params"] = [state.out_itp["constraint"][i]["value"]]
+                if dist_pairwise < state.opti.all_best_emd_dist_geoms["constraints"][i]:
+                    state.opti.all_best_emd_dist_geoms["constraints"][i] = dist_pairwise
+                    state.opti.all_best_params_dist_geoms["constraints"][i]["params"] = [state.opti.out_itp["constraint"][i]["value"]]
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_constraints_bonds += dist_pairwise
 
-        for i in range(state.cg_itp["nb_bonds"]):
+        for i in range(state.model.cg_itp["nb_bonds"]):
             dist_pairwise = avg_diff_grp_bonds[diff_ordered_grp_bonds[i]]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["bonds"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < state.all_best_emd_dist_geoms["bonds"][i]:
-                    state.all_best_emd_dist_geoms["bonds"][i] = dist_pairwise
-                    state.all_best_params_dist_geoms["bonds"][i]["params"] = [state.out_itp["bond"][i]["value"],
-                                                                           state.out_itp["bond"][i]["fct"]]
+                if dist_pairwise < state.opti.all_best_emd_dist_geoms["bonds"][i]:
+                    state.opti.all_best_emd_dist_geoms["bonds"][i] = dist_pairwise
+                    state.opti.all_best_params_dist_geoms["bonds"][i]["params"] = [state.opti.out_itp["bond"][i]["value"],
+                                                                           state.opti.out_itp["bond"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_constraints_bonds += dist_pairwise
 
-        for i in range(state.cg_itp["nb_angles"]):
+        for i in range(state.model.cg_itp["nb_angles"]):
             dist_pairwise = avg_diff_grp_angles[diff_ordered_grp_angles[i]]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["angles"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < state.all_best_emd_dist_geoms["angles"][i]:
-                    state.all_best_emd_dist_geoms["angles"][i] = dist_pairwise
-                    state.all_best_params_dist_geoms["angles"][i]["params"] = [state.out_itp["angle"][i]["value"],
-                                                                            state.out_itp["angle"][i]["fct"]]
+                if dist_pairwise < state.opti.all_best_emd_dist_geoms["angles"][i]:
+                    state.opti.all_best_emd_dist_geoms["angles"][i] = dist_pairwise
+                    state.opti.all_best_params_dist_geoms["angles"][i]["params"] = [state.opti.out_itp["angle"][i]["value"],
+                                                                            state.opti.out_itp["angle"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_angles += dist_pairwise
 
         # dihedrals_dist_pairwise = 0
-        for i in range(state.cg_itp["nb_dihedrals"]):
+        for i in range(state.model.cg_itp["nb_dihedrals"]):
             dist_pairwise = avg_diff_grp_dihedrals[diff_ordered_grp_dihedrals[i]]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["dihedrals"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params and not ignore_dihedrals:
-                if dist_pairwise < state.all_best_emd_dist_geoms["dihedrals"][i]:
-                    state.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
-                    state.all_best_params_dist_geoms["dihedrals"][i]["params"] = [state.out_itp["dihedral"][i]["value"],
-                                                                               state.out_itp["dihedral"][i]["fct"]]
+                if dist_pairwise < state.opti.all_best_emd_dist_geoms["dihedrals"][i]:
+                    state.opti.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
+                    state.opti.all_best_params_dist_geoms["dihedrals"][i]["params"] = [state.opti.out_itp["dihedral"][i]["value"],
+                                                                               state.opti.out_itp["dihedral"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_dihedrals += dist_pairwise
@@ -1805,7 +1805,7 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
             fit_score_constraints_bonds, 3), round(fit_score_angles, 3), round(fit_score_dihedrals, 3)
         all_dist_pairwise += "\n"
         print()
-        print("Using bonds to angles/dihedrals (C) scoring constant:", args.bonds2angles_scoring_factor)
+        print("Using bonds to angles/dihedrals (C) scoring constant:", args.optimization.bonds2angles_scoring_factor)
         print()
         print("Global fitness score:", fit_score_total, "(lower is better)", flush=True)
         print("  Bonds/Constraints constribution to fitness score:", fit_score_constraints_bonds, flush=True)
@@ -1814,23 +1814,23 @@ def compare_models(args: SwarmCGArgs, state: SwarmCGState, manual_mode=True, ign
 
         plt.tight_layout(rect=[0, 0, 1, 0.9])
         eval_score = fit_score_total
-        if ignore_dihedrals and state.cg_itp["nb_dihedrals"] > 0:
+        if ignore_dihedrals and state.model.cg_itp["nb_dihedrals"] > 0:
             eval_score -= fit_score_dihedrals
         sup_title = f"FITNESS SCORE\nTotal: {round(eval_score, 3)} -- Constraints/Bonds: {fit_score_constraints_bonds} -- Angles: {fit_score_angles} -- Dihedrals: {fit_score_dihedrals}"
-        if ignore_dihedrals and state.cg_itp["nb_dihedrals"] > 0:
+        if ignore_dihedrals and state.model.cg_itp["nb_dihedrals"] > 0:
             sup_title += " (ignored)"
         plt.suptitle(sup_title)
     else:
         plt.tight_layout()
 
     # here we close everything we can close because there was a memory leak from plotting
-    plt.savefig(args.plot_filename)
+    plt.savefig(args.paths.plot_filename)
     plt.close(fig)
     print()
-    print("Distributions plot written at location:\n ", args.plot_filename, flush=True)
+    print("Distributions plot written at location:\n ", args.paths.plot_filename, flush=True)
     print()
 
-    if not manual_mode and not state.atom_only:
+    if not manual_mode and not state.mapping.atom_only:
         return fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms
     else:
         return

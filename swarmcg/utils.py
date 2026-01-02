@@ -20,6 +20,6 @@ def set_MDA_backend(state: SwarmCGState):
     """
     # NOTE: this is not used because MDA is not properly parallelized, in fact with OpenMP backend it's slower than in serial
     if mda.lib.distances.USED_OPENMP:  # if MDAnalysis was compiled with OpenMP support
-        state.mda_backend = 'OpenMP'
+        state.runtime.mda_backend = 'OpenMP'
     else:
-        state.mda_backend = 'serial'
+        state.runtime.mda_backend = 'serial'

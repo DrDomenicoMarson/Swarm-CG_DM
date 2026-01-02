@@ -1,6 +1,6 @@
 import os
 
-from swarmcg.context import SwarmCGArgs
+from swarmcg.context import SwarmCGState
 from swarmcg.shared import exceptions
 from swarmcg.shared.utils import parse_string_args
 
@@ -106,8 +106,8 @@ class Production(BaseSimulationConfig):
     edit_mpd = True
 
 
-def select_class(flag, args: SwarmCGArgs):
-    filename = getattr(args, flag)
+def select_class(flag, state: SwarmCGState):
+    filename = getattr(state.files, flag)
     if "mdp_md_basename" == flag:
         return Production(filename)
     elif "mdp_equi_basename" == flag:

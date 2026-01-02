@@ -150,29 +150,29 @@ class SimulationStep:
 
 def build_simulation_setup(args: SwarmCGArgs, state: SwarmCGState, sim_config, prev_gro):
     simulation_setup = {
-        "exec": args.gmx_path,
+        "exec": args.runtime.gmx_path,
         "gro": prev_gro,
-        "mdp": getattr(args, sim_config.mdp_base_name),
-        "top": state.top_input_basename,
+        "mdp": getattr(state.files, sim_config.mdp_base_name),
+        "top": state.files.top_input_basename,
 
-        "gpu_id": args.gpu_id,
-        "mpi_tasks": args.mpi_tasks,
-        "nb_threads": args.nb_threads,
-        "maxwarn": args.mini_maxwarn,
+        "gpu_id": args.runtime.gpu_id,
+        "mpi_tasks": args.runtime.mpi_tasks,
+        "nb_threads": args.runtime.nb_threads,
+        "maxwarn": args.runtime.mini_maxwarn,
 
         "swarmcg_flag": sim_config.swarmcg_flag,
         "step_name": sim_config.step_name,
         "md_output": sim_config.md_output,
 
         "monitor_file": f"{sim_config.md_output}.log",
-        "keep_alive_n_cycles": state.process_alive_nb_cycles_dead,
-        "seconds_between_checks": state.process_alive_time_sleep,
+        "keep_alive_n_cycles": state.runtime.process_alive_nb_cycles_dead,
+        "seconds_between_checks": state.runtime.process_alive_time_sleep,
         "simulation_config": sim_config,
     }
-    prod_sim_time = state.prod_sim_time
+    prod_sim_time = state.opti.prod_sim_time
     if prod_sim_time is not None:
         simulation_setup["sim_duration"] = prod_sim_time
-    prod_nb_frames = state.prod_nb_frames
+    prod_nb_frames = state.opti.prod_nb_frames
     if prod_nb_frames is not None:
         simulation_setup["prod_nb_frames"] = prod_nb_frames
 
@@ -181,9 +181,9 @@ def build_simulation_setup(args: SwarmCGArgs, state: SwarmCGState, sim_config, p
 
 def generate_steps(args: SwarmCGArgs, state: SwarmCGState):
     step_flags = ["mdp_minimization_basename", "mdp_equi_basename", "mdp_md_basename"]
-    prev_gro = state.gro_input_basename
+    prev_gro = state.files.gro_input_basename
     for step in step_flags:
-        sim_config = select_class(step, args)
+        sim_config = select_class(step, state)
         simulation_step = SimulationStep(build_simulation_setup(args, state, sim_config, prev_gro))
         prev_gro = simulation_step.output_gro
         yield simulation_step

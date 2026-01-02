@@ -37,7 +37,7 @@ def run(args: SwarmCGArgs):
     min_nb_cols = 9  # to be sure we have enough columns for opti process plots, even if number of bonds/angles/dihedrals is less than this
 
     # read scores for each geom at each fitness evaluation/simulation
-    iter_indep_scores = np.genfromtxt(args.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
+    iter_indep_scores = np.genfromtxt(args.paths.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
 
     try:
         for i in range(1, iter_indep_scores.shape[1]):
@@ -50,7 +50,7 @@ def run(args: SwarmCGArgs):
         raise exceptions.IncompleteOptimisationFile(msg)
 
     # process files and plot
-    with open(args.opti_dirname + "/" + config.opti_perf_recap_file, "r") as fp:
+    with open(args.paths.opti_dirname + "/" + config.opti_perf_recap_file, "r") as fp:
 
         eval_lines = fp.read().split("\n")
         nb_evals = len(eval_lines) - 7
@@ -241,7 +241,7 @@ def run(args: SwarmCGArgs):
     nrow, nrows, ncols = 0, 9, larger_group
     nrows -= sum([nb_constraints == 0, nb_bonds == 0, nb_angles == 0, nb_dihedrals == 0]) * 2
 
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4 * args.plot_scale, nrows * 3 * args.plot_scale),
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4 * args.plotting.plot_scale, nrows * 3 * args.plotting.plot_scale),
                            squeeze=False)
 
     # all evaluations scores and stats
@@ -622,10 +622,10 @@ def run(args: SwarmCGArgs):
                 ax[nrow][i].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(args.opti_dirname + "/" + args.plot_filename)
+    plt.savefig(args.paths.opti_dirname + "/" + args.paths.plot_filename)
     print()
     print("Wrote visual optimization summary file at location:\n ",
-          os.path.normpath(args.opti_dirname + "/" + args.plot_filename))
+          os.path.normpath(args.paths.opti_dirname + "/" + args.paths.plot_filename))
     print()
 
 

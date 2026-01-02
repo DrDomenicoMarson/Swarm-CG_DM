@@ -21,7 +21,7 @@ def test___file_validation(opt_ctx):
 
     # when:
     filename = "tests/data/aa_topol.tpr"
-    args.aa_tpr_filename = filename
+    args.inputs.aa_tpr_filename = filename
 
     # then:
     with pytest.raises(exceptions.MissingTrajectoryFile):
@@ -29,7 +29,7 @@ def test___file_validation(opt_ctx):
 
     # when:
     filename = "tests/data/aa_traj.xtc"
-    args.aa_traj_filename = filename
+    args.inputs.aa_traj_filename = filename
 
     # then:
     with pytest.raises(exceptions.MissingIndexFile):
@@ -37,7 +37,7 @@ def test___file_validation(opt_ctx):
 
    # when:
     filename = "tests/data/cg_map.ndx"
-    args.cg_map_filename = filename
+    args.inputs.cg_map_filename = filename
 
     # then:
     with pytest.raises(exceptions.MissingItpFile):
@@ -45,7 +45,7 @@ def test___file_validation(opt_ctx):
 
    # when:
     filename = "tests/data/cg_model.itp"
-    args.cg_itp_filename = filename
+    args.inputs.cg_itp_filename = filename
 
     # then:
     _file_validation(args)

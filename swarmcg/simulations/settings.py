@@ -12,21 +12,21 @@ def get_settings(args: SwarmCGArgs, state: SwarmCGState):
     """Get simulation and optimzation settings.
 
     args requires:
-        sim_type
+        runtime.sim_type
 
     pass args/state to:
         _optimal
         _fast
         _test
     """
-    if args.sim_type == "OPTIMAL":
+    if args.runtime.sim_type == "OPTIMAL":
         return _optimal(args, state)
-    elif args.sim_type == "FAST":
+    elif args.runtime.sim_type == "FAST":
         return _fast(args, state)
-    elif args.sim_type == "TEST":
+    elif args.runtime.sim_type == "TEST":
         return _test(args, state)
     else:
-        msg = f"Simulation type {args.sim_type} is not valid. (OPTIMAL, FAST, TEST)"
+        msg = f"Simulation type {args.runtime.sim_type} is not valid. (OPTIMAL, FAST, TEST)"
         raise ValueError(msg)
 
 
@@ -37,30 +37,30 @@ def _optimal(args: SwarmCGArgs, state: SwarmCGState):
     as long as the BI keeps yielding close enough results, which should be the case
 
     args requires:
-        sim_duration_short
-        sim_duration_long
+        optimization.sim_duration_short
+        optimization.sim_duration_long
 
     state requires:
-        cg_itp
+        model.cg_itp
     """
     sim_types = {
-        0: {"sim_duration": args.sim_duration_short,
+        0: {"sim_duration": args.optimization.sim_duration_short,
             "prod_nb_frames": 15000,
             "max_swarm_iter": int(
-                round(6 + np.sqrt(state.cg_itp["nb_constraints"] + state.cg_itp["nb_bonds"] + state.cg_itp["nb_angles"]))),
+                round(6 + np.sqrt(state.model.cg_itp["nb_constraints"] + state.model.cg_itp["nb_bonds"] + state.model.cg_itp["nb_angles"]))),
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 1,
             "fct_guess_fact": 0.40},
-        1: {"sim_duration": args.sim_duration_short,
+        1: {"sim_duration": args.optimization.sim_duration_short,
             "prod_nb_frames": 15000,
-            "max_swarm_iter": int(round(6 + np.sqrt(state.cg_itp["nb_angles"] + state.cg_itp["nb_dihedrals"]))),
+            "max_swarm_iter": int(round(6 + np.sqrt(state.model.cg_itp["nb_angles"] + state.model.cg_itp["nb_dihedrals"]))),
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 0.25,
             "fct_guess_fact": 0.30},
-        2: {"sim_duration": args.sim_duration_long,
+        2: {"sim_duration": args.optimization.sim_duration_long,
             "prod_nb_frames": 15000,
             "max_swarm_iter": int(round(6 + np.sqrt(
-                state.cg_itp["nb_constraints"] + state.cg_itp["nb_bonds"] + state.cg_itp["nb_angles"] + state.cg_itp[
+                state.model.cg_itp["nb_constraints"] + state.model.cg_itp["nb_bonds"] + state.model.cg_itp["nb_angles"] + state.model.cg_itp[
                     "nb_dihedrals"]))),
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 0.25,
