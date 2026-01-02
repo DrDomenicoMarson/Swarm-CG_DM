@@ -21,11 +21,13 @@ def compute_Rg(args: SwarmCGArgs, state: SwarmCGState, traj_type):
         gyr_cg_std
     """
     if traj_type == "AA":
-
+        if state.mapping.all_aa_mols:
+            atomgroup = state.mapping.all_aa_mols[0]
+        else:
+            atomgroup = state.traj.aa_universe.atoms[:len(state.mapping.all_atoms)]
         gyr_aa = np.empty(len(state.traj.aa_universe.trajectory))
         for ts in state.traj.aa_universe.trajectory:
-            gyr_aa[ts.frame] = state.traj.aa_universe.atoms[:len(state.mapping.all_atoms)].radius_of_gyration(pbc=None,
-                                                                                           backend=state.runtime.mda_backend)
+            gyr_aa[ts.frame] = atomgroup.radius_of_gyration(pbc=None, backend=state.runtime.mda_backend)
         state.model.gyr_aa = round(np.average(gyr_aa) / 10, 3)  # retrieve nm
         state.model.gyr_aa_std = round(np.std(gyr_aa) / 10, 3)  # retrieve nm
 

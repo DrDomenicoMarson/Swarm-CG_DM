@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field, fields, asdict
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from swarmcg.topology import CgTopology
 
 
 @dataclass(slots=True)
@@ -205,7 +208,7 @@ class OptimizationState:
 
 @dataclass(slots=True)
 class ModelState:
-    cg_itp: dict[str, Any] | None = None
+    cg_itp: "CgTopology | None" = None
     gyr_aa: float | None = None
     gyr_aa_std: float | None = None
     gyr_aa_mapped: float | None = None
@@ -220,6 +223,7 @@ class ModelState:
 
 @dataclass(slots=True)
 class SwarmCGState:
+    paths: Any | None = None
     files: FileState = field(default_factory=FileState)
     runtime: RuntimeState = field(default_factory=RuntimeState)
     mapping: MappingState = field(default_factory=MappingState)

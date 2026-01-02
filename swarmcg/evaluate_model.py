@@ -2,20 +2,18 @@ import os, sys
 from shlex import quote as cmd_quote
 
 import numpy as np
-import matplotlib
 
 import swarmcg.shared.styling
 import swarmcg.io as io
 import swarmcg.scoring as scores
-from swarmcg import swarmCG as scg
-from swarmcg import config
+from swarmcg.engine import comparison, mapping, optimization
 from swarmcg.context import SwarmCGArgs, SwarmCGState
 from swarmcg.shared import catch_warnings
 
-matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
+VISIBLE_DEPRECATION_WARNING = getattr(np, "VisibleDeprecationWarning", Warning)
 
 
-@catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
+@catch_warnings(VISIBLE_DEPRECATION_WARNING)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 def run(args: SwarmCGArgs, state: SwarmCGState):
     print()
     print(swarmcg.shared.styling.sep_close)
@@ -41,7 +39,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
     args.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult = np.inf
     args.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult = np.inf
 
-    # scg.set_MDA_backend(args, state)
+    # utils.set_MDA_backend(state)
     state.runtime.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
 
     args.validate()
@@ -63,27 +61,27 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         args.paths.plot_filename = args.paths.plot_filename + ".png"
 
     scores.create_bins_and_dist_matrices(args, state)  # bins for EMD calculations
-    scg.read_ndx_atoms2beads(args, state)  # read mapping, get atoms accurences in beads
-    scg.get_atoms_weights_in_beads(args, state)  # get weights of atoms within beads
+    mapping.read_ndx_atoms2beads(args, state)  # read mapping, get atoms accurences in beads
+    mapping.get_atoms_weights_in_beads(args, state)  # get weights of atoms within beads
 
     state.model.cg_itp = io.read_cg_itp_file(args)  # load the ITP object and find out geoms grouping
     io.validate_cg_itp(state.model.cg_itp)  # check ITP object is correct
-    scg.process_scaling_str(args, state)  # process the bonds scaling specified by user
+    optimization.process_scaling_str(args, state)  # process the bonds scaling specified by user
 
     print()
     io.read_aa_traj(args, state)  # create universe and read traj
-    scg.load_aa_data(args, state)  # read atoms attributes
-    scg.make_aa_traj_whole_for_selected_mols(args, state)
+    mapping.load_aa_data(args, state)  # read atoms attributes
+    mapping.make_aa_traj_whole_for_selected_mols(args, state)
 
     # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    scg.get_beads_MDA_atomgroups(args, state)
+    mapping.get_beads_MDA_atomgroups(args, state)
 
     print("\nMapping the trajectory from AA to CG representation")
-    state.traj.aa2cg_universe = scg.initialize_cg_traj(state.model.cg_itp)
-    scg.map_aa2cg_traj(args, state)
+    state.traj.aa2cg_universe = mapping.initialize_cg_traj(state.model.cg_itp)
+    mapping.map_aa2cg_traj(args, state)
     print()
 
-    scg.compare_models(args, state, manual_mode=True, calc_sasa=False)
+    comparison.compare_models(args, state, manual_mode=True, calc_sasa=False)
 
 
 def main():

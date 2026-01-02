@@ -4,6 +4,7 @@ import pytest
 
 from swarmcg.shared import exceptions
 from swarmcg.io.read import read_itp, read_cg_itp_file, validate_cg_itp
+from swarmcg.topology import CgTopology
 
 
 required_itp_fields = ["real_beads_ids", "vs_beads_ids", "nb_bonds", "nb_angles",
@@ -46,7 +47,7 @@ def test_read_cg_itp_file(opt_ctx):
 
     # then:
     result = read_cg_itp_file(args)
-    assert isinstance(result, dict)
+    assert isinstance(result, CgTopology)
     assert all([field in result for field in required_itp_fields])
     check_ipt_dict(result)
 

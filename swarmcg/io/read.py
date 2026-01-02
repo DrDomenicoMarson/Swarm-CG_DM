@@ -5,6 +5,7 @@ import MDAnalysis as mda
 from swarmcg import config
 from swarmcg.context import SwarmCGArgs, SwarmCGState
 from swarmcg.shared import exceptions, catch_warnings
+from swarmcg.topology import CgTopology
 
 
 @catch_warnings(
@@ -569,4 +570,4 @@ def read_cg_itp_file(args: SwarmCGArgs):
     cg_itp["nb_angles"] = nb_angles
     cg_itp["nb_dihedrals"] = nb_dihedrals
     cg_itp["nb_constraints"] = nb_constraints
-    return cg_itp
+    return CgTopology.from_legacy(cg_itp)

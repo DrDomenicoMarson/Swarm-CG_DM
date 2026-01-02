@@ -21,12 +21,12 @@ setup(
     packages=find_packages(include=['swarmcg', 'swarmcg.*']),
     package_data={"": ['data/*']},
     install_requires=[
-        'numpy>=1.16.4',
-        'scipy>=1.2.2',
+        'numpy>=1.26.0',
+        'scipy>=1.11.0',
         'pyemd>=0.5.1',
-        'matplotlib>=3.2.2',  # warnings appear for lower versions, don't change
+        'matplotlib>=3.8.0',
         'fst-pso>=1.4.12',
-        'MDAnalysis>=1.0.0'
+        'MDAnalysis>=2.6.0'
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
@@ -40,5 +40,4 @@ setup(
         ]
     }
 )
-
 

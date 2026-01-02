@@ -5,7 +5,9 @@ from datetime import datetime
 
 from swarmcg import config, io as io, simulations as sim
 from swarmcg.context import SwarmCGArgs, SwarmCGState
-from swarmcg.swarmCG import update_cg_itp_obj, compare_models
+from swarmcg.engine.optimization import update_cg_itp_obj
+from swarmcg.engine.comparison import compare_models
+from swarmcg.paths import PathManager
 from swarmcg.utils import print_stdout_forced
 
 
@@ -41,6 +43,12 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
     """
     state.opti.nb_eval += 1
     start_eval_ts = datetime.now().timestamp()
+    eval_score = state.opti.worst_fit_score
+    fit_score_total = state.opti.worst_fit_score
+    fit_score_constraints_bonds = state.opti.worst_fit_score
+    fit_score_angles = state.opti.worst_fit_score
+    fit_score_dihedrals = state.opti.worst_fit_score
+    all_dist_pairwise = ""
 
     print_stdout_forced()
     # TODO: this should use logging
@@ -48,39 +56,34 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
         f"Starting iteration {state.opti.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')}"
     )
 
-    # enter the execution directory
-    os.chdir(state.files.exec_folder)
-
     # create new directory for new parameters evaluation
-    current_eval_dir = f"{config.iteration_sim_files_dirname}_eval_step_{state.opti.nb_eval}"
-    shutil.copytree(config.input_sim_files_dirname, current_eval_dir)
+    paths = state.paths or PathManager.from_exec_dir(state.files.exec_folder)
+    current_eval_dir = paths.eval_dir(state.opti.nb_eval)
+    shutil.copytree(paths.input_sim_dir, current_eval_dir)
 
     # create a modified CG ITP file with parameters according to current evaluation type
     update_cg_itp_obj(args, state, parameters_set=parameters_set, update_type=1)
-    out_path_itp = f"{config.iteration_sim_files_dirname}_eval_step_{state.opti.nb_eval}/{state.files.cg_itp_basename}"
+    out_path_itp = current_eval_dir / state.files.cg_itp_basename
     if state.opti.opti_cycle["nb_geoms"]["dihedral"] == 0:
         print_sections = ["constraint", "bond", "angle", "exclusion"]
     else:
         print_sections = ["constraint", "bond", "angle", "dihedral", "exclusion"]
     io.write_cg_itp_file(state.opti.out_itp, out_path_itp, print_sections=print_sections)
 
-    # enter current evaluation directory and stay there until all sims are finished or failed
-    os.chdir(current_eval_dir)
-
     # run simulation with new parameters
     new_best_fit = False
     start_gmx_ts = datetime.now().timestamp()
 
     for step in sim.generate_steps(args, state):
-        step.run(os.getcwd())
+        step.run(exec_path=current_eval_dir, workdir=current_eval_dir)
 
     # to verify if MD run finished properly, we check for the .gro file printed in the end
-    if os.path.isfile("md.gro"):
+    if (current_eval_dir / "md.gro").is_file():
 
         # get distributions and evaluate fitness
-        args.inputs.cg_tpr_filename = "md.tpr"
-        args.inputs.cg_traj_filename = "md.xtc"
-        args.paths.plot_filename = "distributions.png"
+        args.inputs.cg_tpr_filename = str(current_eval_dir / "md.tpr")
+        args.inputs.cg_traj_filename = str(current_eval_dir / "md.xtc")
+        args.paths.plot_filename = str(current_eval_dir / "distributions.png")
         state.opti.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
 
         start_model_eval_ts = datetime.now().timestamp()
@@ -96,8 +99,10 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
         if state.model.sasa_cg is not None:
 
             # store the distributions for each evaluation step
-            shutil.move("distributions.png",
-                        f"../{config.distrib_plots_all_evals_dirname}/distributions_eval_step_{state.opti.nb_eval}.png")
+            shutil.move(
+                args.paths.plot_filename,
+                paths.distrib_plots_dir / f"distributions_eval_step_{state.opti.nb_eval}.png",
+            )
 
             eval_score = 0
             if "constraint" in state.opti.opti_cycle["geoms"] and "bond" in state.opti.opti_cycle["geoms"]:
@@ -128,40 +133,49 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
                                                                                                                   state.opti.worst_fit_score] * 5
             state.model.gyr_cg, state.model.gyr_cg_std, state.model.sasa_cg, state.model.sasa_cg_std = None, None, None, None
             state.opti.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
-
-    # exit current eval directory
-    os.chdir("..")
+    else:
+        state.model.gyr_cg, state.model.gyr_cg_std, state.model.sasa_cg, state.model.sasa_cg_std = None, None, None, None
+        state.opti.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
 
     # store all log files
-    if os.path.isfile(current_eval_dir + "/md.log"):
-        shutil.copy(current_eval_dir + "/md.log",
-                    f"{config.log_files_all_evals_dirname}/md_sim_eval_step_{state.opti.nb_eval}.log")
-    if os.path.isfile(current_eval_dir + "/equi.log"):
-        shutil.copy(current_eval_dir + "/equi.log",
-                    f"{config.log_files_all_evals_dirname}/equi_sim_eval_step_{state.opti.nb_eval}.log")
-    if os.path.isfile(current_eval_dir + "/mini.log"):
-        shutil.copy(current_eval_dir + "/mini.log",
-                    f"{config.log_files_all_evals_dirname}/mini_sim_eval_step_{state.opti.nb_eval}.log")
+    if (current_eval_dir / "md.log").is_file():
+        shutil.copy(
+            current_eval_dir / "md.log",
+            paths.log_files_dir / f"md_sim_eval_step_{state.opti.nb_eval}.log",
+        )
+    if (current_eval_dir / "equi.log").is_file():
+        shutil.copy(
+            current_eval_dir / "equi.log",
+            paths.log_files_dir / f"equi_sim_eval_step_{state.opti.nb_eval}.log",
+        )
+    if (current_eval_dir / "mini.log").is_file():
+        shutil.copy(
+            current_eval_dir / "mini.log",
+            paths.log_files_dir / f"mini_sim_eval_step_{state.opti.nb_eval}.log",
+        )
 
     # update the best results distrib plot in execution directory
     if new_best_fit:
-        shutil.copy(f"{config.distrib_plots_all_evals_dirname}/distributions_eval_step_{state.opti.nb_eval}.png",
-                    config.best_distrib_plots)
+        shutil.copy(
+            paths.distrib_plots_dir / f"distributions_eval_step_{state.opti.nb_eval}.png",
+            paths.best_distrib_plot,
+        )
 
     # keep all sim files if user wants to
     if args.runtime.keep_all_sims:
-        shutil.copytree(current_eval_dir, config.sim_files_all_evals_dirname + "/" + current_eval_dir)
+        shutil.copytree(current_eval_dir, paths.sim_files_dir / current_eval_dir.name)
 
     # keep BI files (the very first guess of bonded parameters) only for figures
     # TODO: remove ?? this is redundant because we already produce a directory with output for the best current model
     if state.opti.nb_eval == 1:
-        shutil.copytree(current_eval_dir, "boltzmann_inv_CG_model")
+        shutil.copytree(current_eval_dir, paths.exec_dir / "boltzmann_inv_CG_model")
 
     # store sim files for new best fit OR remove eval sim files
     if new_best_fit:
-        if os.path.exists(config.best_fitted_model_dirname):
-            shutil.rmtree(config.best_fitted_model_dirname)
-        shutil.move(current_eval_dir, config.best_fitted_model_dirname)
+        best_fit_dir = paths.exec_dir / config.best_fitted_model_dirname
+        if best_fit_dir.exists():
+            shutil.rmtree(best_fit_dir)
+        shutil.move(current_eval_dir, best_fit_dir)
     else:
         shutil.rmtree(current_eval_dir)
 
@@ -191,12 +205,12 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
     print_stdout_forced(f"  Iteration time: {current_eval_time} min")
 
     # write all pairwise distances between atom mapped and CG geoms to file for later global optimization perf plotting
-    with open(config.opti_pairwise_distances_file, "a") as fp:
+    with open(paths.opti_pairwise_distances, "a") as fp:
         if "dihedral" in state.opti.opti_cycle["geoms"]:
             fp.write("1 " + all_dist_pairwise)
         else:
             fp.write("0 " + all_dist_pairwise)
-    with open(config.opti_perf_recap_file, "a") as fp:
+    with open(paths.opti_perf_recap, "a") as fp:
         recap_line = " ".join(list(map(str, (
         state.opti.opti_cycle["nb_cycle"], state.opti.nb_eval, fit_score_total, fit_score_constraints_bonds, fit_score_angles,
         fit_score_dihedrals, eval_score, state.model.gyr_aa_mapped, state.model.gyr_aa_mapped_std, state.model.gyr_cg, state.model.gyr_cg_std,
@@ -214,7 +228,5 @@ def eval_function(parameters_set, args: SwarmCGArgs, state: SwarmCGState):
                 recap_line += f"{state.opti.out_itp['dihedral'][i]['value']} {state.opti.out_itp['dihedral'][i]['fct']} "
         recap_line += f"{current_eval_time} {current_total_time}"
         fp.write(recap_line + "\n")
-
-    os.chdir("..")  # exit the execution directory
 
     return eval_score

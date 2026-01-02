@@ -13,11 +13,14 @@ from swarmcg.scoring import eval_function
 from swarmcg.simulations import SimulationStep, get_settings
 from swarmcg import config
 from swarmcg.context import SwarmCGArgs, SwarmCGState
+from swarmcg.paths import PathManager
 from swarmcg.shared import exceptions, catch_warnings
-from swarmcg import swarmCG as scg
+from swarmcg.engine import comparison, mapping, optimization
+
+VISIBLE_DEPRECATION_WARNING = getattr(np, "VisibleDeprecationWarning", Warning)
 
 
-@catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
+@catch_warnings(VISIBLE_DEPRECATION_WARNING)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
 def run(args: SwarmCGArgs, state: SwarmCGState):
@@ -77,6 +80,9 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
             "manually or provide another folder name."
         )
         raise exceptions.AvoidOverwritingFolder(msg)
+
+    paths = PathManager.from_exec_dir(state.files.exec_folder)
+    state.paths = paths
 
     # check if we can find files at user-provided location(s)
     # here the order of the args in the 2 lists below is important, be very careful if changing this or adding args
@@ -139,35 +145,26 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
     # INITIALIZATION #
     ##################
 
-    # scg.set_MDA_backend(args, state)
+    # utils.set_MDA_backend(state)
     state.runtime.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
 
-    # directory to write all files for current execution of optimizations routines
-    # TODO: group this operations into a FileManager class
-    os.mkdir(state.files.exec_folder)
-    os.mkdir(state.files.exec_folder + "/.internal")
-    os.mkdir(state.files.exec_folder + "/" + config.distrib_plots_all_evals_dirname)
-    os.mkdir(state.files.exec_folder + "/" + config.log_files_all_evals_dirname)
-    if args.runtime.keep_all_sims:
-        os.mkdir(state.files.exec_folder + "/" + config.sim_files_all_evals_dirname)
-
-    # prepare a directory to be copied at each iteration of the optimization, to run the new simulation
-    os.mkdir(state.files.exec_folder + "/" + config.input_sim_files_dirname)
+    paths.ensure_dirs(args.runtime.keep_all_sims)
 
     # get all TOP file includes copied into input simulation directory
     for top_include in top_includes_filenames:
-        shutil.copy(top_include, state.files.exec_folder + "/" + config.input_sim_files_dirname)
+        shutil.copy(top_include, paths.input_sim_dir)
 
     # copy all other simulation files
     user_provided_sim_files = ["cg_itp_filename", "gro_input_filename", "top_input_filename",
                                "mdp_minimization_filename", "mdp_equi_filename", "mdp_md_filename"]
     for sim_file in user_provided_sim_files:
-        shutil.copy(getattr(args.inputs, sim_file), state.files.exec_folder + "/" + config.input_sim_files_dirname)
+        shutil.copy(getattr(args.inputs, sim_file), paths.input_sim_dir)
 
     # modify the TOP file to adapt includes paths
-    with open(state.files.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.files.top_input_basename, "r") as fp:
+    top_path = paths.input_sim_dir / state.files.top_input_basename
+    with open(top_path, "r") as fp:
         all_top_lines = fp.read().split("\n")
-    with open(state.files.exec_folder + "/" + config.input_sim_files_dirname + "/" + state.files.top_input_basename, "w+") as fp:
+    with open(top_path, "w+") as fp:
         nb_includes = 0
         for i in range(len(all_top_lines)):
             if all_top_lines[i].startswith("#include"):
@@ -180,20 +177,20 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
     state.opti.total_eval_time, state.opti.total_gmx_time, state.opti.total_model_eval_time = 0, 0, 0
 
     scores.create_bins_and_dist_matrices(args, state)  # bins for EMD calculations
-    scg.read_ndx_atoms2beads(args, state)  # read mapping, get atoms accurences in beads
-    scg.get_atoms_weights_in_beads(args, state)  # get weights of atoms within beads
+    mapping.read_ndx_atoms2beads(args, state)  # read mapping, get atoms accurences in beads
+    mapping.get_atoms_weights_in_beads(args, state)  # get weights of atoms within beads
 
     state.model.cg_itp = swarmcg.io.read.read_cg_itp_file(args)  # load the ITP object and find out geoms grouping
     io.validate_cg_itp(state.model.cg_itp)  # check ITP object is correct
-    scg.process_scaling_str(args, state)  # process the bonds scaling specified by user
+    optimization.process_scaling_str(args, state)  # process the bonds scaling specified by user
 
     print()
     io.read_aa_traj(args, state)  # create universe and read traj
-    scg.load_aa_data(args, state)  # read atoms attributes
-    scg.make_aa_traj_whole_for_selected_mols(args, state)
+    mapping.load_aa_data(args, state)  # read atoms attributes
+    mapping.make_aa_traj_whole_for_selected_mols(args, state)
 
     # for each CG bead, create atom groups for trajectory geoms calculation using mass and atom weights across beads
-    scg.get_beads_MDA_atomgroups(args, state)
+    mapping.get_beads_MDA_atomgroups(args, state)
 
     # get CG beads weights from ITP includes present in the TOP file
     # but do NOT erase the masses found in the ITP of the CG MODEL provided via arg -cg_itp
@@ -222,12 +219,12 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                         pass
 
     print("\nMapping the trajectory from AA to CG representation")
-    state.traj.aa2cg_universe = scg.initialize_cg_traj(state.model.cg_itp)
-    scg.map_aa2cg_traj(args, state)
+    state.traj.aa2cg_universe = mapping.initialize_cg_traj(state.model.cg_itp)
+    mapping.map_aa2cg_traj(args, state)
     print()
 
     # touch results files to be appended to later
-    with open(state.files.exec_folder + "/" + config.opti_perf_recap_file, "w") as fp:
+    with open(paths.opti_perf_recap, "w") as fp:
         # TODO: print that file has been generated with Swarm-CG etc -- do this for basically all files
         fp.write(f"# nb constraints: {state.model.cg_itp['nb_constraints']}\n")
         fp.write(f"# nb bonds: {state.model.cg_itp['nb_bonds']}\n")
@@ -236,7 +233,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         fp.write("#\n")
         fp.write(
             "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles fit_score_dihedrals eval_score Rg_AA_mapped Rg_CG parameters_set eval_time current_total_time\n")
-    with open(state.files.exec_folder + "/" + config.opti_pairwise_distances_file, "w"):
+    with open(paths.opti_pairwise_distances, "w"):
         pass
 
     # set these to None to then check the variables have been filled (is not None), so we will do these calculations
@@ -346,13 +343,13 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
 
     # output png with all the reference distributions, so the user can check
     state.mapping.atom_only = True
-    args.paths.plot_filename = state.files.exec_folder + "/" + config.ref_distrib_plots
+    args.paths.plot_filename = str(paths.ref_distrib_plot)
     with open(os.devnull, "w") as devnull:
         with contextlib.redirect_stdout(devnull):
-            scg.compare_models(args, state, manual_mode=False)
+            comparison.compare_models(args, state, manual_mode=False)
     print()
     print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
-          state.files.exec_folder + "/" + config.ref_distrib_plots)
+          paths.ref_distrib_plot)
     state.mapping.atom_only = False
 
     ##################################
@@ -454,10 +451,10 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         # BI is performed:
         # -- exec_mode 1: all equilibrium values and force constants
         # -- exec_mode 2: equilibrium values are not touched for bonds, angles and dihedrals, but all their force constants are optimized
-        scg.perform_BI(args, state)  # performed on object state.opti.out_itp
+        optimization.perform_BI(args, state)  # performed on object state.opti.out_itp
 
         # build vector for search space boundaries + create variations around the BI initial guesses
-        search_space_boundaries = scg.get_search_space_boundaries(args, state)
+        search_space_boundaries = optimization.get_search_space_boundaries(args, state)
 
         # state.opti.worst_fit_score = round(len(search_space_boundaries) * config.sim_crash_EMD_indep_score, 3)
         state.opti.worst_fit_score = round( \
@@ -468,7 +465,7 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
         # nb_particles = int(10 + 2*np.sqrt(len(search_space_boundaries)))  # formula used by FST-PSO to choose nb of particles, which defines the number of initial guesses we can use
         nb_particles = particle_setter(
             search_space_boundaries)  # adapted to have less particles and fitted to our problems, which has good initial guesses and error driven initialization
-        initial_guess_list = scg.get_initial_guess_list(args, state, nb_particles)
+        initial_guess_list = optimization.get_initial_guess_list(args, state, nb_particles)
 
         # actual optimization
         with open(os.devnull, "w") as devnull:
@@ -481,10 +478,10 @@ def run(args: SwarmCGArgs, state: SwarmCGState):
                                               max_iter_without_new_global_best=state.opti.max_swarm_iter_without_new_global_best)
 
         # update ITP object with the best solution using geoms considered at this given optimization step
-        scg.update_cg_itp_obj(args, state, parameters_set=result[0].X, update_type=2)
+        optimization.update_cg_itp_obj(args, state, parameters_set=result[0].X, update_type=2)
 
     # clean temporary copied directory with user"s input files
-    shutil.rmtree(state.files.exec_folder + "/" + config.input_sim_files_dirname)
+    shutil.rmtree(paths.input_sim_dir)
 
     # print some stats
     total_time_sec = datetime.now().timestamp() - state.opti.start_opti_ts

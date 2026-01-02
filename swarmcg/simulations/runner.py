@@ -7,10 +7,10 @@ from swarmcg.utils import print_stdout_forced
 from swarmcg.simulations.simulation_steps import select_class
 
 
-def exec_gmx(gmx_cmd):
-    """Execute gmx cmd and return only exit code"""
+def exec_gmx(gmx_cmd, workdir=None):
+    """Execute gmx cmd and return only exit code."""
     with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE) as gmx_process:
+                          stderr=subprocess.PIPE, cwd=workdir) as gmx_process:
         gmx_out = gmx_process.communicate()[1].decode()
         gmx_process.kill()
     if gmx_process.returncode != 0:
@@ -86,9 +86,9 @@ class SimulationStep:
         self.sim_setup.get("simulation_config").modify_mdp(sim_time, nb_frames).to_file(exec_path)
         return self
 
-    def _run_prep(self, cmd):
+    def _run_prep(self, cmd, workdir=None):
         with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE) as gmx_process:
+                              stderr=subprocess.PIPE, cwd=workdir) as gmx_process:
             _ = gmx_process.communicate()[1].decode()
             gmx_process.kill()
 
@@ -103,14 +103,16 @@ class SimulationStep:
             )
             raise exceptions.ComputationError(msg)
 
-    def _run_md(self, cmd):
+    def _run_md(self, cmd, workdir=None):
         cycles_check, last_log_file_size = 0, 0
         _run_killed = False
         monitor_file = self.sim_setup.get("monitor_file")
+        if workdir:
+            monitor_file = os.path.join(workdir, monitor_file)
         keep_alive_n_cycles = self.sim_setup.get("keep_alive_n_cycles")
         seconds_between_checks = self.sim_setup.get("seconds_between_checks")
         with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, preexec_fn=os.setsid) as gmx_process:
+                              stderr=subprocess.PIPE, preexec_fn=os.setsid, cwd=workdir) as gmx_process:
             while gmx_process.poll() is None:  # while process is alive
                 time.sleep(seconds_between_checks)
                 cycles_check += 1
@@ -142,10 +144,10 @@ class SimulationStep:
         else:
             return gmx_process.returncode
 
-    def run(self, exec_path, aux_command=""):
+    def run(self, exec_path, workdir=None, aux_command=""):
         prep_cmd = self._prepare_cmd()
         md_cmd = self._run_cmd(aux_command)
-        return self._run_setup(exec_path)._run_prep(prep_cmd)._run_md(md_cmd)
+        return self._run_setup(exec_path)._run_prep(prep_cmd, workdir=workdir)._run_md(md_cmd, workdir=workdir)
 
 
 def build_simulation_setup(args: SwarmCGArgs, state: SwarmCGState, sim_config, prev_gro):
