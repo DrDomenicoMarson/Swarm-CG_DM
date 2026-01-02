@@ -16,7 +16,7 @@ Swarm-CG works with MARTINI version 2 or 3. The AA-to-CG mapping can be interpre
 
 ### Installation & Usage
 
-Swarm-CG has been tested with Python versions >= 3.6.8 and Gromacs versions >= 2018.1.
+Swarm-CG has been tested with Python versions >= 3.11 and Gromacs versions >= 2018.1.
 
     yum install python3-devel        # python dev tools CentOS (optional)
     pip3 install python-dev-tools    # python dev tools Ubuntu (optional)

@@ -156,6 +156,19 @@ class SimulationStep:
 
 
 def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, nb_frames=None):
+    """
+    Convert SwarmConfig and SimulationConfig into a runner-compatible dictionary.
+
+    Args:
+        config (SwarmConfig): Global configuration.
+        sim_config (BaseSimulationConfig): Specific step configuration (Mini/Equi/Prod).
+        prev_gro (str): Input structure file for this step.
+        sim_time (float, optional): Overwrite simulation duration.
+        nb_frames (int, optional): Overwrite number of frames.
+
+    Returns:
+        dict: Setup dictionary for SimulationStep.
+    """
     simulation_setup = {
         "exec": config.gromacs.gmx_path,
         "gro": prev_gro,

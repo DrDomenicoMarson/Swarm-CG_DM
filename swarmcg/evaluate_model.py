@@ -21,7 +21,12 @@ matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend sui
 
 @catch_warnings(np.VisibleDeprecationWarning)  # filter MDAnalysis + numpy deprecation stuff that is annoying
 def run(config_obj: SwarmConfig):
+    """
+    Main execution logic for model evaluation.
     
+    Args:
+        config_obj (SwarmConfig): The configuration object containing all runtime parameters.
+    """
     # Create context
     ns = OptimizationContext(config=config_obj)
 
@@ -36,14 +41,10 @@ def run(config_obj: SwarmConfig):
     # get basenames for simulation files
     ns.cg_itp_basename = os.path.basename(ns.cg_itp_filename)
 
-    # NOTE: some arguments exist only in the scope of optimization (optimize_model.py) or only in the scope of model
-    #       evaluation (evaluate_mode.py), but still need to be defined here -> Change this to something less messy
+    # Initialize context variables
     ns.molname_in = None
     ns.gyr_aa_mapped, ns.gyr_aa_mapped_std = None, None
     ns.sasa_aa_mapped, ns.sasa_aa_mapped_std = None, None
-    # ns.aa_rg_offset = 0  # This should be in config via reference.aa_rg_offset
-    # ns.user_input = False # logic handled by config usually
-    # ns.default_max_fct_bonds_opti = np.inf # logic handled by config usually
 
     # scg.set_MDA_backend(ns)
     ns.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm

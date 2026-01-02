@@ -30,7 +30,12 @@ from swarmcg.context import OptimizationContext
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
 def run(config_obj: SwarmConfig):
-    
+    """
+    Main execution logic for model optimization.
+
+    Args:
+        config_obj (SwarmConfig): The configuration object containing all runtime parameters.
+    """
     # Create context to hold state
     ns = OptimizationContext(config=config_obj)
 

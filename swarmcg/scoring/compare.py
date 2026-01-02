@@ -25,7 +25,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         calc_sasa (bool): Whether to calculate and compare SASA.
         record_best_indep_params (bool): Use independent parameter recording (optimization feature).
     """
-    ns = context # Alias for easier refactoring, though using context directly is preferred long-term
+    ns = context # Alias for backward compatibility during refactoring
     
     # graphical parameters
     plt.rcParams["grid.color"] = "k"  # plt grid appearance settings
