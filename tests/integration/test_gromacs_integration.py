@@ -68,23 +68,29 @@ def test_gromacs_minimization_run():
             prev_gro="start_conf.gro"
         )
         
-        # 5. Run only PREP (grompp) to verify input validity and GMX execution
+        # 5. Run full Minimization Step (Setup -> Prep -> MD)
+        # This verifies:
+        # 1. MDP modification/writing (_run_setup)
+        # 2. Grompp execution (_run_prep)
+        # 3. Mdrun execution (_run_md)
+        
         step = SimulationStep(setup)
         
         # Change to tmp dir context
         cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
-            # Prepare CMD (grompp)
-            prep_cmd = step._prepare_cmd()
-            print(f"Executing: {prep_cmd}")
+            step.run(tmp_path)
             
-            # Run Prep
-            step._run_prep(prep_cmd)
+            # Assert Output Exists
+            gro_file = Path(step.sim_setup['md_output'] + ".gro")
+            assert gro_file.exists(), "Minimization output GRO file missing"
             
-            # Assert TPR exists
             tpr_file = Path(step.sim_setup['md_output'] + ".tpr")
-            assert tpr_file.exists(), "TPR generation failed"
+            assert tpr_file.exists(), "TPR file missing"
+            
+            log_file = Path(step.sim_setup['monitor_file'])
+            assert log_file.exists(), "Log file missing"
             
         finally:
             os.chdir(cwd)
