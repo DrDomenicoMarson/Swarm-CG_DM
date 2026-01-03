@@ -40,25 +40,25 @@ def eval_function(parameters_set, ns: OptimizationContext):
        compare_models
     """
     original_dir = os.getcwd()
-    exec_dir = os.path.abspath(ns.exec_folder)
-    ns.nb_eval += 1
+    exec_dir = os.path.abspath(ns.files.exec_folder)
+    ns.status.nb_eval += 1
     start_eval_ts = datetime.now().timestamp()
 
     print_stdout_forced()
     # TODO: this should use logging
     print_stdout_forced(
-        f"Starting iteration {ns.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')}"
+        f"Starting iteration {ns.status.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')}"
     )
     
-    eval_score = ns.worst_fit_score
-    fit_score_total = ns.worst_fit_score
-    fit_score_constraints_bonds = ns.worst_fit_score
-    fit_score_angles = ns.worst_fit_score
-    fit_score_dihedrals = ns.worst_fit_score
+    eval_score = ns.pso.worst_fit_score
+    fit_score_total = ns.pso.worst_fit_score
+    fit_score_constraints_bonds = ns.pso.worst_fit_score
+    fit_score_angles = ns.pso.worst_fit_score
+    fit_score_dihedrals = ns.pso.worst_fit_score
     all_dist_pairwise = ""
     all_emd_dist_geoms = None
     new_best_fit = False
-    current_eval_dir = f"{config.iteration_sim_files_dirname}_eval_step_{ns.nb_eval}"
+    current_eval_dir = f"{config.iteration_sim_files_dirname}_eval_step_{ns.status.nb_eval}"
     current_eval_path = os.path.join(exec_dir, current_eval_dir)
 
     try:
@@ -69,8 +69,8 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
         shutil.copytree(os.path.join(exec_dir, config.input_sim_files_dirname), current_eval_path)
 
-        update_cg_itp_obj(ns.out_itp, ns.opti_cycle, parameters_set, ns.exec_mode)
-        out_path_itp = os.path.join(current_eval_path, ns.cg_itp_basename)
+        update_cg_itp_obj(ns.out_itp, ns.opti_cycle, parameters_set, ns.config.optimization.exec_mode)
+        out_path_itp = os.path.join(current_eval_path, ns.files.cg_itp_basename)
 
         if ns.opti_cycle["nb_geoms"]["dihedral"] == 0:
             print_sections = ["constraint", "bond", "angle", "exclusion"]
@@ -92,24 +92,24 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
         if os.path.isfile("md.gro"):
 
-            ns.cg_tpr_filename = "md.tpr"
-            ns.cg_traj_filename = "md.xtc"
-            ns.plot_filename = "distributions.png"
-            ns.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
+            ns.files.cg_tpr_filename = "md.tpr"
+            ns.files.cg_traj_filename = "md.xtc"
+            ns.files.plot_filename = "distributions.png"
+            ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
 
             start_model_eval_ts = datetime.now().timestamp()
             ignore_dihedrals = ns.opti_cycle["nb_geoms"]["dihedral"] == 0
             fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms = compare_models(
                 ns, manual_mode=False, ignore_dihedrals=ignore_dihedrals, calc_sasa=True,
                 record_best_indep_params=True)
-            ns.total_model_eval_time += datetime.now().timestamp() - start_model_eval_ts
+            ns.status.total_model_eval_time += datetime.now().timestamp() - start_model_eval_ts
 
-            if ns.sasa_cg is not None:
+            if ns.results.sasa_cg is not None:
 
                 shutil.move(
                     "distributions.png",
                     os.path.join(exec_dir, config.distrib_plots_all_evals_dirname,
-                                 f"distributions_eval_step_{ns.nb_eval}.png"),
+                                 f"distributions_eval_step_{ns.status.nb_eval}.png"),
                 )
 
                 eval_score = 0
@@ -121,34 +121,34 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     eval_score += fit_score_dihedrals
 
                 global_score = 0
-                if "constraint" in ns.opti_geoms_all and "bond" in ns.opti_geoms_all:
+                if "constraint" in ns.pso.opti_geoms_all and "bond" in ns.pso.opti_geoms_all:
                     global_score += fit_score_constraints_bonds
-                if "angle" in ns.opti_geoms_all:
+                if "angle" in ns.pso.opti_geoms_all:
                     global_score += fit_score_angles
-                if "dihedral" in ns.opti_geoms_all:
+                if "dihedral" in ns.pso.opti_geoms_all:
                     global_score += fit_score_dihedrals
 
-                if global_score < ns.best_fitness[0]:
+                if global_score < ns.pso.best_fitness[0]:
                     new_best_fit = True
-                    ns.best_fitness = global_score, ns.nb_eval
-                    ns.all_emd_dist_geoms = all_emd_dist_geoms
+                    ns.pso.best_fitness = global_score, ns.status.nb_eval
+                    ns.pso.all_emd_dist_geoms = all_emd_dist_geoms
 
             else:
-                eval_score = ns.worst_fit_score
-                fit_score_total = ns.worst_fit_score
-                fit_score_constraints_bonds = ns.worst_fit_score
-                fit_score_angles = ns.worst_fit_score
-                fit_score_dihedrals = ns.worst_fit_score
-                ns.gyr_cg, ns.gyr_cg_std, ns.sasa_cg, ns.sasa_cg_std = None, None, None, None
-                ns.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
+                eval_score = ns.pso.worst_fit_score
+                fit_score_total = ns.pso.worst_fit_score
+                fit_score_constraints_bonds = ns.pso.worst_fit_score
+                fit_score_angles = ns.pso.worst_fit_score
+                fit_score_dihedrals = ns.pso.worst_fit_score
+                ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
+                ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
         else:
-            eval_score = ns.worst_fit_score
-            fit_score_total = ns.worst_fit_score
-            fit_score_constraints_bonds = ns.worst_fit_score
-            fit_score_angles = ns.worst_fit_score
-            fit_score_dihedrals = ns.worst_fit_score
-            ns.gyr_cg, ns.gyr_cg_std, ns.sasa_cg, ns.sasa_cg_std = None, None, None, None
-            ns.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
+            eval_score = ns.pso.worst_fit_score
+            fit_score_total = ns.pso.worst_fit_score
+            fit_score_constraints_bonds = ns.pso.worst_fit_score
+            fit_score_angles = ns.pso.worst_fit_score
+            fit_score_dihedrals = ns.pso.worst_fit_score
+            ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
+            ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
 
         os.chdir(exec_dir)
 
@@ -156,35 +156,35 @@ def eval_function(parameters_set, ns: OptimizationContext):
             shutil.copy(
                 os.path.join(current_eval_path, "md.log"),
                 os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"md_sim_eval_step_{ns.nb_eval}.log"),
+                             f"md_sim_eval_step_{ns.status.nb_eval}.log"),
             )
         if os.path.isfile(os.path.join(current_eval_path, "equi.log")):
             shutil.copy(
                 os.path.join(current_eval_path, "equi.log"),
                 os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"equi_sim_eval_step_{ns.nb_eval}.log"),
+                             f"equi_sim_eval_step_{ns.status.nb_eval}.log"),
             )
         if os.path.isfile(os.path.join(current_eval_path, "mini.log")):
             shutil.copy(
                 os.path.join(current_eval_path, "mini.log"),
                 os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"mini_sim_eval_step_{ns.nb_eval}.log"),
+                             f"mini_sim_eval_step_{ns.status.nb_eval}.log"),
             )
 
         if new_best_fit:
             shutil.copy(
                 os.path.join(exec_dir, config.distrib_plots_all_evals_dirname,
-                             f"distributions_eval_step_{ns.nb_eval}.png"),
+                             f"distributions_eval_step_{ns.status.nb_eval}.png"),
                 os.path.join(exec_dir, config.best_distrib_plots),
             )
 
-        if ns.keep_all_sims:
+        if ns.config.optimization.keep_all_sims:
             shutil.copytree(
                 current_eval_path,
                 os.path.join(exec_dir, config.sim_files_all_evals_dirname, current_eval_dir),
             )
 
-        if ns.nb_eval == 1:
+        if ns.status.nb_eval == 1:
             shutil.copytree(current_eval_path, os.path.join(exec_dir, "boltzmann_inv_CG_model"))
 
         if new_best_fit:
@@ -195,7 +195,7 @@ def eval_function(parameters_set, ns: OptimizationContext):
         else:
             shutil.rmtree(current_eval_path)
 
-        if eval_score == ns.worst_fit_score:
+        if eval_score == ns.pso.worst_fit_score:
             all_dist_pairwise = ""
             for _ in range(len(ns.cg_itp["constraint"]) + len(ns.cg_itp["bond"]) + len(ns.cg_itp["angle"]) + len(
                     ns.cg_itp["dihedral"])):
@@ -208,13 +208,13 @@ def eval_function(parameters_set, ns: OptimizationContext):
             if new_best_fit:
                 print_stdout_forced("    --> Selected as new best bonded parametrization")
             print_stdout_forced(
-                f"  Rg CG:   {round(ns.gyr_cg, 2)} nm   (Error abs. {round(abs(1 - ns.gyr_cg / ns.gyr_aa_mapped) * 100, 1)}% -- Reference Rg AA-mapped: {ns.gyr_aa_mapped} nm)")
+                f"  Rg CG:   {round(ns.results.gyr_cg, 2)} nm   (Error abs. {round(abs(1 - ns.results.gyr_cg / ns.results.gyr_aa_mapped) * 100, 1)}% -- Reference Rg AA-mapped: {ns.results.gyr_aa_mapped} nm)")
             print_stdout_forced(
-                f"  SASA CG: {ns.sasa_cg} nm2   (Error abs. {round(abs(1 - ns.sasa_cg / ns.sasa_aa_mapped) * 100, 1)}% -- Reference SASA AA-mapped: {ns.sasa_aa_mapped} nm2)")
+                f"  SASA CG: {ns.results.sasa_cg} nm2   (Error abs. {round(abs(1 - ns.results.sasa_cg / ns.results.sasa_aa_mapped) * 100, 1)}% -- Reference SASA AA-mapped: {ns.results.sasa_aa_mapped} nm2)")
 
-        current_total_time = round((datetime.now().timestamp() - ns.start_opti_ts) / (60 * 60), 2)
+        current_total_time = round((datetime.now().timestamp() - ns.status.start_opti_ts) / (60 * 60), 2)
         current_eval_time = datetime.now().timestamp() - start_eval_ts
-        ns.total_eval_time += current_eval_time
+        ns.status.total_eval_time += current_eval_time
         current_eval_time = round(current_eval_time / 60, 2)
         print_stdout_forced(f"  Iteration time: {current_eval_time} min")
 
@@ -225,9 +225,9 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 fp.write("0 " + all_dist_pairwise)
         with open(os.path.join(exec_dir, config.opti_perf_recap_file), "a") as fp:
             recap_line = " ".join(list(map(str, (
-            ns.opti_cycle["nb_cycle"], ns.nb_eval, fit_score_total, fit_score_constraints_bonds, fit_score_angles,
-            fit_score_dihedrals, eval_score, ns.gyr_aa_mapped, ns.gyr_aa_mapped_std, ns.gyr_cg, ns.gyr_cg_std,
-            ns.sasa_aa_mapped, ns.sasa_aa_mapped_std, ns.sasa_cg, ns.sasa_cg_std)))) + " "
+            ns.opti_cycle["nb_cycle"], ns.status.nb_eval, fit_score_total, fit_score_constraints_bonds, fit_score_angles,
+            fit_score_dihedrals, eval_score, ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std, ns.results.gyr_cg, ns.results.gyr_cg_std,
+            ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std, ns.results.sasa_cg, ns.results.sasa_cg_std)))) + " "
             for i in range(len(ns.cg_itp["constraint"])):
                 recap_line += f"{ns.out_itp['constraint'][i]['value']} "
             for i in range(len(ns.cg_itp["bond"])):

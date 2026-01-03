@@ -38,26 +38,26 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     row_wise_ranges["max_range_angles"] = 0
     row_wise_ranges["max_range_dihedrals"] = 0
 
-    if ns.atom_only:
+    if ns.scoring.atom_only:
         # scores.compute_Rg(ns, traj_type="AA")
-        ns.gyr_aa, ns.gyr_aa_std = scores.compute_Rg(ns.aa_universe, ns.aa_universe.atoms[:len(ns.all_atoms)], backend=ns.mda_backend)
-        print("Radius of gyration (AA reference, NOT CG-mapped):", ns.gyr_aa, "nm")
+        ns.scoring.gyr_aa, ns.scoring.gyr_aa_std = scores.compute_Rg(ns.scoring.aa_universe, ns.scoring.aa_universe.atoms[:len(ns.scoring.all_atoms)], backend=ns.scoring.mda_backend)
+        print("Radius of gyration (AA reference, NOT CG-mapped):", ns.scoring.gyr_aa, "nm")
 
     # proceed with CG data
-    if not ns.atom_only:
+    if not ns.scoring.atom_only:
         config_obj = ns.config if ns.config else SwarmConfig.from_namespace(ns) # Fallback for safety
 
         print("Reading CG trajectory")
-        ns.cg_universe = mda.Universe(ns.cg_tpr_filename, ns.cg_traj_filename, in_memory=True, refresh_offsets=True,
+        ns.scoring.cg_universe = mda.Universe(ns.files.cg_tpr_filename, ns.files.cg_traj_filename, in_memory=True, refresh_offsets=True,
                                       guess_bonds=False)
-        print("  Found", len(ns.cg_universe.trajectory), "frames")
+        print("  Found", len(ns.scoring.cg_universe.trajectory), "frames")
 
         if manual_mode:
             # here we read the CG beads masses + actualize the mapped trajectory object
             for bead_id in range(len(ns.cg_itp["atoms"])):
-                ns.cg_itp["atoms"][bead_id]["mass"] = ns.cg_universe.atoms[bead_id].mass
+                ns.cg_itp["atoms"][bead_id]["mass"] = ns.scoring.cg_universe.atoms[bead_id].mass
             masses = np.array([val["mass"] for val in ns.cg_itp["atoms"]])
-            ns.aa2cg_universe._topology.masses.values = np.array(masses)
+            ns.scoring.aa2cg_universe._topology.masses.values = np.array(masses)
 
         # create fake bonds in the CG MDA universe, that will be used only for making the molecule whole
         # we make bonds between each VS and their beads definition, so we retrieve the connectivity
@@ -71,37 +71,38 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                             fake_bonds.append([bead_id, vs_def_bead_id])
                 except (IndexError, ValueError):
                     pass
-            ns.cg_universe.add_bonds(fake_bonds, guessed=False)
+            ns.scoring.cg_universe.add_bonds(fake_bonds, guessed=False)
 
         # select the whole molecule as an MDA atomgroup and make its coordinates whole, inplace, across the complete trajectory
-        ag_mol = mda.AtomGroup([bead_id for bead_id in range(len(ns.cg_itp["atoms"]))], ns.cg_universe)
-        for _ in ns.cg_universe.trajectory:
+        ag_mol = mda.AtomGroup([bead_id for bead_id in range(len(ns.cg_itp["atoms"]))], ns.scoring.cg_universe)
+        for _ in ns.scoring.cg_universe.trajectory:
             mda.lib.mdamath.make_whole(ag_mol, inplace=True)
 
         # this requires CG data for mapping -- especially, masses are taken from the CG TPR but the CG ITP is also used atm
-        if ns.gyr_aa_mapped is None:
+        if ns.results.gyr_aa_mapped is None:
             # scores.compute_Rg(ns, traj_type="AA_mapped")
-            ns.gyr_aa_mapped, ns.gyr_aa_mapped_std = scores.compute_Rg(ns.aa2cg_universe, ns.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.mda_backend, offset=ns.aa_rg_offset)
+            ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(ns.scoring.aa2cg_universe, ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend, offset=ns.config.reference.aa_rg_offset)
             print()
-            print("Radius of gyration (AA reference, CG-mapped, no bonds scaling):", ns.gyr_aa_mapped, "+/-",
-                  ns.gyr_aa_mapped_std, "nm")
+            print("Radius of gyration (AA reference, CG-mapped, no bonds scaling):", ns.results.gyr_aa_mapped, "+/-",
+                  ns.results.gyr_aa_mapped_std, "nm")
 
         # scores.compute_Rg(ns, traj_type="CG")
-        ns.gyr_cg, ns.gyr_cg_std = scores.compute_Rg(ns.cg_universe, ns.cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.mda_backend)
-        print("Radius of gyration (CG model):", ns.gyr_cg, "+/-", ns.gyr_cg_std, "nm")
+        ns.results.gyr_cg, ns.results.gyr_cg_std = scores.compute_Rg(ns.scoring.cg_universe, ns.scoring.cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend)
+        print("Radius of gyration (CG model):", ns.results.gyr_cg, "+/-", ns.results.gyr_cg_std, "nm")
+
+
 
         if calc_sasa:
-
-            if ns.sasa_aa_mapped is None:
+            if ns.results.sasa_aa_mapped is None:
                 # scores.compute_SASA(ns, traj_type="AA_mapped")
-                ns.sasa_aa_mapped, ns.sasa_aa_mapped_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="AA_mapped")
+                ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="AA_mapped")
 
             # scores.compute_SASA(ns, traj_type="CG")
-            ns.sasa_cg, ns.sasa_cg_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="CG")
+            ns.results.sasa_cg, ns.results.sasa_cg_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="CG")
             print()
 
             # this line checks that gmx trjconv could read the md.xtc trajectory from the opti
-            if ns.sasa_cg is None:
+            if ns.results.sasa_cg is None:
                 return 0, 0, 0, 0, 0, None  # ns.sasa_cg == None will be checked in eval_function and worst score will be attributed
 
     print()
@@ -121,7 +122,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.bins_constraints, bandwidth=ns.bw_constraints)
+            constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_constraints, bandwidth=ns.bw_constraints)
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -131,26 +132,26 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(1, len(constraints[grp_constraint]["AA"]["hist"]) - 1):
             if constraints[grp_constraint]["AA"]["hist"][i - 1] > 0 or constraints[grp_constraint]["AA"]["hist"][
                 i] > 0 or constraints[grp_constraint]["AA"]["hist"][i + 1] > 0:
-                constraints[grp_constraint]["AA"]["x"].append(np.mean(ns.bins_constraints[i:i + 2]))
+                constraints[grp_constraint]["AA"]["x"].append(np.mean(ns.scoring.bins_constraints[i:i + 2]))
                 constraints[grp_constraint]["AA"]["y"].append(constraints[grp_constraint]["AA"]["hist"][i])
 
-        if not ns.atom_only:
+        if not ns.scoring.atom_only:
             try:
-                constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.bins_constraints, bandwidth=ns.bw_constraints)
+                constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.scoring.bins_constraints, bandwidth=ns.bw_constraints)
                 constraints[grp_constraint]["CG"]["avg"] = constraint_avg
                 constraints[grp_constraint]["CG"]["hist"] = constraint_hist
 
                 for i in range(1, len(constraint_hist) - 1):
                     if constraint_hist[i - 1] > 0 or constraint_hist[i] > 0 or constraint_hist[
                         i + 1] > 0: 
-                        constraints[grp_constraint]["CG"]["x"].append(np.mean(ns.bins_constraints[i:i + 2]))
+                        constraints[grp_constraint]["CG"]["x"].append(np.mean(ns.scoring.bins_constraints[i:i + 2]))
                         constraints[grp_constraint]["CG"]["y"].append(constraint_hist[i])
 
                 domain_min = min(constraints[grp_constraint]["AA"]["x"][0], constraints[grp_constraint]["CG"]["x"][0])
                 domain_max = max(constraints[grp_constraint]["AA"]["x"][-1], constraints[grp_constraint]["CG"]["x"][-1])
                 avg_diff_grp_constraints.append(
                     emd(constraints[grp_constraint]["AA"]["hist"], constraints[grp_constraint]["CG"]["hist"],
-                        ns.bins_constraints_dist_matrix) * ns.bonds2angles_scoring_factor)
+                        ns.scoring.bins_constraints_dist_matrix) * ns.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
@@ -161,8 +162,8 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         else:
             avg_diff_grp_constraints.append(constraints[grp_constraint]["AA"]["avg"])
 
-        if ns.row_x_scaling:
-            if ns.atom_only:
+        if ns.scoring.row_x_scaling:
+            if ns.scoring.atom_only:
                 row_wise_ranges["constraints"][grp_constraint] = [constraints[grp_constraint]["AA"]["x"][0],
                                                                   constraints[grp_constraint]["AA"]["x"][-1]]
             else:
@@ -173,7 +174,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                            row_wise_ranges["constraints"][grp_constraint][0]
 
     # constraint groups ordered by mean difference between atomistic-mapped and CG models
-    if ns.mismatch_order and not ns.atom_only:
+    if ns.scoring.mismatch_order and not ns.scoring.atom_only:
         diff_ordered_grp_constraints = [x for _, x in
                                         sorted(zip(avg_diff_grp_constraints, diff_ordered_grp_constraints),
                                                key=lambda pair: pair[0], reverse=True)]
@@ -189,7 +190,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.bins_bonds, bandwidth=ns.bw_bonds)
+            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_bonds, bandwidth=ns.bw_bonds)
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -199,24 +200,24 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(1, len(bonds[grp_bond]["AA"]["hist"]) - 1):
             if bonds[grp_bond]["AA"]["hist"][i - 1] > 0 or bonds[grp_bond]["AA"]["hist"][i] > 0 or \
                     bonds[grp_bond]["AA"]["hist"][i + 1] > 0:
-                bonds[grp_bond]["AA"]["x"].append(np.mean(ns.bins_bonds[i:i + 2]))
+                bonds[grp_bond]["AA"]["x"].append(np.mean(ns.scoring.bins_bonds[i:i + 2]))
                 bonds[grp_bond]["AA"]["y"].append(bonds[grp_bond]["AA"]["hist"][i])
 
-        if not ns.atom_only:
+        if not ns.scoring.atom_only:
             try:
-                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.bins_bonds, bandwidth=ns.bw_bonds)
+                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.scoring.bins_bonds, bandwidth=ns.bw_bonds)
                 bonds[grp_bond]["CG"]["avg"] = bond_avg
                 bonds[grp_bond]["CG"]["hist"] = bond_hist
 
                 for i in range(1, len(bond_hist) - 1):
                     if bond_hist[i - 1] > 0 or bond_hist[i] > 0 or bond_hist[i + 1] > 0:
-                        bonds[grp_bond]["CG"]["x"].append(np.mean(ns.bins_bonds[i:i + 2]))
+                        bonds[grp_bond]["CG"]["x"].append(np.mean(ns.scoring.bins_bonds[i:i + 2]))
                         bonds[grp_bond]["CG"]["y"].append(bond_hist[i])
 
                 domain_min = min(bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["CG"]["x"][0])
                 domain_max = max(bonds[grp_bond]["AA"]["x"][-1], bonds[grp_bond]["CG"]["x"][-1])
                 avg_diff_grp_bonds.append(emd(bonds[grp_bond]["AA"]["hist"], bonds[grp_bond]["CG"]["hist"],
-                                              ns.bins_bonds_dist_matrix) * ns.bonds2angles_scoring_factor)
+                                              ns.scoring.bins_bonds_dist_matrix) * ns.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
@@ -227,8 +228,8 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         else:
             avg_diff_grp_bonds.append(bonds[grp_bond]["AA"]["avg"])
 
-        if ns.row_x_scaling:
-            if ns.atom_only:
+        if ns.scoring.row_x_scaling:
+            if ns.scoring.atom_only:
                 row_wise_ranges["bonds"][grp_bond] = [bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["AA"]["x"][-1]]
             else:
                 row_wise_ranges["bonds"][grp_bond] = [domain_min, domain_max]
@@ -238,7 +239,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                      row_wise_ranges["bonds"][grp_bond][0]
 
     # bond groups ordered by mean difference between atomistic-mapped and CG models
-    if ns.mismatch_order and not ns.atom_only:
+    if ns.scoring.mismatch_order and not ns.scoring.atom_only:
         diff_ordered_grp_bonds = [x for _, x in
                                   sorted(zip(avg_diff_grp_bonds, diff_ordered_grp_bonds), key=lambda pair: pair[0],
                                          reverse=True)]
@@ -254,7 +255,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.bins_angles, bandwidth=ns.bw_angles)
+            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.bw_angles)
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -264,28 +265,28 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(1, len(angles[grp_angle]["AA"]["hist"]) - 1):
             if angles[grp_angle]["AA"]["hist"][i - 1] > 0 or angles[grp_angle]["AA"]["hist"][i] > 0 or \
                     angles[grp_angle]["AA"]["hist"][i + 1] > 0:
-                angles[grp_angle]["AA"]["x"].append(np.mean(ns.bins_angles[i:i + 2]))
+                angles[grp_angle]["AA"]["x"].append(np.mean(ns.scoring.bins_angles[i:i + 2]))
                 angles[grp_angle]["AA"]["y"].append(angles[grp_angle]["AA"]["hist"][i])
 
-        if not ns.atom_only:
-            angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.bins_angles, bandwidth=ns.bw_angles)
+        if not ns.scoring.atom_only:
+            angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.bw_angles)
             angles[grp_angle]["CG"]["avg"] = angle_avg
             angles[grp_angle]["CG"]["hist"] = angle_hist
 
             for i in range(1, len(angle_hist) - 1):
                 if angle_hist[i - 1] > 0 or angle_hist[i] > 0 or angle_hist[i + 1] > 0:
-                    angles[grp_angle]["CG"]["x"].append(np.mean(ns.bins_angles[i:i + 2]))
+                    angles[grp_angle]["CG"]["x"].append(np.mean(ns.scoring.bins_angles[i:i + 2]))
                     angles[grp_angle]["CG"]["y"].append(angle_hist[i])
 
             domain_min = min(angles[grp_angle]["AA"]["x"][0], angles[grp_angle]["CG"]["x"][0])
             domain_max = max(angles[grp_angle]["AA"]["x"][-1], angles[grp_angle]["CG"]["x"][-1])
             avg_diff_grp_angles.append(
-                emd(angles[grp_angle]["AA"]["hist"], angles[grp_angle]["CG"]["hist"], ns.bins_angles_dist_matrix))
+                emd(angles[grp_angle]["AA"]["hist"], angles[grp_angle]["CG"]["hist"], ns.scoring.bins_angles_dist_matrix))
         else:
             avg_diff_grp_angles.append(angles[grp_angle]["AA"]["avg"])
 
-        if ns.row_x_scaling:
-            if ns.atom_only:
+        if ns.scoring.row_x_scaling:
+            if ns.scoring.atom_only:
                 row_wise_ranges["angles"][grp_angle] = [angles[grp_angle]["AA"]["x"][0],
                                                         angles[grp_angle]["AA"]["x"][-1]]
             else:
@@ -296,7 +297,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                       row_wise_ranges["angles"][grp_angle][0]
 
     # angle groups ordered by mean difference between atomistic-mapped and CG models
-    if ns.mismatch_order and not ns.atom_only:
+    if ns.scoring.mismatch_order and not ns.scoring.atom_only:
         diff_ordered_grp_angles = [x for _, x in
                                    sorted(zip(avg_diff_grp_angles, diff_ordered_grp_angles), key=lambda pair: pair[0],
                                           reverse=True)]
@@ -312,7 +313,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.bins_dihedrals, bandwidth=ns.bw_dihedrals)
+            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.bw_dihedrals)
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -322,29 +323,29 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(1, len(dihedrals[grp_dihedral]["AA"]["hist"]) - 1):
             if dihedrals[grp_dihedral]["AA"]["hist"][i - 1] > 0 or dihedrals[grp_dihedral]["AA"]["hist"][i] > 0 or \
                     dihedrals[grp_dihedral]["AA"]["hist"][i + 1] > 0:
-                dihedrals[grp_dihedral]["AA"]["x"].append(np.mean(ns.bins_dihedrals[i:i + 2]))
+                dihedrals[grp_dihedral]["AA"]["x"].append(np.mean(ns.scoring.bins_dihedrals[i:i + 2]))
                 dihedrals[grp_dihedral]["AA"]["y"].append(dihedrals[grp_dihedral]["AA"]["hist"][i])
 
-        if not ns.atom_only:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.bins_dihedrals, bandwidth=ns.bw_dihedrals)
+        if not ns.scoring.atom_only:
+            dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.bw_dihedrals)
             dihedrals[grp_dihedral]["CG"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["CG"]["hist"] = dihedral_hist
 
             for i in range(1, len(dihedral_hist) - 1):
                 if dihedral_hist[i - 1] > 0 or dihedral_hist[i] > 0 or dihedral_hist[i + 1] > 0:
-                    dihedrals[grp_dihedral]["CG"]["x"].append(np.mean(ns.bins_dihedrals[i:i + 2]))
+                    dihedrals[grp_dihedral]["CG"]["x"].append(np.mean(ns.scoring.bins_dihedrals[i:i + 2]))
                     dihedrals[grp_dihedral]["CG"]["y"].append(dihedral_hist[i])
 
             domain_min = min(dihedrals[grp_dihedral]["AA"]["x"][0], dihedrals[grp_dihedral]["CG"]["x"][0])
             domain_max = max(dihedrals[grp_dihedral]["AA"]["x"][-1], dihedrals[grp_dihedral]["CG"]["x"][-1])
             avg_diff_grp_dihedrals.append(
                 emd(dihedrals[grp_dihedral]["AA"]["hist"], dihedrals[grp_dihedral]["CG"]["hist"],
-                    ns.bins_dihedrals_dist_matrix))
+                    ns.scoring.bins_dihedrals_dist_matrix))
         else:
             avg_diff_grp_dihedrals.append(dihedrals[grp_dihedral]["AA"]["avg"])
 
-        if ns.row_x_scaling:
-            if ns.atom_only:
+        if ns.scoring.row_x_scaling:
+            if ns.scoring.atom_only:
                 row_wise_ranges["dihedrals"][grp_dihedral] = [dihedrals[grp_dihedral]["AA"]["x"][0],
                                                               dihedrals[grp_dihedral]["AA"]["x"][-1]]
             else:
@@ -355,7 +356,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                          row_wise_ranges["dihedrals"][grp_dihedral][0]
 
     # dihedral groups ordered by mean difference between atomistic-mapped and CG models
-    if ns.mismatch_order and not ns.atom_only:
+    if ns.scoring.mismatch_order and not ns.scoring.atom_only:
         diff_ordered_grp_dihedrals = [x for _, x in sorted(zip(avg_diff_grp_dihedrals, diff_ordered_grp_dihedrals),
                                                            key=lambda pair: pair[0], reverse=True)]
 
@@ -365,16 +366,16 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     larger_group = max(ns.cg_itp["nb_constraints"], ns.cg_itp["nb_bonds"], ns.cg_itp["nb_angles"],
                        ns.cg_itp["nb_dihedrals"])
-    nrow, nrows, ncols = -1, 4, min(ns.ncols_max, larger_group)
-    if ns.ncols_max == 0:
+    nrow, nrows, ncols = -1, 4, min(ns.scoring.ncols_max, larger_group)
+    if ns.scoring.ncols_max == 0:
         ncols = larger_group
     if larger_group > ncols:
         hidden_cols = larger_group - ncols
-        if ns.atom_only:
+        if ns.scoring.atom_only:
             print(
                 f"Displaying max {ncols} distributions per row using the CG ITP file ordering of distributions groups ({hidden_cols} more are hidden)")
         else:
-            if not ns.mismatch_order:
+            if not ns.scoring.mismatch_order:
                 print(
                     f"{styling.header_warning}Displaying max {ncols} distributions groups per row and this can be MISLEADING because ordering by pairwise AA-mapped vs. CG distributions mismatch is DISABLED ({hidden_cols} more are hidden)")
             else:
@@ -382,7 +383,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                     f"Displaying max {ncols} distributions groups per row ordered by pairwise AA-mapped vs. CG distributions difference ({hidden_cols} more are hidden)")
     else:
         print()
-        if not ns.mismatch_order:
+        if not ns.scoring.mismatch_order:
             print("Distributions groups will be displayed using the CG ITP file groups ordering")
         else:
             print(
@@ -418,7 +419,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                              alpha=config.fill_alpha)
                 ax[nrow][i].plot(constraints[grp_constraint]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not ns.atom_only:
+                if not ns.scoring.atom_only:
                     ax[nrow][i].set_title(
                         f"Constraint grp {grp_constraint + 1} - EMD Δ {round(avg_diff_grp_constraints[grp_constraint], 3)}")
                     if config.use_hists:
@@ -442,7 +443,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                     print(
                         f"Constraint {grp_constraint + 1} -- AA Avg: {round(constraints[grp_constraint]['AA']['avg'], 3)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if ns.row_x_scaling:
+                if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["constraints"][grp_constraint]) - row_wise_ranges[
                         "max_range_constraints"] / 2 * 1.1,
                                          np.mean(row_wise_ranges["constraints"][grp_constraint]) + row_wise_ranges[
@@ -475,7 +476,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(bonds[grp_bond]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not ns.atom_only:
+                if not ns.scoring.atom_only:
                     ax[nrow][i].set_title(f"Bond grp {grp_bond + 1} - EMD Δ {round(avg_diff_grp_bonds[grp_bond], 3)}")
                     if config.use_hists:
                         ax[nrow][i].step(bonds[grp_bond]["CG"]["x"], bonds[grp_bond]["CG"]["y"], label="CG",
@@ -494,7 +495,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                     ax[nrow][i].set_title(f"Bond grp {grp_bond + 1} - Avg {round(avg_diff_grp_bonds[grp_bond], 3)} nm")
                     print(f"Bond {grp_bond + 1} -- AA Avg: {round(bonds[grp_bond]['AA']['avg'], 3)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if ns.row_x_scaling:
+                if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(
                         np.mean(row_wise_ranges["bonds"][grp_bond]) - row_wise_ranges["max_range_bonds"] / 2 * 1.1,
                         np.mean(row_wise_ranges["bonds"][grp_bond]) + row_wise_ranges["max_range_bonds"] / 2 * 1.1)
@@ -526,7 +527,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(angles[grp_angle]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not ns.atom_only:
+                if not ns.scoring.atom_only:
                     ax[nrow][i].set_title(
                         f"Angle grp {grp_angle + 1} - EMD Δ {round(avg_diff_grp_angles[grp_angle], 3)}")
                     if config.use_hists:
@@ -547,7 +548,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         f"Angle grp {grp_angle + 1} - Avg {round(avg_diff_grp_angles[grp_angle], 1)}°")
                     print(f"Angle {grp_angle + 1} -- AA Avg: {round(angles[grp_angle]['AA']['avg'], 1)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if ns.row_x_scaling:
+                if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(
                         np.mean(row_wise_ranges["angles"][grp_angle]) - row_wise_ranges["max_range_angles"] / 2 * 1.1,
                         np.mean(row_wise_ranges["angles"][grp_angle]) + row_wise_ranges["max_range_angles"] / 2 * 1.1)
@@ -579,7 +580,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                              color=config.atom_color, alpha=config.fill_alpha)
                 ax[nrow][i].plot(dihedrals[grp_dihedral]["AA"]["avg"], 0, color=config.atom_color, marker="D")
 
-                if not ns.atom_only:
+                if not ns.scoring.atom_only:
                     ax[nrow][i].set_title(
                         f"Dihedral grp {grp_dihedral + 1} - EMD Δ {round(avg_diff_grp_dihedrals[grp_dihedral], 3)}")
                     if config.use_hists:
@@ -600,7 +601,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         f"Dihedral grp {grp_dihedral + 1} - Avg {round(avg_diff_grp_dihedrals[grp_dihedral], 1)}°")
                     print(f"Dihedral {grp_dihedral + 1} -- AA Avg: {round(dihedrals[grp_dihedral]['AA']['avg'], 1)}")
                 ax[nrow][i].grid(zorder=0.5)
-                if ns.row_x_scaling:
+                if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["dihedrals"][grp_dihedral]) - row_wise_ranges[
                         "max_range_dihedrals"] / 2 * 1.1,
                                          np.mean(row_wise_ranges["dihedrals"][grp_dihedral]) + row_wise_ranges[
@@ -615,7 +616,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 ax[nrow][i].set_visible(False)
 
     # now we have all the ylims, so make them all consistent
-    if ns.row_y_scaling:
+    if ns.scoring.row_y_scaling:
         nrow = -1
         if ns.cg_itp["nb_constraints"] != 0:
             nrow += 1
@@ -638,7 +639,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     all_dist_pairwise = ""  # for global optimization plotting
     all_emd_dist_geoms = {"constraints": [], "bonds": [], "angles": [], "dihedrals": []}
 
-    if not ns.atom_only:
+    if not ns.scoring.atom_only:
         fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals = 0, 0, 0, 0
 
         for i in range(ns.cg_itp["nb_constraints"]):
@@ -648,9 +649,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.all_best_emd_dist_geoms["constraints"][i]:
-                    ns.all_best_emd_dist_geoms["constraints"][i] = dist_pairwise
-                    ns.all_best_params_dist_geoms["constraints"][i]["params"] = [ns.out_itp["constraint"][i]["value"]]
+                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["constraints"][i]:
+                    ns.pso.all_best_emd_dist_geoms["constraints"][i] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["constraints"][i]["params"] = [ns.out_itp["constraint"][i]["value"]]
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_constraints_bonds += dist_pairwise
@@ -662,9 +663,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.all_best_emd_dist_geoms["bonds"][i]:
-                    ns.all_best_emd_dist_geoms["bonds"][i] = dist_pairwise
-                    ns.all_best_params_dist_geoms["bonds"][i]["params"] = [ns.out_itp["bond"][i]["value"],
+                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["bonds"][i]:
+                    ns.pso.all_best_emd_dist_geoms["bonds"][i] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["bonds"][i]["params"] = [ns.out_itp["bond"][i]["value"],
                                                                            ns.out_itp["bond"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
@@ -677,9 +678,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.all_best_emd_dist_geoms["angles"][i]:
-                    ns.all_best_emd_dist_geoms["angles"][i] = dist_pairwise
-                    ns.all_best_params_dist_geoms["angles"][i]["params"] = [ns.out_itp["angle"][i]["value"],
+                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["angles"][i]:
+                    ns.pso.all_best_emd_dist_geoms["angles"][i] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["angles"][i]["params"] = [ns.out_itp["angle"][i]["value"],
                                                                             ns.out_itp["angle"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
@@ -693,9 +694,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
             # keep track of independent best parameters
             if record_best_indep_params and not ignore_dihedrals:
-                if dist_pairwise < ns.all_best_emd_dist_geoms["dihedrals"][i]:
-                    ns.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
-                    ns.all_best_params_dist_geoms["dihedrals"][i]["params"] = [ns.out_itp["dihedral"][i]["value"],
+                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["dihedrals"][i]:
+                    ns.pso.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["dihedrals"][i]["params"] = [ns.out_itp["dihedral"][i]["value"],
                                                                                ns.out_itp["dihedral"][i]["fct"]]
 
             dist_pairwise = dist_pairwise ** 2
@@ -731,13 +732,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         plt.tight_layout()
 
     # here we close everything we can close because there was a memory leak from plotting
-    plt.savefig(ns.plot_filename)
+    plt.savefig(ns.files.plot_filename)
     plt.close(fig)
     print()
-    print("Distributions plot written at location:\n ", ns.plot_filename, flush=True)
+    print("Distributions plot written at location:\n ", ns.files.plot_filename, flush=True)
     print()
 
-    if not manual_mode and not ns.atom_only:
+    if not manual_mode and not ns.scoring.atom_only:
         return fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms
     else:
         return

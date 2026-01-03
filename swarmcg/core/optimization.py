@@ -52,24 +52,23 @@ class SwarmOptimizer:
 
     def _initialize_context(self):
         # Default variable initialization
-        self.ns.mismatch_order = False
-        self.ns.row_x_scaling = True
-        self.ns.row_y_scaling = True
-        self.ns.ncols_max = 0
-        self.ns.molname_in = None
+        self.ns.scoring.mismatch_order = False
+        self.ns.scoring.row_x_scaling = True
+        self.ns.scoring.row_y_scaling = True
+        self.ns.scoring.molname_in = None
         
-        self.ns.process_alive_time_sleep = 10
-        self.ns.process_alive_nb_cycles_dead = int(
-            self.ns.sim_kill_delay / self.ns.process_alive_time_sleep)
-        self.ns.bonds_rescaling_performed = False
+        self.ns.status.process_alive_time_sleep = 10
+        self.ns.status.process_alive_nb_cycles_dead = int(
+            self.config.simulation.sim_kill_delay / self.ns.status.process_alive_time_sleep)
+        self.ns.status.bonds_rescaling_performed = False
 
         # file basenames
-        self.ns.cg_itp_basename = os.path.basename(self.ns.cg_itp_filename)
-        self.ns.gro_input_basename = os.path.basename(self.ns.gro_input_filename)
-        self.ns.top_input_basename = os.path.basename(self.ns.top_input_filename)
-        self.ns.mdp_minimization_basename = os.path.basename(self.ns.mdp_minimization_filename)
-        self.ns.mdp_equi_basename = os.path.basename(self.ns.mdp_equi_filename)
-        self.ns.mdp_md_basename = os.path.basename(self.ns.mdp_md_filename)
+        self.ns.files.cg_itp_basename = os.path.basename(self.config.cg_model.cg_itp_filename)
+        self.ns.files.gro_input_basename = os.path.basename(self.config.simulation.gro_input_filename)
+        self.ns.files.top_input_basename = os.path.basename(self.config.simulation.top_input_filename)
+        self.ns.files.mdp_minimization_basename = os.path.basename(self.config.simulation.mdp_minimization_filename)
+        self.ns.files.mdp_equi_basename = os.path.basename(self.config.simulation.mdp_equi_filename)
+        self.ns.files.mdp_md_basename = os.path.basename(self.config.simulation.mdp_md_filename)
 
         # Initialize Managers
         self.ns.workspace_manager = WorkspaceManager(self.config)
@@ -77,19 +76,19 @@ class SwarmOptimizer:
 
     def _setup_execution(self):
         try:
-            self.ns.exec_folder = self.ns.workspace_manager.setup_execution_folder(self.ns.output_folder)
+            self.ns.files.exec_folder = self.ns.workspace_manager.setup_execution_folder(self.config.output.output_folder)
         except exceptions.AvoidOverwritingFolder as e:
             raise e
 
     def _validate_environment(self):
-        SimulationStep._validate_exec(self.ns.gmx_path)
+        SimulationStep._validate_exec(self.config.gromacs.gmx_path)
         self.top_includes_filenames = self.ns.workspace_manager.verify_topology_includes()
 
     def _initialize_optimization(self):
         self.ns.workspace_manager.prepare_simulation_input(self.top_includes_filenames)
         
-        self.ns.nb_eval = 0
-        self.ns.start_opti_ts = datetime.now().timestamp()
+        self.ns.status.nb_eval = 0
+        self.ns.status.start_opti_ts = datetime.now().timestamp()
         
         self.ns.evaluator.initialize(self.ns)
         self.ns.evaluator.compute_reference_distributions()
@@ -97,7 +96,7 @@ class SwarmOptimizer:
         print()
 
     def _create_output_files(self):
-        with open(os.path.join(self.ns.exec_folder, config.opti_perf_recap_file), "w") as fp:
+        with open(os.path.join(self.ns.files.exec_folder, config.opti_perf_recap_file), "w") as fp:
             fp.write(f"# nb constraints: {self.ns.cg_itp['nb_constraints']}\n")
             fp.write(f"# nb bonds: {self.ns.cg_itp['nb_bonds']}\n")
             fp.write(f"# nb angles: {self.ns.cg_itp['nb_angles']}\n")
@@ -106,42 +105,42 @@ class SwarmOptimizer:
             fp.write(
                 "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles fit_score_dihedrals eval_score Rg_AA_mapped Rg_CG parameters_set eval_time current_total_time\n")
         
-        with open(os.path.join(self.ns.exec_folder, config.opti_pairwise_distances_file), "w"):
+        with open(os.path.join(self.ns.files.exec_folder, config.opti_pairwise_distances_file), "w"):
             pass
             
-        self.ns.gyr_aa_mapped, self.ns.gyr_aa_mapped_std = None, None
-        self.ns.sasa_aa_mapped, self.ns.sasa_aa_mapped_std = None, None
+        self.ns.results.gyr_aa_mapped, self.ns.results.gyr_aa_mapped_std = None, None
+        self.ns.results.sasa_aa_mapped, self.ns.results.sasa_aa_mapped_std = None, None
 
     def _plot_reference_distributions(self):
-        self.ns.atom_only = True
-        self.ns.plot_filename = os.path.join(self.ns.exec_folder, config.ref_distrib_plots)
+        self.ns.scoring.atom_only = True
+        self.ns.files.plot_filename = os.path.join(self.ns.files.exec_folder, config.ref_distrib_plots)
         with open(os.devnull, "w") as devnull:
             with contextlib.redirect_stdout(devnull):
                 compare_models(self.ns, manual_mode=False)
         print()
         print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
-              self.ns.plot_filename)
-        self.ns.atom_only = False
+              self.ns.files.plot_filename)
+        self.ns.scoring.atom_only = False
 
     def _run_optimization_cycles(self):
         sim_types, opti_cycles, sim_cycles, particle_setter = get_settings(self.ns)
         
         self.ns.opti_itp = copy.deepcopy(self.ns.cg_itp)
-        self.ns.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}
+        self.ns.status.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}
 
         # Handle dihedrals case
         if self.ns.cg_itp["nb_dihedrals"] == 0:
             opti_cycles = self._remove_dihedrals_from_cycles(opti_cycles)
 
-        self.ns.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
-        self.ns.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
-        self.ns.best_fitness = [np.inf, None]
+        self.ns.scoring.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
+        self.ns.pso.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
+        self.ns.pso.best_fitness = [np.inf, None]
 
         # Initialize tracking dictionaries
         for geom_type in ["constraints", "bonds", "angles", "dihedrals"]:
             nb_geom = self.ns.cg_itp[f"nb_{geom_type}"]
-            self.ns.all_best_emd_dist_geoms[geom_type] = {i: config.sim_crash_EMD_indep_score for i in range(nb_geom)}
-            self.ns.all_best_params_dist_geoms[geom_type] = {i: {} for i in range(nb_geom)}
+            self.ns.pso.all_best_emd_dist_geoms[geom_type] = {i: config.sim_crash_EMD_indep_score for i in range(nb_geom)}
+            self.ns.pso.all_best_params_dist_geoms[geom_type] = {i: {} for i in range(nb_geom)}
 
         for i, cycle_geoms in enumerate(opti_cycles):
             self._run_single_cycle(i, cycle_geoms, sim_cycles, sim_types, particle_setter)
@@ -160,12 +159,12 @@ class SwarmOptimizer:
                          "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}}
         self.ns.out_itp = copy.deepcopy(self.ns.opti_itp)
 
-        self.ns.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
-        self.ns.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
-        self.ns.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
-        self.ns.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
-        self.ns.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
-        self.ns.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
+        self.ns.status.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
+        self.ns.status.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
+        self.ns.status.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
+        self.ns.status.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
+        self.ns.status.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
+        self.ns.status.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
 
         self._update_geom_counts_for_cycle()
         
@@ -225,31 +224,31 @@ class SwarmOptimizer:
         return " & ".join(geoms_display)
 
     def _calculate_worst_fit_score(self):
-        self.ns.worst_fit_score = round( \
+        self.ns.pso.worst_fit_score = round( \
             np.sqrt((self.ns.cg_itp["nb_constraints"] + self.ns.cg_itp["nb_bonds"]) * config.sim_crash_EMD_indep_score) + \
             np.sqrt(self.ns.cg_itp["nb_angles"] * config.sim_crash_EMD_indep_score) + \
             np.sqrt(self.ns.cg_itp["nb_dihedrals"] * config.sim_crash_EMD_indep_score) \
             , 3)
 
     def _finalize_optimization(self):
-        shutil.rmtree(os.path.join(self.ns.exec_folder, config.input_sim_files_dirname))
+        shutil.rmtree(os.path.join(self.ns.files.exec_folder, config.input_sim_files_dirname))
 
-        total_time_sec = datetime.now().timestamp() - self.ns.start_opti_ts
+        total_time_sec = datetime.now().timestamp() - self.ns.status.start_opti_ts
         total_time = round(total_time_sec / (60 * 60), 2)
-        init_time = round((total_time_sec - self.ns.total_eval_time) / (60 * 60), 2)
-        self.ns.total_gmx_time = round(self.ns.total_gmx_time / (60 * 60), 2)
-        self.ns.total_model_eval_time = round(self.ns.total_model_eval_time / (60 * 60), 2)
+        init_time = round((total_time_sec - self.ns.status.total_eval_time) / (60 * 60), 2)
+        self.ns.status.total_gmx_time = round(self.ns.status.total_gmx_time / (60 * 60), 2)
+        self.ns.status.total_model_eval_time = round(self.ns.status.total_model_eval_time / (60 * 60), 2)
 
         print()
         print(swarmcg.shared.styling.sep_close)
         print("|  FINISHED PROPERLY                                                                          |")
         print(swarmcg.shared.styling.sep_close)
         print()
-        print("Total nb of evaluation steps:", self.ns.nb_eval)
-        print("Best model obtained at evaluation step number:", self.ns.best_fitness[1])
+        print("Total nb of evaluation steps:", self.ns.status.nb_eval)
+        print("Best model obtained at evaluation step number:", self.ns.pso.best_fitness[1])
         print()
         print(f"Total execution time : {total_time} h")
         print(f"Initialization time  : {init_time} h ({round(init_time / total_time * 100, 2)} %)")
-        print(f"Simulations time     : {self.ns.total_gmx_time} h ({round(self.ns.total_gmx_time / total_time * 100, 2)} %)")
-        print(f"Models scoring time  : {self.ns.total_model_eval_time} h ({round(self.ns.total_model_eval_time / total_time * 100, 2)} %)")
+        print(f"Simulations time     : {self.ns.status.total_gmx_time} h ({round(self.ns.status.total_gmx_time / total_time * 100, 2)} %)")
+        print(f"Models scoring time  : {self.ns.status.total_model_eval_time} h ({round(self.ns.status.total_model_eval_time / total_time * 100, 2)} %)")
         print()

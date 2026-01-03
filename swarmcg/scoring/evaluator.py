@@ -39,8 +39,8 @@ class SwarmEvaluator:
         self.mapping.get_atoms_weights_in_beads()
         
         # Expose to context (legacy support)
-        self.ns.all_beads = self.mapping.all_beads
-        self.ns.atom_w = self.mapping.atom_w
+        self.ns.scoring.all_beads = self.mapping.all_beads
+        self.ns.scoring.atom_w = self.mapping.atom_w
         
         # 3. CG ITP
         self.ns.cg_itp = io.read_cg_itp_file(self.config)
@@ -51,27 +51,27 @@ class SwarmEvaluator:
         
         # 5. Load AA Trajectory
         print("\nLoading Reference AA Trajectory...")
-        self.ns.aa_universe = io.read_aa_traj(self.config.reference)
+        self.ns.scoring.aa_universe = io.read_aa_traj(self.config.reference)
         
-        self.mapping.load_aa_data(self.ns.aa_universe)
-        self.ns.all_atoms = self.mapping.all_atoms
-        self.ns.all_aa_mols = self.mapping.all_aa_mols
+        self.mapping.load_aa_data(self.ns.scoring.aa_universe)
+        self.ns.scoring.all_atoms = self.mapping.all_atoms
+        self.ns.scoring.all_aa_mols = self.mapping.all_aa_mols
         
-        make_aa_traj_whole_for_selected_mols(self.ns.aa_universe, self.ns.all_aa_mols)
+        make_aa_traj_whole_for_selected_mols(self.ns.scoring.aa_universe, self.ns.scoring.all_aa_mols)
         
         # 6. Create Atom Groups
-        self.mapping.get_beads_MDA_atomgroups(self.ns.aa_universe)
-        self.ns.mda_beads_atom_grps = self.mapping.mda_beads_atom_grps
-        self.ns.mda_weights_atom_grps = self.mapping.mda_weights_atom_grps
+        self.mapping.get_beads_MDA_atomgroups(self.ns.scoring.aa_universe)
+        self.ns.scoring.mda_beads_atom_grps = self.mapping.mda_beads_atom_grps
+        self.ns.scoring.mda_weights_atom_grps = self.mapping.mda_weights_atom_grps
         
         # 6b. Initialize Data Containers
-        self.ns.data_BI = {}
-        self.ns.domains_val = {}
+        self.ns.scoring.data_BI = {}
+        self.ns.scoring.domains_val = {}
         
         # 7. Map AA to CG
         print("\nMapping AA Trajectory to CG representation...")
-        self.ns.aa2cg_universe = initialize_cg_traj(self.ns.cg_itp)
-        self.mapping.map_aa2cg_traj(self.ns.aa_universe, self.ns.aa2cg_universe, self.ns.cg_itp)
+        self.ns.scoring.aa2cg_universe = initialize_cg_traj(self.ns.cg_itp)
+        self.mapping.map_aa2cg_traj(self.ns.scoring.aa_universe, self.ns.scoring.aa2cg_universe, self.ns.cg_itp)
         
     def compute_reference_distributions(self):
         """
@@ -87,30 +87,32 @@ class SwarmEvaluator:
         # Constraints
         for i, grp in enumerate(self.ns.cg_itp["constraint"]):
              avg, hist, values = scores.get_AA_bonds_distrib(
-                 self.ns.aa2cg_universe, 
+                 self.ns.scoring.aa2cg_universe, 
                  grp["beads"], 
                  "constraint",
                  i,
                  self.config, 
-                 self.ns.bins_constraints, 
-                 self.ns.bw_constraints
+                 self.ns.scoring.bins_constraints, 
+                 self.config.optimization.bw_constraints,
+                 bonds_scaling_specific=self.ns.scoring.bonds_scaling_specific
              )
              if self.config.optimization.exec_mode == 1:
                 grp["value"] = avg 
              grp["avg"] = avg
              grp["hist"] = hist
-             self.ns.domains_val.setdefault("constraint", []).append([round(np.min(values), 3), round(np.max(values), 3)])
+             self.ns.scoring.domains_val.setdefault("constraint", []).append([round(np.min(values), 3), round(np.max(values), 3)])
              
         # Bonds
         for i, grp in enumerate(self.ns.cg_itp["bond"]):
             avg, hist, values = scores.get_AA_bonds_distrib(
-                self.ns.aa2cg_universe,
+                self.ns.scoring.aa2cg_universe,
                 grp["beads"],
                 "bond",
                 i,
                 self.config,
-                self.ns.bins_bonds,
-                self.ns.bw_bonds
+                self.ns.scoring.bins_bonds,
+                self.config.optimization.bw_bonds,
+                bonds_scaling_specific=self.ns.scoring.bonds_scaling_specific
             )
             if self.config.optimization.exec_mode == 1:
                 grp["value"] = avg
@@ -118,43 +120,43 @@ class SwarmEvaluator:
             grp["hist"] = hist
             
             # BI initialization stats
-            xmin, xmax = min(np.inf, self.ns.bins_bonds[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.bins_bonds[np.max(np.nonzero(hist)) + 1])
-            xmin, xmax = xmin - self.ns.bw_bonds, xmax + self.ns.bw_bonds
+            xmin, xmax = min(np.inf, self.ns.scoring.bins_bonds[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.scoring.bins_bonds[np.max(np.nonzero(hist)) + 1])
+            xmin, xmax = xmin - self.config.optimization.bw_bonds, xmax + self.config.optimization.bw_bonds
             
             # Helper for hist in BI range
             h, _ = np.histogram(values, range=(xmin, xmax), bins=self.config.optimization.bi_nb_bins)
             
-            self.ns.data_BI.setdefault("bond", []).append([h, np.std(values), np.mean(values), (xmin, xmax)])
-            self.ns.domains_val.setdefault("bond", []).append([round(np.min(values), 3), round(np.max(values), 3)])
+            self.ns.scoring.data_BI.setdefault("bond", []).append([h, np.std(values), np.mean(values), (xmin, xmax)])
+            self.ns.scoring.domains_val.setdefault("bond", []).append([round(np.min(values), 3), round(np.max(values), 3)])
             
         # Angles
         for i, grp in enumerate(self.ns.cg_itp["angle"]):
              avg, hist, val_deg, val_rad = scores.get_AA_angles_distrib(
-                 self.ns.aa2cg_universe,
+                 self.ns.scoring.aa2cg_universe,
                  grp["beads"],
-                 self.ns.bins_angles,
-                 self.ns.bw_angles
+                 self.ns.scoring.bins_angles,
+                 self.config.optimization.bw_angles
              )
              if self.config.optimization.exec_mode == 1:
                 grp["value"] = avg
              grp["avg"] = avg
              grp["hist"] = hist
              
-             xmin, xmax = min(np.inf, self.ns.bins_angles[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.bins_angles[np.max(np.nonzero(hist)) + 1])
-             xmin, xmax = xmin + self.ns.bw_angles / 2, xmax - self.ns.bw_angles / 2
+             xmin, xmax = min(np.inf, self.ns.scoring.bins_angles[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.scoring.bins_angles[np.max(np.nonzero(hist)) + 1])
+             xmin, xmax = xmin + self.config.optimization.bw_angles / 2, xmax - self.config.optimization.bw_angles / 2
              
              h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=self.config.optimization.bi_nb_bins)
              
-             self.ns.data_BI.setdefault("angle", []).append([h, np.std(val_rad), (xmin, xmax)])
-             self.ns.domains_val.setdefault("angle", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
+             self.ns.scoring.data_BI.setdefault("angle", []).append([h, np.std(val_rad), (xmin, xmax)])
+             self.ns.scoring.domains_val.setdefault("angle", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
 
         # Dihedrals
         for i, grp in enumerate(self.ns.cg_itp["dihedral"]):
             avg, hist, val_deg, val_rad = scores.get_AA_dihedrals_distrib(
-                self.ns.aa2cg_universe,
+                self.ns.scoring.aa2cg_universe,
                 grp["beads"],
-                self.ns.bins_dihedrals,
-                self.ns.bw_dihedrals
+                self.ns.scoring.bins_dihedrals,
+                self.config.optimization.bw_dihedrals
             )
             # exec_mode 1 logic handled later/in optimize
             if self.config.optimization.exec_mode == 1:
@@ -166,8 +168,8 @@ class SwarmEvaluator:
             xmin, xmax = -180, 180
             h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=2 * self.config.optimization.bi_nb_bins)
             
-            self.ns.data_BI.setdefault("dihedral", []).append([h, np.std(val_rad), np.mean(val_rad), (xmin, xmax)])
-            self.ns.domains_val.setdefault("dihedral", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
+            self.ns.scoring.data_BI.setdefault("dihedral", []).append([h, np.std(val_rad), np.mean(val_rad), (xmin, xmax)])
+            self.ns.scoring.domains_val.setdefault("dihedral", []).append([round(np.min(val_deg), 2), round(np.max(val_deg), 2)])
 
     def evaluate_model(self, working_dir, manual_mode=False) -> Tuple[float, float, float, float, Any, Any]:
         """

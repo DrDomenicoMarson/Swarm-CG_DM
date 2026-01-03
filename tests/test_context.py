@@ -7,29 +7,24 @@ def test_context_initialization():
     context = OptimizationContext(config=config)
     
     assert context.config is config
-    assert context.nb_eval == 0
-    assert context.best_fitness == (float('inf'), None)
+    assert context.status.nb_eval == 0
+    assert context.pso.best_fitness == (float('inf'), None)
 
 def test_context_getattr_fallback():
-    # Test that we can access config attributes via context (mocking legacy ns behavior)
+    # Test that legacy shim is removed
     config = SwarmConfig()
     config.gromacs.gmx_path = "test_gmx"
     
     context = OptimizationContext(config=config)
     
-    # Direct access should fail if not defined in context
-    # But __getattr__ should delegate to config
-    # Note: OptimizationContext.__getattr__ logic handles specific delegation
-    # Let's verify what it actually does. 
-    # If it searches recursively through sub-configs, we test that.
-    
-    # Based on previous view of context.py, it attempts to find attributes in sub-configs
-    assert context.gmx_path == "test_gmx"
+    # Direct access should fail now that shim is removed
+    with pytest.raises(AttributeError):
+        _ = context.gmx_path
 
 def test_context_state_updates():
     context = OptimizationContext(config=SwarmConfig())
-    context.nb_eval += 1
-    assert context.nb_eval == 1
+    context.status.nb_eval += 1
+    assert context.status.nb_eval == 1
     
-    context.gyr_aa_mapped = 1.5
-    assert context.gyr_aa_mapped == 1.5
+    context.results.gyr_aa_mapped = 1.5
+    assert context.results.gyr_aa_mapped == 1.5

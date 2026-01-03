@@ -5,6 +5,7 @@ import numpy as np
 from types import SimpleNamespace
 from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.config_types import SwarmConfig
+from swarmcg.context import OptimizationContext
 import swarmcg.config as config
 
 TEST_DATA = "tests/data/"
@@ -58,26 +59,11 @@ def test_evaluator_workflow_real_data(real_data_config):
     
     evaluator = SwarmEvaluator(real_data_config)
     
+    
     # Mock context - in real app, context is populated with config data + runtime data
-    context = SimpleNamespace()
-    # We need to inject config into context because some functions look for it there
-    context.config = real_data_config
+    context = OptimizationContext(config=real_data_config)
     
-    # Copy relevant config values to context (legacy behavior support)
-    context.aa_tpr_filename = real_data_config.reference.aa_tpr_filename
-    context.aa_traj_filename = real_data_config.reference.aa_traj_filename
-    context.cg_map_filename = real_data_config.reference.cg_map_filename
-    context.cg_itp_filename = real_data_config.cg_model.cg_itp_filename
-    context.mapping_type = real_data_config.reference.mapping_type
-    
-    # Optimization params required for binning
-    context.bonds_max_range = 15
-    context.bonded_max_range = 15 # Legacy alias required by scores.create_bins_and_dist_matrices
-    context.bw_constraints = 0.002
-    context.bw_bonds = 0.01
-    context.bw_angles = 2.5
-    context.bw_dihedrals = 2.5
-    context.verbose = False # legacy name for output.verbose?
+    pass
     
     # Initialize (Heavy lifting: I/O + Mapping)
     # This calls:
@@ -92,14 +78,14 @@ def test_evaluator_workflow_real_data(real_data_config):
     print("Initialization Complete.")
     
     # Verify State
-    assert context.aa_universe is not None
-    assert len(context.aa_universe.trajectory) > 0
+    assert context.scoring.aa_universe is not None
+    assert len(context.scoring.aa_universe.trajectory) > 0
     
-    assert context.aa2cg_universe is not None
-    assert len(context.aa2cg_universe.trajectory) == len(context.aa_universe.trajectory)
+    assert context.scoring.aa2cg_universe is not None
+    assert len(context.scoring.aa2cg_universe.trajectory) == len(context.scoring.aa_universe.trajectory)
     
-    assert context.all_beads is not None
-    assert len(context.all_beads) > 0
+    assert context.scoring.all_beads is not None
+    assert len(context.scoring.all_beads) > 0
     
     # Now run compute_reference_distributions (The vectorized scoring)
     print("Computing Reference Distributions...")

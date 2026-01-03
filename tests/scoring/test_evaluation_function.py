@@ -51,19 +51,24 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
         "geoms": ["bond"],
         "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
     }
-    ctx.opti_geoms_all = set()
-    ctx.best_fitness = (float("inf"), None)
-    ctx.worst_fit_score = 123.0
-    ctx.nb_eval = 0
-    ctx.start_opti_ts = 0.0
-    ctx.total_eval_time = 0.0
-    ctx.total_gmx_time = 0.0
-    ctx.total_model_eval_time = 0.0
-    ctx.keep_all_sims = False
-    ctx.cg_itp_basename = "cg_model.itp"
+    ctx.pso.opti_geoms_all = set()
+    ctx.pso.best_fitness = (float("inf"), None)
+    ctx.pso.worst_fit_score = 123.0
+    ctx.status.nb_eval = 0
+    ctx.status.start_opti_ts = 0.0
+    ctx.status.total_eval_time = 0.0
+    ctx.status.total_gmx_time = 0.0
+    ctx.status.total_model_eval_time = 0.0
+    # ctx.keep_all_sims = False # Config attribute? No, it was added as logic.
+    # Where is keep_all_sims? It's in SwarmConfig.optimization?
+    # Or runtime?
+    # Let's check context.py def. It's not in OptimizationContext dataclass explicitly.
+    # It might be in config.optimization.keep_all_sims.
+    
+    ctx.files.cg_itp_basename = "cg_model.itp"
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        ctx.exec_folder = tmpdir
+        ctx.files.exec_folder = tmpdir
         internal_dir = os.path.join(tmpdir, ".internal")
         os.makedirs(internal_dir)
 
@@ -79,7 +84,7 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
         with patch("swarmcg.scoring.evaluation_function.sim.SimulationManager.run_simulation", return_value=None):
             score = eval_function([], ctx)
 
-        assert score == ctx.worst_fit_score
+        assert score == ctx.pso.worst_fit_score
         assert os.getcwd() == original_cwd
 
         eval_dir = os.path.join(

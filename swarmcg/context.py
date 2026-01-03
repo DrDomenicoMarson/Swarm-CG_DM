@@ -1,70 +1,13 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Dict, Set, Tuple, Optional
 
 import numpy as np
 from swarmcg.config_types import SwarmConfig
 
+
 @dataclass
-class OptimizationContext:
-    """
-    Context object to hold the state of the optimization process.
-    Replaces the legacy 'ns' namespace object.
-    """
-    config: SwarmConfig
-    
-    # State variables
-    nb_eval: int = 0
-    best_fitness: tuple[float, Any] = field(default_factory=lambda: (np.inf, None))
-    
-    # Data structures (Topology, Mapping, etc.)
-    cg_itp: dict = field(default_factory=dict)
-    out_itp: dict = field(default_factory=dict) # The ITP being optimized/modified
-    opti_cycle: dict = field(default_factory=dict)
-    
-    # Managers (injected at runtime)
-    workspace_manager: Any = None
-    evaluator: Any = None
-    
-    # Results of current evaluation
-    gyr_aa_mapped: float | None = None
-    gyr_aa_mapped_std: float | None = None
-    gyr_cg: float | None = None
-    gyr_cg_std: float | None = None
-    sasa_aa_mapped: float | None = None
-    sasa_aa_mapped_std: float | None = None
-    sasa_cg: float | None = None
-    sasa_cg_std: float | None = None
-    
-    # Scoring/Optimization state
-    all_best_emd_dist_geoms: dict = field(default_factory=dict)
-    all_best_params_dist_geoms: dict = field(default_factory=dict)
-    worst_fit_score: float = 0.0
-    
-    # Simulation/Execution state
-    total_eval_time: float = 0.0
-    total_gmx_time: float = 0.0
-    total_model_eval_time: float = 0.0
-    start_opti_ts: float = 0.0
-    
-    # Other legacy attributes compatibility
-    # These were in 'ns' and used across functions.
-    # We include them here for compatibility during refactoring.
-    aa_universe: Any = None
-    cg_universe: Any = None
-    aa2cg_universe: Any = None
-    mda_beads_atom_grps: dict = field(default_factory=dict)
-    mda_weights_atom_grps: dict = field(default_factory=dict)
-    
-    mismatch_order: bool = False
-    row_x_scaling: bool = True
-    row_y_scaling: bool = True
-    atom_only: bool = False
-    molname_in: Any = None
-    process_alive_time_sleep: int = 10
-    process_alive_nb_cycles_dead: int = 0
-    bonds_rescaling_performed: bool = False
-    
-    # Basenames (derived from config filenames)
+class SimulationFiles:
+    """Stores filenames and basenames for simulation inputs/outputs."""
     cg_itp_basename: str = ""
     gro_input_basename: str = ""
     top_input_basename: str = ""
@@ -72,19 +15,29 @@ class OptimizationContext:
     mdp_equi_basename: str = ""
     mdp_md_basename: str = ""
     
-    # Directories
-    exec_folder: str = ""
-    
-    # Optimization specific
-    performed_init_BI: dict = field(default_factory=lambda: {"bond": False, "angle": False, "dihedral": False})
-    opti_geoms_all: set = field(default_factory=set)
-    domains_val: dict = field(default_factory=dict)
-    data_BI: dict = field(default_factory=dict)
-    
-    # Plots
+    # Dynamic filenames during optimization steps
+    cg_tpr_filename: str = ""
+    cg_traj_filename: str = ""
     plot_filename: str = ""
     
-    # Bins (calculated in optimize_model)
+    # Directories
+    exec_folder: str = ""
+
+
+@dataclass
+class ScoringState:
+    """Stores state related to scoring, MDAnalysis universes, and histograms."""
+    # Universes
+    aa_universe: Any = None
+    cg_universe: Any = None
+    aa2cg_universe: Any = None
+
+    # MDA Helper data
+    mda_backend: str = "serial"
+    mda_beads_atom_grps: Dict = field(default_factory=dict)
+    mda_weights_atom_grps: Dict = field(default_factory=dict)
+
+    # Bins/Histograms for scoring
     bins_constraints: Any = None
     bins_bonds: Any = None
     bins_angles: Any = None
@@ -93,25 +46,113 @@ class OptimizationContext:
     bins_constraints_dist_matrix: Any = None
     bins_bonds_dist_matrix: Any = None
     bins_angles_dist_matrix: Any = None
-    # bins_dihedrals_dist_matrix: Any = None # Not always used?
+    # bins_dihedrals_dist_matrix: Any = None 
 
-    # MDA backend
-    mda_backend: str = "serial"
+    # Plotting/Scoring configuration
+    mismatch_order: bool = False
+    row_x_scaling: bool = True
+    row_y_scaling: bool = True
+    atom_only: bool = False
+    molname_in: Any = None
     
-    def __getattr__(self, name):
-        """Fallback to config for attributes not found in context (legacy ns behavior support)"""
-        # Dictionary mapping legacy flat attribute names to SwarmConfig sections
-        # This is a heuristic based on SwarmConfig definition
-        if self.config:
-            # Check root
-            if hasattr(self.config, name):
-                return getattr(self.config, name)
-            
-            # Check sections
-            for section in ['gromacs', 'reference', 'cg_model', 'simulation', 'optimization', 'output']:
-                if hasattr(self.config, section):
-                    c_section = getattr(self.config, section)
-                    if hasattr(c_section, name):
-                        return getattr(c_section, name)
-             
-        raise AttributeError(f"'OptimizationContext' object has no attribute '{name}'")
+    # Dynamic Mapping Data
+    all_atoms: Any = None
+    all_aa_mols: Any = None
+    all_beads: Any = None
+    atom_w: Any = None
+    bonds_scaling_specific: Optional[Dict] = None
+    
+    # Reference Metrics
+    gyr_aa: Optional[float] = None
+    gyr_aa_std: Optional[float] = None
+    
+    # Results of BI initialization
+    performed_init_BI: Dict = field(default_factory=lambda: {"bond": False, "angle": False, "dihedral": False})
+    data_BI: Dict = field(default_factory=dict) # Reference distributions
+    domains_val: Dict = field(default_factory=dict) # Search domains
+
+
+@dataclass
+class OptimizationStatus:
+    """Stores progress indicators and timings."""
+    nb_eval: int = 0
+    start_opti_ts: float = 0.0
+    
+    # Timings
+    total_eval_time: float = 0.0
+    total_gmx_time: float = 0.0
+    total_model_eval_time: float = 0.0
+    
+    # Process management
+    process_alive_time_sleep: int = 10
+    process_alive_nb_cycles_dead: int = 0
+    bonds_rescaling_performed: bool = False
+    
+    # Cycle Parameters/Status
+    prod_sim_time: float = 0.0
+    prod_nb_frames: int = 0
+    val_guess_fact: float = 0.0
+    fct_guess_fact: float = 0.0
+    max_swarm_iter: int = 0
+    max_swarm_iter_without_new_global_best: int = 0
+    eval_nb_geoms: Dict = field(default_factory=lambda: {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0})
+
+
+@dataclass
+class OptimizationResults:
+    """Stores metrics of the current evaluation."""
+    gyr_aa_mapped: Optional[float] = None
+    gyr_aa_mapped_std: Optional[float] = None
+    gyr_cg: Optional[float] = None
+    gyr_cg_std: Optional[float] = None
+    
+    sasa_aa_mapped: Optional[float] = None
+    sasa_aa_mapped_std: Optional[float] = None
+    sasa_cg: Optional[float] = None
+    sasa_cg_std: Optional[float] = None
+
+
+@dataclass
+class ParticleSwarmState:
+    """Stores PSO specific state."""
+    best_fitness: Tuple[float, Any] = field(default_factory=lambda: (np.inf, None))
+    
+    # Tracking best independent parameters
+    all_best_emd_dist_geoms: Dict = field(default_factory=dict)
+    all_best_params_dist_geoms: Dict = field(default_factory=dict)
+    
+    worst_fit_score: float = 0.0
+    
+    # Active set of geometries being optimized
+    opti_geoms_all: Set = field(default_factory=set)
+
+
+@dataclass
+class OptimizationContext:
+    """
+    Context object to hold the state of the optimization process.
+    Refactored to compose granular state objects while maintaining 
+    backward compatibility via properties.
+    """
+    config: SwarmConfig
+    
+    # Composed State Objects
+    files: SimulationFiles = field(default_factory=SimulationFiles)
+    scoring: ScoringState = field(default_factory=ScoringState)
+    status: OptimizationStatus = field(default_factory=OptimizationStatus)
+    results: OptimizationResults = field(default_factory=OptimizationResults)
+    pso: ParticleSwarmState = field(default_factory=ParticleSwarmState)
+    
+    # Core Data Structures (kept at top level or moved?)
+    # These are core to the logic flow, could move to 'TopologyState' if desired,
+    # but for now let's keep them here or proxy them?
+    # Actually, let's keep them as fields here for now as they are central shared state.
+    cg_itp: Dict = field(default_factory=dict)
+    opti_itp: Dict = field(default_factory=dict)
+    out_itp: Dict = field(default_factory=dict) 
+    opti_cycle: Dict = field(default_factory=dict)
+    
+    # Managers (injected at runtime)
+    workspace_manager: Any = None
+    evaluator: Any = None
+

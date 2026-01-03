@@ -17,14 +17,16 @@ def get_settings(ns):
         _fast
         _test
     """
-    if ns.sim_type == "OPTIMAL":
+    sim_type = ns.config.optimization.sim_type
+    
+    if sim_type == "OPTIMAL":
         return _optimal(ns)
-    elif ns.sim_type == "FAST":
+    elif sim_type == "FAST":
         return _fast(ns)
-    elif ns.sim_type == "TEST":
+    elif sim_type == "TEST":
         return _test(ns)
     else:
-        msg = f"Simulation type {ns.sim_type} is not valid. (OPTIMAL, FAST, TEST)"
+        msg = f"Simulation type {sim_type} is not valid. (OPTIMAL, FAST, TEST)"
         raise ValueError(msg)
 
 
@@ -36,24 +38,27 @@ def _optimal(ns):
 
     ns requires:
         cg_itp
-        sim_duration_short
-        sim_duration_long
+        config.simulation.sim_duration_short
+        config.simulation.sim_duration_long
     """
+    sim_short = ns.config.simulation.sim_duration_short
+    sim_long = ns.config.simulation.sim_duration_long
+    
     sim_types = {
-        0: {"sim_duration": ns.sim_duration_short,
+        0: {"sim_duration": sim_short,
             "prod_nb_frames": 15000,
             "max_swarm_iter": int(
                 round(6 + np.sqrt(ns.cg_itp["nb_constraints"] + ns.cg_itp["nb_bonds"] + ns.cg_itp["nb_angles"]))),
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 1,
             "fct_guess_fact": 0.40},
-        1: {"sim_duration": ns.sim_duration_short,
+        1: {"sim_duration": sim_short,
             "prod_nb_frames": 15000,
             "max_swarm_iter": int(round(6 + np.sqrt(ns.cg_itp["nb_angles"] + ns.cg_itp["nb_dihedrals"]))),
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 0.25,
             "fct_guess_fact": 0.30},
-        2: {"sim_duration": ns.sim_duration_long,
+        2: {"sim_duration": sim_long,
             "prod_nb_frames": 15000,
             "max_swarm_iter": int(round(6 + np.sqrt(
                 ns.cg_itp["nb_constraints"] + ns.cg_itp["nb_bonds"] + ns.cg_itp["nb_angles"] + ns.cg_itp[
