@@ -58,12 +58,9 @@ def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
                 parameters_set[nb_bonds + nb_angles + i], 2)
 
 
-def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, optimization_config=None):
+def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, config: SwarmConfig):
     """Set dimensions of the search space."""
-    # Getting defaults from global config or passed optimization_config
-    # Ideally should use optimization_config, but falling back to config global constants for now to simulate original behavior
-    # if optimization_config is available, use it.
-    
+    opt_config = config.optimization
     search_space_boundaries = []
 
     if opti_cycle["nb_geoms"]["constraint"] > 0:
@@ -74,54 +71,36 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, opti
         if exec_mode == 1:
             search_space_boundaries.extend(domains_val["bond"])
         
-        # Using config globals as per original code access pattern (ns.default_max_fct_bonds_opti -> config or user arg)
-        # Assuming typical values if not provided.
-        # Original code used: ns.default_max_fct_bonds_opti
-        # We need to ensure we have access to these values.
-        # Let's assume they are in optimization_config or similar context passed.
-        # Simplification: use config defaults if not passed, but arguments control this.
-        # This function signature decoupling is tricky because of the many config values.
-        
-        # NOTE: For now, I'm using SwarmConfig.optimization defaults if accessed via optimization_config,
-        # otherwise referencing the global config module for hardcoded defaults if they exist there, 
-        # BUT `ns` attributes usually came from argparse defaults.
-        
-        max_fct_bonds = optimization_config.default_max_fct_bonds_opti if optimization_config else config.default_max_fct_bonds_opti
-        search_space_boundaries.extend([[0, max_fct_bonds]] * opti_cycle["nb_geoms"]["bond"])
+        search_space_boundaries.extend([[0, opt_config.default_max_fct_bonds_opti]] * opti_cycle["nb_geoms"]["bond"])
 
     if opti_cycle["nb_geoms"]["angle"] > 0:
         if exec_mode == 1:
             search_space_boundaries.extend(domains_val["angle"])
 
-        max_fct_angles_f1 = optimization_config.default_max_fct_angles_opti_f1 if optimization_config else config.default_max_fct_angles_opti_f1
-        max_fct_angles_f2 = optimization_config.default_max_fct_angles_opti_f2 if optimization_config else config.default_max_fct_angles_opti_f2
-
         for grp_angle in range(opti_cycle["nb_geoms"]["angle"]):
             if cg_itp["angle"][grp_angle]["func"] == 1:
-                search_space_boundaries.extend([[0, max_fct_angles_f1]])
+                search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f1]])
             elif cg_itp["angle"][grp_angle]["func"] == 2:
-                search_space_boundaries.extend([[0, max_fct_angles_f2]])
+                search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f2]])
 
     if opti_cycle["nb_geoms"]["dihedral"] > 0:
         if exec_mode == 1:
             search_space_boundaries.extend(domains_val["dihedral"])
 
-        range_dihedrals_nomult = optimization_config.default_abs_range_fct_dihedrals_opti_func_without_mult if optimization_config else config.default_abs_range_fct_dihedrals_opti_func_without_mult
-        range_dihedrals_mult = optimization_config.default_abs_range_fct_dihedrals_opti_func_with_mult if optimization_config else config.default_abs_range_fct_dihedrals_opti_func_with_mult
-
         for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
             if cg_itp["dihedral"][grp_dihedral]["func"] == 2:
-                search_space_boundaries.extend([[-range_dihedrals_nomult, range_dihedrals_nomult]])
+                search_space_boundaries.extend([[-opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult, opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult]])
             elif cg_itp["dihedral"][grp_dihedral]["func"] in config.dihedral_func_with_mult:
-                search_space_boundaries.extend([[-range_dihedrals_mult, range_dihedrals_mult]])
+                search_space_boundaries.extend([[-opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult, opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult]])
 
     return search_space_boundaries
 
-def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=False, exec_mode=1):
+def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config: SwarmConfig, verbose=False, exec_mode=1):
     """Update ITP force constants with Boltzmann inversion."""
+    opt_config = config.optimization
     
     # Constants/Config access - using global config as it contains physical constants
-    kB = config.kB
+    kB = config.kB # Leaving physical constant global
     
     # Check bonds
     if not performed_init_BI["bond"] and opti_cycle["nb_geoms"]["bond"] > 0:
@@ -138,10 +117,10 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
             nb_passes = 3
             alpha = 0.55
             for _ in range(nb_passes):
-                hist_geoms_modif = math_utils.ewma(hist_geoms_modif, alpha, int(config.bi_nb_bins / 10))
+                hist_geoms_modif = math_utils.ewma(hist_geoms_modif, alpha, int(opt_config.bi_nb_bins / 10))
 
             y = -kB * temp * np.log(hist_geoms_modif + 1)
-            x = np.linspace(bi_xrange[0], bi_xrange[1], config.bi_nb_bins, endpoint=True)
+            x = np.linspace(bi_xrange[0], bi_xrange[1], opt_config.bi_nb_bins, endpoint=True)
             k = kB * temp / std_grp_bond / std_grp_bond * 100 / 2
 
             params_guess = [k, avg_grp_bond * 10, min(y)]
@@ -154,7 +133,7 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
             deriv.rotate(-3)
 
             for _ in range(5):
-                deriv = math_utils.sma(deriv, int(config.bi_nb_bins / 5))
+                deriv = math_utils.sma(deriv, int(opt_config.bi_nb_bins / 5))
 
             deriv *= np.sqrt(y / min(y))
             with np.errstate(divide='ignore'):
@@ -165,8 +144,8 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
                 popt, pcov = curve_fit(gmx_bonds_func_1, x * 10, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
                 itp_obj["bond"][grp_bond]["fct"] = popt[0] * 100
                 
-                # Enforce limits (using global defaults for now as passed config is getting messy)
-                max_fct = config.default_max_fct_bonds_opti # Simplified, should use passed config
+                # Enforce limits
+                max_fct = opt_config.default_max_fct_bonds_opti
                 if not 0 <= itp_obj["bond"][grp_bond]["fct"] <= max_fct:
                     itp_obj["bond"][grp_bond]["fct"] = max_fct / 2
                 
@@ -187,18 +166,12 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
         for grp_angle in range(opti_cycle["nb_geoms"]["angle"]):
             hists_geoms_bi, std_rad_grp_angle, bi_xrange = data_BI["angle"][grp_angle]
             y = -kB * temp * np.log(hists_geoms_bi + 1)
-            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), config.bi_nb_bins, endpoint=True)
+            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), opt_config.bi_nb_bins, endpoint=True)
             k = kB * temp / std_rad_grp_angle / std_rad_grp_angle * 100 / 2
             
             sigma = np.where(y < max(y), 0.1, np.inf)
             func = itp_obj["angle"][grp_angle]["func"] # Using itp_obj which is cg_itp effectively here?
-            # Actually caller passes out_itp as itp_obj. but func is in cg_itp (static).
-            # We assume itp_obj HAS 'angle' structure with 'func', or we need cg_itp separate.
-            # Original: ns.cg_itp["angle"][grp_angle]["func"]
-            # But here we act on itp_obj.
-            # WARNING: perform_BI in swarmCG.py writes to ns.out_itp but reads from ns.cg_itp for func types!
-            # We will need to correct this. For now assuming itp_obj has func.
-            
+
             if func == 1:
                 params_guess = [k, std_rad_grp_angle, min(y)]
                 try:
@@ -229,7 +202,7 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
          for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
             hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = data_BI["dihedral"][grp_dihedral]
             y = -kB * temp * np.log(hists_geoms_bi + 1)
-            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), 2 * config.bi_nb_bins, endpoint=True)
+            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), 2 * opt_config.bi_nb_bins, endpoint=True)
             k = kB * temp / std_rad_grp_dihedral / std_rad_grp_dihedral
             sigma = np.where(y < max(y), 0.1, np.inf)
             
@@ -238,7 +211,6 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
             
             if exec_mode == 2:
                 avg_rad = np.deg2rad(itp_obj["dihedral"][grp_dihedral].get("value_user", 0)) # Fallback if missing
-                # ...
                 pass
 
             if func in config.dihedral_func_with_mult:
@@ -258,8 +230,6 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
                      pass
             
             if exec_mode == 1:
-                 # Update value if needed
-                 # itp_obj["dihedral"][grp_dihedral]["value"] = np.rad2deg(popt[1])
                  pass
             
             if verbose:
@@ -269,8 +239,7 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, verbose=Fa
 
 def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_val,
                            all_best_emd_dist_geoms, all_best_params_dist_geoms,
-                           exec_mode, user_input=False,
-                           config_obj=None, # SwarmConfig
+                           exec_mode, config: SwarmConfig, user_input=False,
                            val_guess_fact=None, fct_guess_fact=None,
                            verbose=False):
     """Build initial guesses for particles initialization."""
@@ -281,29 +250,21 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     if val_guess_fact is None: val_guess_fact = 1.0 # default?
     if fct_guess_fact is None: fct_guess_fact = 0.5 # default?
 
-    # Access config parameters (constants/optimization params)
-    # Using global config for defaults if config_obj missing, or direct access if present
-    # Simplified access helpers:
-    def get_conf(attr, default):
-        if config_obj and hasattr(config_obj.optimization, attr):
-            return getattr(config_obj.optimization, attr)
-        if hasattr(config, attr):
-             return getattr(config, attr)
-        return default
-
-    default_max_fct_bonds_opti = get_conf("default_max_fct_bonds_opti", 15000)
-    default_max_fct_angles_opti_f1 = get_conf("default_max_fct_angles_opti_f1", 1500)
-    default_max_fct_angles_opti_f2 = get_conf("default_max_fct_angles_opti_f2", 1500)
-    default_abs_range_fct_dihedrals_opti_func_without_mult = get_conf("default_abs_range_fct_dihedrals_opti_func_without_mult", 50)
-    default_abs_range_fct_dihedrals_opti_func_with_mult = get_conf("default_abs_range_fct_dihedrals_opti_func_with_mult", 50)
-    bond_dist_guess_variation = get_conf("bond_dist_guess_variation", 0.02)
-    angle_value_guess_variation = get_conf("angle_value_guess_variation", 5)
-    dihedral_value_guess_variation = get_conf("dihedral_value_guess_variation", 10)
-    fct_guess_min_flat_diff_bonds = get_conf("fct_guess_min_flat_diff_bonds", 500)
-    fct_guess_min_flat_diff_angles = get_conf("fct_guess_min_flat_diff_angles", 50)
-    fct_guess_min_flat_diff_dihedrals_without_mult = get_conf("fct_guess_min_flat_diff_dihedrals_without_mult", 1)
-    fct_guess_min_flat_diff_dihedrals_with_mult = get_conf("fct_guess_min_flat_diff_dihedrals_with_mult", 1)
-    sim_crash_EMD_indep_score = get_conf("sim_crash_EMD_indep_score", 999)
+    opt_config = config.optimization
+    
+    default_max_fct_bonds_opti = opt_config.default_max_fct_bonds_opti
+    default_max_fct_angles_opti_f1 = opt_config.default_max_fct_angles_opti_f1
+    default_max_fct_angles_opti_f2 = opt_config.default_max_fct_angles_opti_f2
+    default_abs_range_fct_dihedrals_opti_func_without_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
+    default_abs_range_fct_dihedrals_opti_func_with_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
+    bond_dist_guess_variation = opt_config.bond_dist_guess_variation
+    angle_value_guess_variation = opt_config.angle_value_guess_variation
+    dihedral_value_guess_variation = opt_config.dihedral_value_guess_variation
+    fct_guess_min_flat_diff_bonds = opt_config.fct_guess_min_flat_diff_bonds
+    fct_guess_min_flat_diff_angles = opt_config.fct_guess_min_flat_diff_angles
+    fct_guess_min_flat_diff_dihedrals_without_mult = opt_config.fct_guess_min_flat_diff_dihedrals_without_mult
+    fct_guess_min_flat_diff_dihedrals_with_mult = opt_config.fct_guess_min_flat_diff_dihedrals_with_mult
+    sim_crash_EMD_indep_score = opt_config.sim_crash_EMD_indep_score
 
 
     # 1. Exact current ITP (or BI in exec_mode 1)

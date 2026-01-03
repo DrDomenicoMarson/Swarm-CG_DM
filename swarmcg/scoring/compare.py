@@ -122,7 +122,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_constraints, bandwidth=ns.bw_constraints)
+            constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_constraints, bandwidth=ns.config.optimization.bw_constraints)
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -137,7 +137,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
         if not ns.scoring.atom_only:
             try:
-                constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.scoring.bins_constraints, bandwidth=ns.bw_constraints)
+                constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.scoring.bins_constraints, bandwidth=ns.config.optimization.bw_constraints)
                 constraints[grp_constraint]["CG"]["avg"] = constraint_avg
                 constraints[grp_constraint]["CG"]["hist"] = constraint_hist
 
@@ -151,11 +151,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 domain_max = max(constraints[grp_constraint]["AA"]["x"][-1], constraints[grp_constraint]["CG"]["x"][-1])
                 avg_diff_grp_constraints.append(
                     emd(constraints[grp_constraint]["AA"]["hist"], constraints[grp_constraint]["CG"]["hist"],
-                        ns.scoring.bins_constraints_dist_matrix) * ns.bonds2angles_scoring_factor)
+                        ns.scoring.bins_constraints_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
-                    f"exceed {ns.bonded_max_range} nm.\nIncrease bins range for bonds and "
+                    f"exceed {ns.config.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
                     f"constraints and retry!\nSee argument -bonds_max_range."
                 )
                 raise ValueError(msg)
@@ -190,7 +190,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_bonds, bandwidth=ns.bw_bonds)
+            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_bonds, bandwidth=ns.config.optimization.bw_bonds)
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -205,7 +205,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
         if not ns.scoring.atom_only:
             try:
-                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.scoring.bins_bonds, bandwidth=ns.bw_bonds)
+                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.scoring.bins_bonds, bandwidth=ns.config.optimization.bw_bonds)
                 bonds[grp_bond]["CG"]["avg"] = bond_avg
                 bonds[grp_bond]["CG"]["hist"] = bond_hist
 
@@ -217,11 +217,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 domain_min = min(bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["CG"]["x"][0])
                 domain_max = max(bonds[grp_bond]["AA"]["x"][-1], bonds[grp_bond]["CG"]["x"][-1])
                 avg_diff_grp_bonds.append(emd(bonds[grp_bond]["AA"]["hist"], bonds[grp_bond]["CG"]["hist"],
-                                              ns.scoring.bins_bonds_dist_matrix) * ns.bonds2angles_scoring_factor)
+                                              ns.scoring.bins_bonds_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
             except IndexError:
                 msg = (
                     f"Most probably because you have bonds or constraints that "
-                    f"exceed {ns.bonded_max_range} nm.\nIncrease bins range for bonds and "
+                    f"exceed {ns.config.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
                     f"constraints and retry!\nSee argument -bonds_max_range."
                 )
                 raise ValueError(msg)
@@ -255,7 +255,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.bw_angles)
+            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.config.optimization.bw_angles)
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -269,7 +269,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 angles[grp_angle]["AA"]["y"].append(angles[grp_angle]["AA"]["hist"][i])
 
         if not ns.scoring.atom_only:
-            angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.bw_angles)
+            angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.config.optimization.bw_angles)
             angles[grp_angle]["CG"]["avg"] = angle_avg
             angles[grp_angle]["CG"]["hist"] = angle_hist
 
@@ -313,7 +313,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.bw_dihedrals)
+            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.config.optimization.bw_dihedrals)
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -327,7 +327,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 dihedrals[grp_dihedral]["AA"]["y"].append(dihedrals[grp_dihedral]["AA"]["hist"][i])
 
         if not ns.scoring.atom_only:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.bw_dihedrals)
+            dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.config.optimization.bw_dihedrals)
             dihedrals[grp_dihedral]["CG"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["CG"]["hist"] = dihedral_hist
 
@@ -713,7 +713,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             fit_score_constraints_bonds, 3), round(fit_score_angles, 3), round(fit_score_dihedrals, 3)
         all_dist_pairwise += "\n"
         print()
-        print("Using bonds to angles/dihedrals (C) scoring constant:", ns.bonds2angles_scoring_factor)
+        print("Using bonds to angles/dihedrals (C) scoring constant:", ns.config.optimization.bonds2angles_scoring_factor)
         print()
         print("Global fitness score:", fit_score_total, "(lower is better)", flush=True)
         print("  Bonds/Constraints constribution to fitness score:", fit_score_constraints_bonds, flush=True)

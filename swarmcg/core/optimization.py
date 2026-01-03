@@ -177,9 +177,9 @@ class SwarmOptimizer:
         print("| Optimizing", geoms_display, " " * (95 - 16 - len(geoms_display)), "|")
         print(swarmcg.shared.styling.sep_close)
 
-        forcefield.perform_BI(self.ns.out_itp, self.ns.opti_cycle, self.ns.data_BI, self.ns.performed_init_BI, self.ns.temp, exec_mode=self.ns.exec_mode)
+        forcefield.perform_BI(self.ns.out_itp, self.ns.opti_cycle, self.ns.data_BI, self.ns.performed_init_BI, self.ns.temp, config=self.ns.config, exec_mode=self.ns.exec_mode)
 
-        search_space_boundaries = forcefield.get_search_space_boundaries(self.ns.cg_itp, self.ns.opti_cycle, self.ns.domains_val, self.ns.exec_mode, optimization_config=self.ns.config.optimization)
+        search_space_boundaries = forcefield.get_search_space_boundaries(self.ns.cg_itp, self.ns.opti_cycle, self.ns.domains_val, self.ns.exec_mode, config=self.ns.config)
 
         self._calculate_worst_fit_score()
 
@@ -187,8 +187,7 @@ class SwarmOptimizer:
         
         initial_guess_list = forcefield.get_initial_guess_list(nb_particles, self.ns.opti_cycle, self.ns.cg_itp, self.ns.out_itp, self.ns.domains_val,
                            self.ns.all_best_emd_dist_geoms, self.ns.all_best_params_dist_geoms,
-                           self.ns.exec_mode, user_input=self.ns.user_input,
-                           config_obj=self.ns.config, 
+                           self.ns.exec_mode, config=self.ns.config, user_input=self.ns.user_input, 
                            val_guess_fact=self.ns.val_guess_fact, fct_guess_fact=self.ns.fct_guess_fact)
 
         # Optimization
