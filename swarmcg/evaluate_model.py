@@ -5,6 +5,7 @@ from shlex import quote as cmd_quote
 import numpy as np
 import matplotlib
 
+import swarmcg.io as io
 import swarmcg.shared.styling
 from swarmcg.shared import catch_warnings
 from swarmcg.scoring.compare import compare_models
