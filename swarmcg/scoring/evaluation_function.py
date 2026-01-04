@@ -8,6 +8,7 @@ from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg.scoring.compare import compare_models
 from swarmcg.forcefield import update_cg_itp_obj
+from swarmcg.shared import exceptions, styling
 from swarmcg.utils import print_stdout_forced
 
 
@@ -84,13 +85,19 @@ def eval_function(parameters_set, ns: OptimizationContext):
         swarm_config = ns.config
 
         sim_manager = sim.SimulationManager(swarm_config)
-        sim_manager.run_simulation(
-            os.getcwd(),
-            sim_time=getattr(ns, 'prod_sim_time', None),
-            nb_frames=getattr(ns, 'prod_nb_frames', None)
-        )
+        sim_failed = False
+        sim_error = None
+        try:
+            sim_manager.run_simulation(
+                os.getcwd(),
+                sim_time=getattr(ns.status, 'prod_sim_time', None),
+                nb_frames=getattr(ns.status, 'prod_nb_frames', None)
+            )
+        except exceptions.ComputationError as exc:
+            sim_failed = True
+            sim_error = exc
 
-        if os.path.isfile("md.gro"):
+        if not sim_failed and os.path.isfile("md.gro"):
 
             ns.files.cg_tpr_filename = "md.tpr"
             ns.files.cg_traj_filename = "md.xtc"
@@ -142,6 +149,12 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
                 ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
         else:
+            if sim_failed:
+                print_stdout_forced(
+                    styling.header_warning
+                    + "Simulation failed; assigning worst score and continuing.\n"
+                    + str(sim_error)
+                )
             eval_score = ns.pso.worst_fit_score
             fit_score_total = ns.pso.worst_fit_score
             fit_score_constraints_bonds = ns.pso.worst_fit_score

@@ -356,6 +356,12 @@ verbose = BaseField(
     help="Display more processing details & error traceback",
     action="store_true"
 )
+nobanner = BaseField(
+    dest="no_banner",
+    default=False,
+    help="Suppress the ASCII banner header and print a single-line header instead",
+    action="store_true",
+)
 help = BaseField(
     help="Show this help message and exit",
     action="help"

@@ -24,6 +24,10 @@ def run(config_obj: SwarmConfig):
     """
     # Create context
     ns = OptimizationContext(config=config_obj)
+    ns.scoring.mismatch_order = config_obj.output.mismatch_order
+    ns.scoring.row_x_scaling = config_obj.output.row_x_scaling
+    ns.scoring.row_y_scaling = config_obj.output.row_y_scaling
+    ns.scoring.ncols_max = config_obj.output.ncols_max
 
     print()
     print(swarmcg.shared.styling.sep_close)

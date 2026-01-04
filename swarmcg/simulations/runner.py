@@ -236,7 +236,7 @@ class SimulationManager:
         steps = ["minimization", "equilibration", "production"]
         
         for step_type in steps:
-            sim_config = select_class(step_type, self.config.simulation)
+            sim_config = select_class(step_type, self.config.simulation, base_dir=working_dir)
             simulation_setup = config_to_runner(self.config, sim_config, prev_gro, sim_time, nb_frames)
             
             step = SimulationStep(simulation_setup)

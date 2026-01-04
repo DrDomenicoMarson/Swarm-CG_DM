@@ -2,6 +2,7 @@
 import os
 from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
+from swarmcg import config as config_module
 
 class GromacsConfig(BaseModel):
     gmx_path: str = "gmx"
@@ -84,6 +85,14 @@ class OptimizationConfig(BaseModel):
     # Other
     keep_all_sims: bool = False
     bi_nb_bins: int = 50
+    bond_dist_guess_variation: float = config_module.bond_dist_guess_variation
+    angle_value_guess_variation: float = config_module.angle_value_guess_variation
+    dihedral_value_guess_variation: float = config_module.dihedral_value_guess_variation
+    fct_guess_min_flat_diff_bonds: float = config_module.fct_guess_min_flat_diff_bonds
+    fct_guess_min_flat_diff_angles: float = config_module.fct_guess_min_flat_diff_angles
+    fct_guess_min_flat_diff_dihedrals_without_mult: float = config_module.fct_guess_min_flat_diff_dihedrals_without_mult
+    fct_guess_min_flat_diff_dihedrals_with_mult: float = config_module.fct_guess_min_flat_diff_dihedrals_with_mult
+    sim_crash_EMD_indep_score: float = config_module.sim_crash_EMD_indep_score
 
     @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1', 'default_max_fct_angles_opti_f2')
     @classmethod
@@ -236,7 +245,15 @@ class SwarmConfig(BaseModel):
             bonds_scaling_str=getattr(ns, 'bonds_scaling_str', ""),
             min_bonds_length=getattr(ns, 'min_bonds_length', 0.0),
             keep_all_sims=getattr(ns, 'keep_all_sims', False),
-            bi_nb_bins=getattr(ns, 'bi_nb_bins', 50)
+            bi_nb_bins=getattr(ns, 'bi_nb_bins', 50),
+            bond_dist_guess_variation=getattr(ns, 'bond_dist_guess_variation', config_module.bond_dist_guess_variation),
+            angle_value_guess_variation=getattr(ns, 'angle_value_guess_variation', config_module.angle_value_guess_variation),
+            dihedral_value_guess_variation=getattr(ns, 'dihedral_value_guess_variation', config_module.dihedral_value_guess_variation),
+            fct_guess_min_flat_diff_bonds=getattr(ns, 'fct_guess_min_flat_diff_bonds', config_module.fct_guess_min_flat_diff_bonds),
+            fct_guess_min_flat_diff_angles=getattr(ns, 'fct_guess_min_flat_diff_angles', config_module.fct_guess_min_flat_diff_angles),
+            fct_guess_min_flat_diff_dihedrals_without_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_without_mult', config_module.fct_guess_min_flat_diff_dihedrals_without_mult),
+            fct_guess_min_flat_diff_dihedrals_with_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_with_mult', config_module.fct_guess_min_flat_diff_dihedrals_with_mult),
+            sim_crash_EMD_indep_score=getattr(ns, 'sim_crash_EMD_indep_score', config_module.sim_crash_EMD_indep_score)
         )
 
         # Output

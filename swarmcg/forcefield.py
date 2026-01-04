@@ -58,9 +58,9 @@ def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
                 parameters_set[nb_bonds + nb_angles + i], 2)
 
 
-def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, config: SwarmConfig):
+def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, config_obj: SwarmConfig):
     """Set dimensions of the search space."""
-    opt_config = config.optimization
+    opt_config = config_obj.optimization
     search_space_boundaries = []
 
     if opti_cycle["nb_geoms"]["constraint"] > 0:
@@ -95,9 +95,9 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, conf
 
     return search_space_boundaries
 
-def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config: SwarmConfig, verbose=False, exec_mode=1):
+def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj: SwarmConfig, verbose=False, exec_mode=1):
     """Update ITP force constants with Boltzmann inversion."""
-    opt_config = config.optimization
+    opt_config = config_obj.optimization
     
     # Constants/Config access - using global config as it contains physical constants
     kB = config.kB # Leaving physical constant global
@@ -239,7 +239,7 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config: Sw
 
 def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_val,
                            all_best_emd_dist_geoms, all_best_params_dist_geoms,
-                           exec_mode, config: SwarmConfig, user_input=False,
+                           exec_mode, config_obj: SwarmConfig, user_input=False,
                            val_guess_fact=None, fct_guess_fact=None,
                            verbose=False):
     """Build initial guesses for particles initialization."""
@@ -250,7 +250,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     if val_guess_fact is None: val_guess_fact = 1.0 # default?
     if fct_guess_fact is None: fct_guess_fact = 0.5 # default?
 
-    opt_config = config.optimization
+    opt_config = config_obj.optimization
     
     default_max_fct_bonds_opti = opt_config.default_max_fct_bonds_opti
     default_max_fct_angles_opti_f1 = opt_config.default_max_fct_angles_opti_f1

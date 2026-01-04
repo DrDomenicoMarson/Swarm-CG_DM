@@ -52,6 +52,7 @@ class ScoringState:
     mismatch_order: bool = False
     row_x_scaling: bool = True
     row_y_scaling: bool = True
+    ncols_max: int = 0
     atom_only: bool = False
     molname_in: Any = None
     
@@ -155,4 +156,3 @@ class OptimizationContext:
     # Managers (injected at runtime)
     workspace_manager: Any = None
     evaluator: Any = None
-

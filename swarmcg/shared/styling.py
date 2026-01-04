@@ -38,6 +38,10 @@ def header_package(module_line):
 """
 
 
+def header_simple(module_name):
+    return f"SWARM-CG, version {swarmcg.__version__}, module {module_name}"
+
+
 ANALYSE_DESCR = """
 This module produces a visual summary (big plot) of an optimization procedure started with
 module "scg_optimize" to refine the bonded terms of a coarse-grained (CG) molecular model.

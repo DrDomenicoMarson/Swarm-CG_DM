@@ -1,11 +1,15 @@
 from argparse import ArgumentParser, RawTextHelpFormatter, SUPPRESS
+import sys
 
 from swarmcg.shared import styling
 from swarmcg.io.job_args import defaults
 
 
 def get_evaluate_args():
-    print(styling.header_package("                Module: Model bonded terms assessment\n"))
+    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
+        print(styling.header_simple("evaluate"))
+    else:
+        print(styling.header_package("                Module: Model bonded terms assessment\n"))
 
     formatter = lambda prog: RawTextHelpFormatter(prog, width=135, max_help_position=52)
     args_parser = ArgumentParser(
@@ -35,6 +39,7 @@ def get_evaluate_args():
     optional_args2 = args_parser.add_argument_group(bullet + "OTHERS")
     optional_args2.add_argument("-o_ev", **defaults.o_ev.args)
     optional_args2.add_argument("-h", "--help", **defaults.help.args)
+    optional_args2.add_argument("--nobanner", "-nobanner", **defaults.nobanner.args)
     optional_args2.add_argument("-v", "--verbose", **defaults.verbose.args)
 
     return args_parser

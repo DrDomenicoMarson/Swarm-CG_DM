@@ -34,7 +34,10 @@ class BaseSimulationConfig:
     def to_string(self):
         output_string = ""
         for k, v in self.sim_setup.items():
-            output_string += f"{k}".ljust(25, " ") + f"  = {str(v)}\n"
+            if k == "nb_frames":
+                output_string += f"; {k}".ljust(25, " ") + f"  = {str(v)}  (swarmcg internal)\n"
+            else:
+                output_string += f"{k}".ljust(25, " ") + f"  = {str(v)}\n"
         return output_string
 
     def _validate_init(self):
@@ -101,19 +104,25 @@ class Production(BaseSimulationConfig):
     edit_mpd = True
 
 
-def select_class(step_type, config):
+def select_class(step_type, config, base_dir=None):
     """
     Factory for simulation step configuration.
     
     Args:
         step_type (str): One of 'minimization', 'equilibration', 'production'
         config (SimulationConfig): Configuration object containing file paths
+        base_dir (str, optional): Directory containing staged MDP files
     """
+    def resolve_mdp_path(path):
+        if base_dir:
+            return os.path.join(base_dir, os.path.basename(path))
+        return path
+
     if step_type == "production":
-        return Production(config.mdp_md_filename)
+        return Production(resolve_mdp_path(config.mdp_md_filename))
     elif step_type == "equilibration":
-        return Equilibration(config.mdp_equi_filename)
+        return Equilibration(resolve_mdp_path(config.mdp_equi_filename))
     elif step_type == "minimization":
-        return Minimisation(config.mdp_minimization_filename)
+        return Minimisation(resolve_mdp_path(config.mdp_minimization_filename))
     else:
         raise ValueError(f"Step type '{step_type}' does not correspond to any class.")

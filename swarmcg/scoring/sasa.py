@@ -41,7 +41,7 @@ def compute_SASA(config: SwarmConfig, cg_itp, traj_type):
         
         aa_tpr_filename = config.reference.aa_tpr_filename
         aa_traj_filename = config.reference.aa_traj_filename
-        cg_map_filename = config.cg_model.cg_map_filename # Mapping file (ndx)
+        cg_map_filename = config.reference.cg_map_filename  # Mapping file (ndx)
 
         aa_traj_whole_filename = '../' + global_config.input_sim_files_dirname + '/aa_traj_whole.xtc'
         aa_mapped_traj_whole_filename = '../' + global_config.input_sim_files_dirname + '/aa_mapped_traj_whole.xtc'

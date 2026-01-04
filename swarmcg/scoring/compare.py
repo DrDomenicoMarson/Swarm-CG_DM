@@ -61,12 +61,12 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                       guess_bonds=False)
         print("  Found", len(ns.scoring.cg_universe.trajectory), "frames")
 
-        if manual_mode:
-            # here we read the CG beads masses + actualize the mapped trajectory object
+        if manual_mode or any(atom["mass"] is None for atom in ns.cg_itp["atoms"]):
+            # Sync masses from CG trajectory (TPR) to avoid None masses in mapped universe.
             for bead_id in range(len(ns.cg_itp["atoms"])):
                 ns.cg_itp["atoms"][bead_id]["mass"] = ns.scoring.cg_universe.atoms[bead_id].mass
-            masses = np.array([val["mass"] for val in ns.cg_itp["atoms"]])
-            ns.scoring.aa2cg_universe._topology.masses.values = np.array(masses)
+            masses = np.array([val["mass"] for val in ns.cg_itp["atoms"]], dtype=float)
+            ns.scoring.aa2cg_universe._topology.masses.values = masses
 
         # create fake bonds in the CG MDA universe, that will be used only for making the molecule whole
         # we make bonds between each VS and their beads definition, so we retrieve the connectivity

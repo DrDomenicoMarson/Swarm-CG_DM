@@ -52,9 +52,10 @@ class SwarmOptimizer:
 
     def _initialize_context(self):
         # Default variable initialization
-        self.ns.scoring.mismatch_order = False
-        self.ns.scoring.row_x_scaling = True
-        self.ns.scoring.row_y_scaling = True
+        self.ns.scoring.mismatch_order = self.config.output.mismatch_order
+        self.ns.scoring.row_x_scaling = self.config.output.row_x_scaling
+        self.ns.scoring.row_y_scaling = self.config.output.row_y_scaling
+        self.ns.scoring.ncols_max = self.config.output.ncols_max
         self.ns.scoring.molname_in = None
         
         self.ns.status.process_alive_time_sleep = 10
@@ -64,8 +65,8 @@ class SwarmOptimizer:
 
         # file basenames
         self.ns.files.cg_itp_basename = os.path.basename(self.config.cg_model.cg_itp_filename)
-        self.ns.files.gro_input_basename = os.path.basename(self.config.simulation.gro_input_filename)
-        self.ns.files.top_input_basename = os.path.basename(self.config.simulation.top_input_filename)
+        self.ns.files.gro_input_basename = os.path.basename(self.config.cg_model.gro_input_filename)
+        self.ns.files.top_input_basename = os.path.basename(self.config.cg_model.top_input_filename)
         self.ns.files.mdp_minimization_basename = os.path.basename(self.config.simulation.mdp_minimization_filename)
         self.ns.files.mdp_equi_basename = os.path.basename(self.config.simulation.mdp_equi_filename)
         self.ns.files.mdp_md_basename = os.path.basename(self.config.simulation.mdp_md_filename)
@@ -177,18 +178,42 @@ class SwarmOptimizer:
         print("| Optimizing", geoms_display, " " * (95 - 16 - len(geoms_display)), "|")
         print(swarmcg.shared.styling.sep_close)
 
-        forcefield.perform_BI(self.ns.out_itp, self.ns.opti_cycle, self.ns.data_BI, self.ns.performed_init_BI, self.ns.temp, config=self.ns.config, exec_mode=self.ns.exec_mode)
+        forcefield.perform_BI(
+            self.ns.out_itp,
+            self.ns.opti_cycle,
+            self.ns.scoring.data_BI,
+            self.ns.scoring.performed_init_BI,
+            self.config.simulation.temp,
+            config_obj=self.ns.config,
+            exec_mode=self.config.optimization.exec_mode,
+        )
 
-        search_space_boundaries = forcefield.get_search_space_boundaries(self.ns.cg_itp, self.ns.opti_cycle, self.ns.domains_val, self.ns.exec_mode, config=self.ns.config)
+        search_space_boundaries = forcefield.get_search_space_boundaries(
+            self.ns.cg_itp,
+            self.ns.opti_cycle,
+            self.ns.scoring.domains_val,
+            self.config.optimization.exec_mode,
+            config_obj=self.ns.config,
+        )
 
         self._calculate_worst_fit_score()
 
         nb_particles = particle_setter(search_space_boundaries)
         
-        initial_guess_list = forcefield.get_initial_guess_list(nb_particles, self.ns.opti_cycle, self.ns.cg_itp, self.ns.out_itp, self.ns.domains_val,
-                           self.ns.all_best_emd_dist_geoms, self.ns.all_best_params_dist_geoms,
-                           self.ns.exec_mode, config=self.ns.config, user_input=self.ns.user_input, 
-                           val_guess_fact=self.ns.val_guess_fact, fct_guess_fact=self.ns.fct_guess_fact)
+        initial_guess_list = forcefield.get_initial_guess_list(
+            nb_particles,
+            self.ns.opti_cycle,
+            self.ns.cg_itp,
+            self.ns.out_itp,
+            self.ns.scoring.domains_val,
+            self.ns.pso.all_best_emd_dist_geoms,
+            self.ns.pso.all_best_params_dist_geoms,
+            self.config.optimization.exec_mode,
+            config_obj=self.ns.config,
+            user_input=self.config.cg_model.user_input,
+            val_guess_fact=self.ns.status.val_guess_fact,
+            fct_guess_fact=self.ns.status.fct_guess_fact,
+        )
 
         # Optimization
         with open(os.devnull, "w") as devnull:
@@ -197,10 +222,18 @@ class SwarmOptimizer:
                 FP.set_search_space(search_space_boundaries)
                 FP.set_swarm_size(nb_particles)
                 FP.set_fitness(fitness=eval_function, arguments=self.ns, skip_test=True)
-                result = FP.solve_with_fstpso(max_iter=self.ns.max_swarm_iter, initial_guess_list=initial_guess_list,
-                                              max_iter_without_new_global_best=self.ns.max_swarm_iter_without_new_global_best)
+                result = FP.solve_with_fstpso(
+                    max_iter=self.ns.status.max_swarm_iter,
+                    initial_guess_list=initial_guess_list,
+                    max_iter_without_new_global_best=self.ns.status.max_swarm_iter_without_new_global_best,
+                )
 
-        forcefield.update_cg_itp_obj(self.ns.out_itp, self.ns.opti_cycle, parameters_set=result[0].X, exec_mode=self.ns.exec_mode)
+        forcefield.update_cg_itp_obj(
+            self.ns.out_itp,
+            self.ns.opti_cycle,
+            parameters_set=result[0].X,
+            exec_mode=self.config.optimization.exec_mode,
+        )
 
     def _update_geom_counts_for_cycle(self):
         if "constraint" in self.ns.opti_cycle["geoms"]:
