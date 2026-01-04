@@ -59,7 +59,7 @@ class SwarmOptimizer:
         
         self.ns.status.process_alive_time_sleep = 10
         self.ns.status.process_alive_nb_cycles_dead = int(
-            self.config.simulation.sim_kill_delay / self.ns.status.process_alive_time_sleep)
+            self.config.gromacs.sim_kill_delay / self.ns.status.process_alive_time_sleep)
         self.ns.status.bonds_rescaling_performed = False
 
         # file basenames

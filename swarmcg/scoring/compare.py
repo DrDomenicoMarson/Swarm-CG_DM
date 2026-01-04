@@ -2,7 +2,16 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
-from pyemd import emd
+import warnings
+
+# Silence pyemd pkg_resources deprecation warning on import.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"pkg_resources is deprecated as an API\..*",
+        category=UserWarning,
+    )
+    from pyemd import emd
 
 import swarmcg.scoring as scores
 from swarmcg.config_types import SwarmConfig
