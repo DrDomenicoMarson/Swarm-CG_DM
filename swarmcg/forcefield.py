@@ -9,7 +9,7 @@ from swarmcg.shared.logging_utils import get_logger
 from swarmcg.shared.math_utils import draw_float
 from swarmcg.simulations.potentials import (
     gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2, gmx_angles_func_10,
-    gmx_dihedrals_func_1, gmx_dihedrals_func_2, gmx_dihedrals_func_3
+    gmx_dihedrals_func_1, gmx_dihedrals_func_2, gmx_dihedrals_func_3, gmx_dihedrals_func_11
 )
 
 logger = get_logger(__name__)
@@ -56,7 +56,7 @@ def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
     # Dihedrals
     for i in range(nb_dihedrals):
         func = itp_obj["dihedral"][i]["func"]
-        if func == 3:
+        if func in (3, 11):
             coeffs = [round(param, 2) for param in parameters_set[idx:idx + 6]]
             idx += 6
             itp_obj["dihedral"][i]["params"] = coeffs
@@ -104,8 +104,11 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, conf
     if opti_cycle["nb_geoms"]["dihedral"] > 0:
         for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
             func = cg_itp["dihedral"][grp_dihedral]["func"]
-            if func == 3:
-                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_rb
+            if func in (3, 11):
+                if func == 3:
+                    max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_rb
+                else:
+                    max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_cbt
                 search_space_boundaries.extend([[-max_abs, max_abs]] * 6)
                 continue
 
@@ -294,21 +297,21 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
                 except:
                     pass
-            elif func == 3:
-                # Keep RB coefficients from input (no BI fit currently applied)
+            elif func in (3, 11):
+                # Keep polynomial coefficients from input (no BI fit currently applied)
                 pass
 
-            if func != 3:
+            if func not in (3, 11):
                 itp_obj["dihedral"][grp_dihedral]["params"] = [
                     itp_obj["dihedral"][grp_dihedral]["value"],
                     itp_obj["dihedral"][grp_dihedral]["fct"],
                 ]
 
             if verbose:
-                if func == 3:
+                if func in (3, 11):
                     coeffs = itp_obj["dihedral"][grp_dihedral]["params"]
                     logger.info(
-                        "  Dihedral group %s RB coefficients: %s",
+                        "  Dihedral group %s coefficients: %s",
                         grp_dihedral + 1,
                         [round(coeff, 2) for coeff in coeffs],
                     )
@@ -343,6 +346,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     default_abs_range_fct_dihedrals_opti_func_without_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
     default_abs_range_fct_dihedrals_opti_func_with_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
     default_abs_range_fct_dihedrals_opti_func_rb = opt_config.default_abs_range_fct_dihedrals_opti_func_rb
+    default_abs_range_fct_dihedrals_opti_func_cbt = opt_config.default_abs_range_fct_dihedrals_opti_func_cbt
     bond_dist_guess_variation = opt_config.bond_dist_guess_variation
     angle_value_guess_variation = opt_config.angle_value_guess_variation
     dihedral_value_guess_variation = opt_config.dihedral_value_guess_variation
@@ -384,8 +388,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
 
     for i in range(opti_cycle["nb_geoms"]["dihedral"]):
         func = cg_itp["dihedral"][i]["func"]
-        if func == 3:
-            max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+        if func in (3, 11):
+            max_abs = default_abs_range_fct_dihedrals_opti_func_rb if func == 3 else default_abs_range_fct_dihedrals_opti_func_cbt
             for coeff in out_itp["dihedral"][i]["params"]:
                 input_guess.append(min(max(coeff, -max_abs), max_abs))
             continue
@@ -456,8 +460,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
             if all_best_emd_dist_geoms["dihedrals"][i] != sim_crash_EMD_indep_score:
                 best_params = all_best_params_dist_geoms["dihedrals"][i]["params"]
 
-            if func == 3:
-                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+            if func in (3, 11):
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb if func == 3 else default_abs_range_fct_dihedrals_opti_func_cbt
                 params = best_params if best_params is not None else out_itp["dihedral"][i]["params"]
                 for coeff in params:
                     input_guess.append(min(max(coeff, -max_abs), max_abs))
@@ -516,8 +520,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         # dihedrals
         for i in range(opti_cycle["nb_geoms"]["dihedral"]):
             func = cg_itp["dihedral"][i]["func"]
-            if func == 3:
-                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+            if func in (3, 11):
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb if func == 3 else default_abs_range_fct_dihedrals_opti_func_cbt
                 for coeff in out_itp["dihedral"][i]["params_user"]:
                     input_guess.append(min(max(coeff, -max_abs), max_abs))
                 continue
@@ -592,8 +596,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 emd_err_fact = 1
 
             func = cg_itp["dihedral"][j]["func"]
-            if func == 3:
-                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+            if func in (3, 11):
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb if func == 3 else default_abs_range_fct_dihedrals_opti_func_cbt
                 for coeff in out_itp["dihedral"][j]["params"]:
                     if coeff > 0:
                         draw_low = coeff * (1 - fct_guess_fact * emd_err_fact)

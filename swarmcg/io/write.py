@@ -78,8 +78,8 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
 
         if "dihedral" in print_sections and "dihedral" in itp_obj and len(itp_obj["dihedral"]) > 0:
             fp.write("\n\n[ dihedrals ]\n")
-            has_rb = any(dihedral["func"] == 3 for dihedral in itp_obj["dihedral"])
-            if has_rb:
+            has_poly = any(dihedral["func"] in (3, 11) for dihedral in itp_obj["dihedral"])
+            if has_poly:
                 fp.write(";   i     j     k     l   funct    params\n")
             else:
                 fp.write(";   i     j     k     l   funct     dihedral   force.c.   mult.\n")
@@ -93,7 +93,7 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
                 for i in range(len(itp_obj["dihedral"][j]["beads"])):
 
                     func = itp_obj["dihedral"][j]["func"]
-                    if func == 3:
+                    if func in (3, 11):
                         params = itp_obj["dihedral"][j]["params"]
                         params_str = " ".join(f"{param:9.2f}" for param in params)
                         fp.write(

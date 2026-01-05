@@ -57,6 +57,16 @@ def gmx_dihedrals_func_3(x, c0, c1, c2, c3, c4, c5):
     cos_psi = np.cos(psi)
     return c0 + c1 * cos_psi + c2 * cos_psi ** 2 + c3 * cos_psi ** 3 + c4 * cos_psi ** 4 + c5 * cos_psi ** 5
 
+
+def gmx_dihedrals_func_11(theta_prev, theta_curr, phi, k_phi, a0, a1, a2, a3, a4):
+    """
+    Gromacs dihedral function 11 (combined bending-torsion potential).
+    """
+    sin_term = np.sin(theta_prev) ** 3 * np.sin(theta_curr) ** 3
+    cos_phi = np.cos(phi)
+    series = a0 + a1 * cos_phi + a2 * cos_phi ** 2 + a3 * cos_phi ** 3 + a4 * cos_phi ** 4
+    return k_phi * sin_term * series
+
 # TODO: for dihedral function 9, this is the merging of several potentials of
 # TODO: gmx_dihedrals_func_1 -- here one of mult=1 together with another of mult=2
 # def f(x,a,b,c,d,e):

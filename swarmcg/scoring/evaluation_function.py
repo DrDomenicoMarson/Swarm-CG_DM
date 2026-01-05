@@ -253,12 +253,12 @@ def eval_function(parameters_set, ns: OptimizationContext):
             for i in range(len(ns.cg_itp["dihedral"])):
                 func = ns.cg_itp["dihedral"][i]["func"]
                 if ns.opti_cycle["nb_geoms"]["dihedral"] == 0:
-                    if func == 3:
+                    if func in (3, 11):
                         recap_line += "0 0 0 0 0 0 "
                     else:
                         recap_line += "0 0 "
                 else:
-                    if func == 3:
+                    if func in (3, 11):
                         recap_line += " ".join(map(str, ns.out_itp["dihedral"][i]["params"])) + " "
                     else:
                         recap_line += f"{ns.out_itp['dihedral'][i]['value']} {ns.out_itp['dihedral'][i]['fct']} "

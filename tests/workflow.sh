@@ -16,8 +16,8 @@ scg_optimize \
   -nt 8 \
   -out_dir workflow_output \
   -v \
-  -cg_time_short 3 \
-  -cg_time_long 4 \
+  -cg_time_short 2 \
+  -cg_time_long 3 \
 
 
 

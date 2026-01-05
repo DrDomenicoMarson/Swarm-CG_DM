@@ -209,7 +209,7 @@ def run(ns):
 
             for j in range(nb_dihedrals):
                 func = dihedral_funcs[j]
-                if func == 3:
+                if func in (3, 11):
                     coeffs = list(map(float, sp_eval_line[param_idx:param_idx + 6]))
                     param_idx += 6
                     parameters_vals["dihedrals"]["coeffs"][j].append(coeffs)
@@ -612,12 +612,12 @@ def run(ns):
         for i in range(ncols):
             if i < nb_dihedrals:
                 func = dihedral_funcs[i]
-                if func == 3:
-                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - RB coeffs")
+                if func in (3, 11):
+                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - Coeffs")
                     ax[nrow - 1][i].grid(zorder=0.5)
                     ax[nrow - 1][i].set_xlim(x_min, x_max)
                     ax[nrow - 1][i].set_ylim(0, 1)
-                    ax[nrow - 1][i].text(0.5, 0.5, "RB coefficients\nnot plotted",
+                    ax[nrow - 1][i].text(0.5, 0.5, "Dihedral coefficients\nnot plotted",
                                          ha="center", va="center", transform=ax[nrow - 1][i].transAxes)
                     if display_opti_cycles_sep:
                         for j in range(len(opti_cycles_sep)):

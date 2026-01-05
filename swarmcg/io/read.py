@@ -392,19 +392,19 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     func = verify_handled_functions("dihedral", sp_itp_line[4], i + 1)
                     cg_itp["dihedral"][nb_dihedrals]["func"].append(func)
-                    if func == 3:
+                    if func in (3, 11):
                         try:
                             params = [float(param) for param in sp_itp_line[5:11]]
                         except (IndexError, ValueError):
                             msg = (
                                 "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
-                                "Function 3 expects 6 coefficients (C0..C5) after the function id."
+                                "Function 3/11 expects 6 parameters after the function id."
                             )
                             raise exceptions.MissformattedFile(msg)
                         if len(params) != 6:
                             msg = (
                                 "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
-                                "Function 3 expects 6 coefficients (C0..C5) after the function id."
+                                "Function 3/11 expects 6 parameters after the function id."
                             )
                             raise exceptions.MissformattedFile(msg)
                         cg_itp["dihedral"][nb_dihedrals]["params"].append(params)
@@ -446,6 +446,13 @@ def read_cg_itp_file(config: SwarmConfig):
                                                                                         -max_abs,
                                                                                         max_abs,
                                                                                         "-max_fct_dihedrals_f3"))
+                        elif func == 11:
+                            max_abs = config.optimization.default_abs_range_fct_dihedrals_opti_func_cbt
+                            if any(abs(param) > max_abs for param in cg_itp["dihedral"][nb_dihedrals]["params"][-1]):
+                                raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
+                                                                                        -max_abs,
+                                                                                        max_abs,
+                                                                                        "-max_fct_dihedrals_f11"))
 
                     # handle multiplicity if function assumes multiplicity
                     from swarmcg import config as global_config
@@ -589,7 +596,7 @@ def read_cg_itp_file(config: SwarmConfig):
             else:
                 raise exceptions.MissformattedFile(msg(geom, grp_geom))
 
-            if func == 3:
+            if func in (3, 11):
                 cg_itp[geom][grp_geom]["value"] = None
                 cg_itp[geom][grp_geom]["value_user"] = None
                 cg_itp[geom][grp_geom]["fct"] = None

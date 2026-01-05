@@ -761,7 +761,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 if dist_pairwise < ns.pso.all_best_emd_dist_geoms["dihedrals"][i]:
                     ns.pso.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
                     func = ns.cg_itp["dihedral"][i]["func"]
-                    if func == 3:
+                    if func in (3, 11):
                         params = list(ns.out_itp["dihedral"][i]["params"])
                     else:
                         params = [ns.out_itp["dihedral"][i]["value"], ns.out_itp["dihedral"][i]["fct"]]
