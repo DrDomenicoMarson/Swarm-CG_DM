@@ -212,40 +212,61 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
         if verbose:
             logger.info("")
             logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate dihedrals force constants")
-         
-         for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
+
+        for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
             hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = data_BI["dihedral"][grp_dihedral]
             y = -kB * temp * np.log(hists_geoms_bi + 1)
-            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), 2 * opt_config.bi_nb_bins, endpoint=True)
+            x = np.linspace(
+                np.deg2rad(bi_xrange[0]),
+                np.deg2rad(bi_xrange[1]),
+                2 * opt_config.bi_nb_bins,
+                endpoint=True,
+            )
             k = kB * temp / std_rad_grp_dihedral / std_rad_grp_dihedral
             sigma = np.where(y < max(y), 0.1, np.inf)
-            
+
             # Again, assuming func is present in itp_obj for now, or we'd need cg_itp passed explicitly
             func = itp_obj["dihedral"][grp_dihedral]["func"]
-            
+
             if exec_mode == 2:
-                avg_rad = np.deg2rad(itp_obj["dihedral"][grp_dihedral].get("value_user", 0)) # Fallback if missing
+                avg_rad = np.deg2rad(itp_obj["dihedral"][grp_dihedral].get("value_user", 0))  # Fallback if missing
                 pass
 
             if func in config.dihedral_func_with_mult:
-                 multiplicity = itp_obj["dihedral"][grp_dihedral]["mult"]
-                 params_guess = [max(y) - min(y), avg_rad_grp_dihedral, min(y)]
-                 try:
-                     popt, pcov = curve_fit(gmx_dihedrals_func_1(mult=multiplicity), x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                     itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
-                 except:
-                     pass
+                multiplicity = itp_obj["dihedral"][grp_dihedral]["mult"]
+                params_guess = [max(y) - min(y), avg_rad_grp_dihedral, min(y)]
+                try:
+                    popt, pcov = curve_fit(
+                        gmx_dihedrals_func_1(mult=multiplicity),
+                        x,
+                        y,
+                        p0=params_guess,
+                        sigma=sigma,
+                        maxfev=99999,
+                        absolute_sigma=False,
+                    )
+                    itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
+                except:
+                    pass
             elif func == 2:
-                 params_guess = [k, avg_rad_grp_dihedral, min(y)]
-                 try:
-                     popt, pcov = curve_fit(gmx_dihedrals_func_2, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                     itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
-                 except:
-                     pass
-            
+                params_guess = [k, avg_rad_grp_dihedral, min(y)]
+                try:
+                    popt, pcov = curve_fit(
+                        gmx_dihedrals_func_2,
+                        x,
+                        y,
+                        p0=params_guess,
+                        sigma=sigma,
+                        maxfev=99999,
+                        absolute_sigma=False,
+                    )
+                    itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
+                except:
+                    pass
+
             if exec_mode == 1:
-                 pass
-            
+                pass
+
             if verbose:
                 logger.info(
                     "  Dihedral group %s estimated force constant: %s",
@@ -253,7 +274,7 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     round(itp_obj["dihedral"][grp_dihedral]["fct"], 2),
                 )
 
-         performed_init_BI["dihedral"] = True
+        performed_init_BI["dihedral"] = True
 
 def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_val,
                            all_best_emd_dist_geoms, all_best_params_dist_geoms,
