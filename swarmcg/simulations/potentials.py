@@ -22,6 +22,15 @@ def gmx_angles_func_2(x, a, b, c):
     return a / 2 * (np.cos(x) - np.cos(b)) ** 2 + c
 
 
+def gmx_angles_func_10(x, a, b, c):
+    """
+    Gromacs angle function 10 (restricted bending / ReB).
+    """
+    sin_sq = np.sin(x) ** 2
+    denom = np.where(sin_sq < 1e-8, 1e-8, sin_sq)
+    return a / 2 * (np.cos(x) - np.cos(b)) ** 2 / denom + c
+
+
 def gmx_dihedrals_func_1(mult):
     """
     Gromacs potential function 1 for angles -- generated on the fly with adjusted multiplicity

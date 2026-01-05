@@ -216,6 +216,12 @@ max_fct_angles_f2 = BaseField(
     default=config.default_max_fct_angles_opti_f2,
     help="Max. force ct. for angles function 2 (kJ.mol⁻¹)",
 )
+max_fct_angles_f10 = BaseField(
+    dest="default_max_fct_angles_opti_f10",
+    type=float,
+    default=config.default_max_fct_angles_opti_f10,
+    help="Max. force ct. for angles function 10 (kJ.mol⁻¹)",
+)
 max_fct_dihedrals_f149 = BaseField(
     dest="default_abs_range_fct_dihedrals_opti_func_with_mult",
     type=float,

@@ -8,7 +8,7 @@ from swarmcg.config_types import SwarmConfig
 from swarmcg.shared.logging_utils import get_logger
 from swarmcg.shared.math_utils import draw_float
 from swarmcg.simulations.potentials import (
-    gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2,
+    gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2, gmx_angles_func_10,
     gmx_dihedrals_func_1, gmx_dihedrals_func_2
 )
 
@@ -85,6 +85,8 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, conf
                 search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f1]])
             elif cg_itp["angle"][grp_angle]["func"] == 2:
                 search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f2]])
+            elif cg_itp["angle"][grp_angle]["func"] == 10:
+                search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f10]])
 
     if opti_cycle["nb_geoms"]["dihedral"] > 0:
         if exec_mode == 1:
@@ -197,6 +199,15 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     itp_obj["angle"][grp_angle]["fct"] = popt[0]
                 except:
                     itp_obj["angle"][grp_angle]["fct"] = 30
+            elif func == 10:
+                params_guess = [max(y) - min(y), std_rad_grp_angle, min(y)]
+                try:
+                    popt, pcov = curve_fit(gmx_angles_func_10, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
+                    if popt[0] < 0:
+                        popt[0] = 30 # fallback
+                    itp_obj["angle"][grp_angle]["fct"] = popt[0]
+                except:
+                    itp_obj["angle"][grp_angle]["fct"] = 30
 
             if verbose:
                 logger.info(
@@ -294,6 +305,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     default_max_fct_bonds_opti = opt_config.default_max_fct_bonds_opti
     default_max_fct_angles_opti_f1 = opt_config.default_max_fct_angles_opti_f1
     default_max_fct_angles_opti_f2 = opt_config.default_max_fct_angles_opti_f2
+    default_max_fct_angles_opti_f10 = opt_config.default_max_fct_angles_opti_f10
     default_abs_range_fct_dihedrals_opti_func_without_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
     default_abs_range_fct_dihedrals_opti_func_with_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
     bond_dist_guess_variation = opt_config.bond_dist_guess_variation
@@ -331,6 +343,9 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         elif cg_itp["angle"][i]["func"] == 2:
             input_guess.append(
                 min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f2))
+        elif cg_itp["angle"][i]["func"] == 10:
+            input_guess.append(
+                min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f10))
 
     if exec_mode == 1:
         for i in range(opti_cycle["nb_geoms"]["dihedral"]):
@@ -393,6 +408,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                     input_guess.append(min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f1))
                 elif cg_itp["angle"][i]["func"] == 2:
                      input_guess.append(min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f2))
+                elif cg_itp["angle"][i]["func"] == 10:
+                     input_guess.append(min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f10))
 
         # Dihedrals
         if exec_mode == 1:
@@ -445,6 +462,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 input_guess.append(min(max(out_itp["angle"][i]["fct_user"], 0), default_max_fct_angles_opti_f1))
             elif cg_itp["angle"][i]["func"] == 2:
                 input_guess.append(min(max(out_itp["angle"][i]["fct_user"], 0), default_max_fct_angles_opti_f2))
+            elif cg_itp["angle"][i]["func"] == 10:
+                input_guess.append(min(max(out_itp["angle"][i]["fct_user"], 0), default_max_fct_angles_opti_f10))
 
         # dihedrals
         if exec_mode == 1:
@@ -505,6 +524,8 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 draw_high = min(max(out_itp["angle"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact), out_itp["angle"][j]["fct"] + fct_guess_min_flat_diff_angles), default_max_fct_angles_opti_f1)
             elif cg_itp["angle"][j]["func"] == 2:
                 draw_high = min(max(out_itp["angle"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact), out_itp["angle"][j]["fct"] + fct_guess_min_flat_diff_angles), default_max_fct_angles_opti_f2)
+            elif cg_itp["angle"][j]["func"] == 10:
+                draw_high = min(max(out_itp["angle"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact), out_itp["angle"][j]["fct"] + fct_guess_min_flat_diff_angles), default_max_fct_angles_opti_f10)
             init_guess.append(draw_float(draw_low, draw_high, 3))
 
         # dihedrals

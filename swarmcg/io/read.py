@@ -356,6 +356,11 @@ def read_cg_itp_file(config: SwarmConfig):
                             raise exceptions.MissformattedFile(
                                 msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f2,
                                                      "-max_fct_angles_f2"))
+                        elif func == 10 and not 0 <= float(
+                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f10:
+                            raise exceptions.MissformattedFile(
+                                msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f10,
+                                                     "-max_fct_angles_f10"))
 
                 elif section_read["dihedral"]:
 

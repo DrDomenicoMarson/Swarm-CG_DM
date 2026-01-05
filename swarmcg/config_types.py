@@ -69,6 +69,7 @@ class OptimizationConfig(BaseModel):
     default_max_fct_bonds_opti: float = 18000.0
     default_max_fct_angles_opti_f1: float = 1700.0
     default_max_fct_angles_opti_f2: float = 1700.0
+    default_max_fct_angles_opti_f10: float = 1700.0
     default_abs_range_fct_dihedrals_opti_func_with_mult: float = 15.0
     default_abs_range_fct_dihedrals_opti_func_without_mult: float = 1500.0
     
@@ -97,7 +98,8 @@ class OptimizationConfig(BaseModel):
     fct_guess_min_flat_diff_dihedrals_with_mult: float = config_module.fct_guess_min_flat_diff_dihedrals_with_mult
     sim_crash_EMD_indep_score: float = config_module.sim_crash_EMD_indep_score
 
-    @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1', 'default_max_fct_angles_opti_f2')
+    @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1',
+                     'default_max_fct_angles_opti_f2', 'default_max_fct_angles_opti_f10')
     @classmethod
     def check_positive(cls, v: float, info: Any) -> float:
         if v <= 0:
@@ -236,6 +238,7 @@ class SwarmConfig(BaseModel):
             default_max_fct_bonds_opti=getattr(ns, 'default_max_fct_bonds_opti', 18000.0),
             default_max_fct_angles_opti_f1=getattr(ns, 'default_max_fct_angles_opti_f1', 1700.0),
             default_max_fct_angles_opti_f2=getattr(ns, 'default_max_fct_angles_opti_f2', 1700.0),
+            default_max_fct_angles_opti_f10=getattr(ns, 'default_max_fct_angles_opti_f10', 1700.0),
             default_abs_range_fct_dihedrals_opti_func_with_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_with_mult', 15.0),
             default_abs_range_fct_dihedrals_opti_func_without_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_without_mult', 1500.0),
             bonds2angles_scoring_factor=getattr(ns, 'bonds2angles_scoring_factor', 500.0),

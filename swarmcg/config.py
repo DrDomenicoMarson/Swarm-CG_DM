@@ -20,6 +20,7 @@ default_max_fct_bonds_opti = 18000
 default_max_fct_angles_bi = 1200
 default_max_fct_angles_opti_f1 = 1700
 default_max_fct_angles_opti_f2 = 1700
+default_max_fct_angles_opti_f10 = 1700
 
 default_abs_range_fct_dihedrals_bi_func_without_mult = 250
 default_abs_range_fct_dihedrals_opti_func_without_mult = 1500
@@ -54,7 +55,7 @@ fct_guess_min_flat_diff_dihedrals_with_mult = 1  # flat minimum force constant v
 handled_functions = {
     "constraint": [1],  # tested and verified: 1
     "bond": [1],  # tested and verified: 1
-    "angle": [1, 2],  # tested and verified: 1, 2
+    "angle": [1, 2, 10],  # tested and verified: 1, 2; added: 10 (ReB)
     "dihedral": [1, 2, 4],
     # tested and verified: 1, 2, 4 -- ongoing: 9 (need to merge the 1+ dihedrals groups on plots)
     "virtual_sites2": [1],  # tested and verified: 1 -- ongoing: 2 (need GMX 2020)
