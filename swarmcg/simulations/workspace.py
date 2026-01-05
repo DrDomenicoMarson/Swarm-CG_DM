@@ -35,8 +35,7 @@ class WorkspaceManager:
              
         self.exec_folder.mkdir()
         (self.exec_folder / ".internal").mkdir()
-        (self.exec_folder / config.distrib_plots_all_evals_dirname).mkdir()
-        (self.exec_folder / config.log_files_all_evals_dirname).mkdir()
+        (self.exec_folder / config.all_evals_files_dirname).mkdir()
         
         if self.config.optimization.keep_all_sims:
              (self.exec_folder / config.sim_files_all_evals_dirname).mkdir()
@@ -132,4 +131,3 @@ class WorkspaceManager:
         input_sim_dir = self.exec_folder / config.input_sim_files_dirname
         if input_sim_dir.exists():
             shutil.rmtree(input_sim_dir)
-

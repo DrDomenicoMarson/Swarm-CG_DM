@@ -1,3 +1,4 @@
+import gzip
 import os
 import shutil
 import time
@@ -42,6 +43,8 @@ def eval_function(parameters_set, ns: OptimizationContext):
     """
     original_dir = os.getcwd()
     exec_dir = os.path.abspath(ns.files.exec_folder)
+    all_evals_dir = os.path.join(exec_dir, config.all_evals_files_dirname)
+    os.makedirs(all_evals_dir, exist_ok=True)
     ns.status.nb_eval += 1
     start_eval_ts = datetime.now().timestamp()
 
@@ -78,6 +81,9 @@ def eval_function(parameters_set, ns: OptimizationContext):
         else:
             print_sections = ["constraint", "bond", "angle", "dihedral", "exclusion"]
         io.write_cg_itp_file(ns.out_itp, out_path_itp, print_sections=print_sections)
+        itp_root, _ = os.path.splitext(ns.files.cg_itp_basename)
+        eval_itp_name = f"{itp_root}_eval_step_{ns.status.nb_eval}.itp"
+        shutil.copy(out_path_itp, os.path.join(all_evals_dir, eval_itp_name))
 
         os.chdir(current_eval_path)
 
@@ -115,8 +121,10 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
                 shutil.move(
                     "distributions.png",
-                    os.path.join(exec_dir, config.distrib_plots_all_evals_dirname,
-                                 f"distributions_eval_step_{ns.status.nb_eval}.png"),
+                    os.path.join(
+                        all_evals_dir,
+                        f"distributions_eval_step_{ns.status.nb_eval}.png",
+                    ),
                 )
 
                 eval_score = 0
@@ -165,29 +173,24 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
         os.chdir(exec_dir)
 
-        if os.path.isfile(os.path.join(current_eval_path, "md.log")):
-            shutil.copy(
-                os.path.join(current_eval_path, "md.log"),
-                os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"md_sim_eval_step_{ns.status.nb_eval}.log"),
-            )
-        if os.path.isfile(os.path.join(current_eval_path, "equi.log")):
-            shutil.copy(
-                os.path.join(current_eval_path, "equi.log"),
-                os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"equi_sim_eval_step_{ns.status.nb_eval}.log"),
-            )
-        if os.path.isfile(os.path.join(current_eval_path, "mini.log")):
-            shutil.copy(
-                os.path.join(current_eval_path, "mini.log"),
-                os.path.join(exec_dir, config.log_files_all_evals_dirname,
-                             f"mini_sim_eval_step_{ns.status.nb_eval}.log"),
-            )
+        log_sources = [
+            ("md.log", f"md_sim_eval_step_{ns.status.nb_eval}.log.gz"),
+            ("equi.log", f"equi_sim_eval_step_{ns.status.nb_eval}.log.gz"),
+            ("mini.log", f"mini_sim_eval_step_{ns.status.nb_eval}.log.gz"),
+        ]
+        for src_name, dest_name in log_sources:
+            src_path = os.path.join(current_eval_path, src_name)
+            if os.path.isfile(src_path):
+                dest_path = os.path.join(all_evals_dir, dest_name)
+                with open(src_path, "rb") as src_fp, gzip.open(dest_path, "wb") as dest_fp:
+                    shutil.copyfileobj(src_fp, dest_fp)
 
         if new_best_fit:
             shutil.copy(
-                os.path.join(exec_dir, config.distrib_plots_all_evals_dirname,
-                             f"distributions_eval_step_{ns.status.nb_eval}.png"),
+                os.path.join(
+                    all_evals_dir,
+                    f"distributions_eval_step_{ns.status.nb_eval}.png",
+                ),
                 os.path.join(exec_dir, config.best_distrib_plots),
             )
 

@@ -1,5 +1,6 @@
 
 import os
+import logging
 import pytest
 import numpy as np
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from swarmcg.context import OptimizationContext
 import swarmcg.config as config
 
 TEST_DATA = "tests/data/"
+logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def real_data_config():
@@ -73,9 +75,10 @@ def test_evaluator_workflow_real_data(real_data_config):
     # 4. io.read_aa_traj
     # 5. mapping.map_aa2cg_traj (The big loop we optimized)
     
-    print("\nStarting Evaluator Initialization with Real Data...")
+    logger.info("")
+    logger.info("Starting Evaluator Initialization with Real Data...")
     evaluator.initialize(context)
-    print("Initialization Complete.")
+    logger.info("Initialization Complete.")
     
     # Verify State
     assert context.scoring.aa_universe is not None
@@ -88,9 +91,9 @@ def test_evaluator_workflow_real_data(real_data_config):
     assert len(context.scoring.all_beads) > 0
     
     # Now run compute_reference_distributions (The vectorized scoring)
-    print("Computing Reference Distributions...")
+    logger.info("Computing Reference Distributions...")
     evaluator.compute_reference_distributions()
-    print("Computation Complete.")
+    logger.info("Computation Complete.")
     
     # Verify Distributions
     # Check if we have populated distribution arrays in cg_itp (that's where they end up)
@@ -113,4 +116,4 @@ def test_evaluator_workflow_real_data(real_data_config):
         # Angles in degrees, usually around 100-120 etc
         assert first_angle["avg"] > 0
         
-    print(f"Verified {nb_bonds} bond groups and {nb_angles} angle groups.")
+    logger.info("Verified %s bond groups and %s angle groups.", nb_bonds, nb_angles)

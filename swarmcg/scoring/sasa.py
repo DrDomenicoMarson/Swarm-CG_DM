@@ -6,8 +6,11 @@ from swarmcg.shared import exceptions
 from swarmcg.io import read_xvg_col
 from swarmcg.simulations.runner import exec_gmx
 from swarmcg.config_types import SwarmConfig
+from swarmcg.shared.logging_utils import get_logger
 
 PROBE_RADIUS = 0.26  # nm
+
+logger = get_logger(__name__)
 
 def compute_SASA(config: SwarmConfig, cg_itp, traj_type):
     """Compute average SASA.
@@ -61,7 +64,7 @@ def compute_SASA(config: SwarmConfig, cg_itp, traj_type):
             gmx_cmd = f'seq 0 {nb_beads_real - 1} | {gmx_path} traj -f {aa_traj_whole_filename} -s ../../{aa_tpr_filename} -oxt {aa_mapped_traj_whole_filename} -n ../../{cg_map_filename} -com -ng {nb_beads_real}'
             return_code = exec_gmx(gmx_cmd)
             if return_code != 0:
-                print("Failed GMX Command:", gmx_cmd) # Debug help
+                logger.error("Failed GMX Command: %s", gmx_cmd)
                 non_zero_return_code = True
 
         # truncate the CG TPR to get only real beads
@@ -69,7 +72,7 @@ def compute_SASA(config: SwarmConfig, cg_itp, traj_type):
             gmx_cmd = f'{gmx_path} convert-tpr -s md.tpr -n {cg_ndx_filename} -o {aa_mapped_tpr_sasa_filename}'
             return_code = exec_gmx(gmx_cmd)
             if return_code != 0:
-                print("Failed GMX Command:", gmx_cmd)
+                logger.error("Failed GMX Command: %s", gmx_cmd)
                 non_zero_return_code = True
 
         # finally get sasa
@@ -77,7 +80,7 @@ def compute_SASA(config: SwarmConfig, cg_itp, traj_type):
             gmx_cmd = f'{gmx_path} sasa -s {aa_mapped_tpr_sasa_filename} -f {aa_mapped_traj_whole_filename} -n {cg_ndx_filename} -surface 0 -o {aa_mapped_sasa_filename} -probe {PROBE_RADIUS}'
             return_code = exec_gmx(gmx_cmd)
             if return_code != 0:
-                print("Failed GMX Command:", gmx_cmd)
+                logger.error("Failed GMX Command: %s", gmx_cmd)
                 non_zero_return_code = True
 
         if non_zero_return_code:

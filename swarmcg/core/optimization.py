@@ -16,7 +16,10 @@ from swarmcg import config
 from swarmcg import forcefield
 from swarmcg import utils
 from swarmcg.shared import exceptions, catch_warnings
+from swarmcg.shared.logging_utils import setup_logging, get_logger
 from swarmcg.context import OptimizationContext
+
+logger = get_logger(__name__)
 
 class SwarmOptimizer:
     def __init__(self, config_obj):
@@ -32,11 +35,11 @@ class SwarmOptimizer:
         self._initialize_context()
         self._setup_execution()
         
-        print()
-        print(swarmcg.shared.styling.sep_close)
-        print("| PRE-PROCESSING AND CONTROLS                                                                 |")
-        print(swarmcg.shared.styling.sep_close)
-        print()
+        logger.info("")
+        logger.info(swarmcg.shared.styling.sep_close)
+        logger.info("| PRE-PROCESSING AND CONTROLS                                                                 |")
+        logger.info(swarmcg.shared.styling.sep_close)
+        logger.info("")
         
         self._validate_environment()
         self._initialize_optimization()
@@ -78,6 +81,11 @@ class SwarmOptimizer:
     def _setup_execution(self):
         try:
             self.ns.files.exec_folder = self.ns.workspace_manager.setup_execution_folder(self.config.output.output_folder)
+            setup_logging(
+                module_name="optimize",
+                log_dir=self.ns.files.exec_folder,
+                verbose=self.config.output.verbose,
+            )
         except exceptions.AvoidOverwritingFolder as e:
             raise e
 
@@ -94,7 +102,7 @@ class SwarmOptimizer:
         self.ns.evaluator.initialize(self.ns)
         self.ns.evaluator.compute_reference_distributions()
         
-        print()
+        logger.info("")
 
     def _create_output_files(self):
         with open(os.path.join(self.ns.files.exec_folder, config.opti_perf_recap_file), "w") as fp:
@@ -118,9 +126,11 @@ class SwarmOptimizer:
         with open(os.devnull, "w") as devnull:
             with contextlib.redirect_stdout(devnull):
                 compare_models(self.ns, manual_mode=False)
-        print()
-        print("Plotted reference AA-mapped distributions (used as target during optimization) at location:\n ",
-              self.ns.files.plot_filename)
+        logger.info("")
+        logger.info(
+            "Plotted reference AA-mapped distributions (used as target during optimization) at location:\n %s",
+            self.ns.files.plot_filename,
+        )
         self.ns.scoring.atom_only = False
 
     def _run_optimization_cycles(self):
@@ -171,12 +181,18 @@ class SwarmOptimizer:
         
         geoms_display = self._get_geoms_display_string()
 
-        print()
-        print(swarmcg.shared.styling.sep_close)
-        print("| STARTING OPTIMIZATION CYCLE", self.ns.opti_cycle["nb_cycle"],
-              "                                                              |")
-        print("| Optimizing", geoms_display, " " * (95 - 16 - len(geoms_display)), "|")
-        print(swarmcg.shared.styling.sep_close)
+        logger.info("")
+        logger.info(swarmcg.shared.styling.sep_close)
+        logger.info(
+            "| STARTING OPTIMIZATION CYCLE %s                                                              |",
+            self.ns.opti_cycle["nb_cycle"],
+        )
+        logger.info(
+            "| Optimizing %s %s|",
+            geoms_display,
+            " " * (95 - 16 - len(geoms_display)),
+        )
+        logger.info(swarmcg.shared.styling.sep_close)
 
         forcefield.perform_BI(
             self.ns.out_itp,
@@ -271,16 +287,28 @@ class SwarmOptimizer:
         self.ns.status.total_gmx_time = round(self.ns.status.total_gmx_time / (60 * 60), 2)
         self.ns.status.total_model_eval_time = round(self.ns.status.total_model_eval_time / (60 * 60), 2)
 
-        print()
-        print(swarmcg.shared.styling.sep_close)
-        print("|  FINISHED PROPERLY                                                                          |")
-        print(swarmcg.shared.styling.sep_close)
-        print()
-        print("Total nb of evaluation steps:", self.ns.status.nb_eval)
-        print("Best model obtained at evaluation step number:", self.ns.pso.best_fitness[1])
-        print()
-        print(f"Total execution time : {total_time} h")
-        print(f"Initialization time  : {init_time} h ({round(init_time / total_time * 100, 2)} %)")
-        print(f"Simulations time     : {self.ns.status.total_gmx_time} h ({round(self.ns.status.total_gmx_time / total_time * 100, 2)} %)")
-        print(f"Models scoring time  : {self.ns.status.total_model_eval_time} h ({round(self.ns.status.total_model_eval_time / total_time * 100, 2)} %)")
-        print()
+        logger.info("")
+        logger.info(swarmcg.shared.styling.sep_close)
+        logger.info("|  FINISHED PROPERLY                                                                          |")
+        logger.info(swarmcg.shared.styling.sep_close)
+        logger.info("")
+        logger.info("Total nb of evaluation steps: %s", self.ns.status.nb_eval)
+        logger.info("Best model obtained at evaluation step number: %s", self.ns.pso.best_fitness[1])
+        logger.info("")
+        logger.info("Total execution time : %s h", total_time)
+        logger.info(
+            "Initialization time  : %s h (%s %%)",
+            init_time,
+            round(init_time / total_time * 100, 2),
+        )
+        logger.info(
+            "Simulations time     : %s h (%s %%)",
+            self.ns.status.total_gmx_time,
+            round(self.ns.status.total_gmx_time / total_time * 100, 2),
+        )
+        logger.info(
+            "Models scoring time  : %s h (%s %%)",
+            self.ns.status.total_model_eval_time,
+            round(self.ns.status.total_model_eval_time / total_time * 100, 2),
+        )
+        logger.info("")

@@ -1,16 +1,10 @@
 from argparse import ArgumentParser, RawTextHelpFormatter, SUPPRESS
-import sys
 
 from swarmcg.shared import styling
 from swarmcg.io.job_args import defaults
 
 
 def get_optimize_args():
-    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
-        print(styling.header_simple("optimize"))
-    else:
-        print(styling.header_package("                    Module: CG model optimization\n"))
-
     formatter = lambda prog: RawTextHelpFormatter(prog, width=135, max_help_position=52)
     args_parser = ArgumentParser(
         description=styling.OPTIMISE_DESCR,

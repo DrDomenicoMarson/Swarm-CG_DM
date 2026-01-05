@@ -5,11 +5,14 @@ from scipy.optimize import curve_fit
 from swarmcg import config
 from swarmcg.shared import math_utils, exceptions
 from swarmcg.config_types import SwarmConfig
+from swarmcg.shared.logging_utils import get_logger
 from swarmcg.shared.math_utils import draw_float
 from swarmcg.simulations.potentials import (
     gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2,
     gmx_dihedrals_func_1, gmx_dihedrals_func_2
 )
+
+logger = get_logger(__name__)
 
 def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
     """Update coarse-grain ITP object inplace."""
@@ -105,7 +108,8 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
     # Check bonds
     if not performed_init_BI["bond"] and opti_cycle["nb_geoms"]["bond"] > 0:
         if verbose:
-            print("\nPerforming Direct Boltzmann Inversion (DBI) to estimate bonds force constants")
+            logger.info("")
+            logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate bonds force constants")
 
         for grp_bond in range(opti_cycle["nb_geoms"]["bond"]):
             hists_geoms_bi, std_grp_bond, avg_grp_bond, bi_xrange = data_BI["bond"][grp_bond]
@@ -150,18 +154,23 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     itp_obj["bond"][grp_bond]["fct"] = max_fct / 2
                 
                 if verbose:
-                    print("  Bond group", grp_bond + 1, "estimated force constant:", round(itp_obj["bond"][grp_bond]["fct"], 2))
+                    logger.info(
+                        "  Bond group %s estimated force constant: %s",
+                        grp_bond + 1,
+                        round(itp_obj["bond"][grp_bond]["fct"], 2),
+                    )
             except Exception as e:
                 # Fallback or error logging
                 if verbose:
-                    print(f"  Bond group {grp_bond + 1} BI failed: {e}")
+                    logger.warning("  Bond group %s BI failed: %s", grp_bond + 1, e)
 
         performed_init_BI["bond"] = True
 
     # Check angles
     if not performed_init_BI["angle"] and opti_cycle["nb_geoms"]["angle"] > 0:
         if verbose:
-            print("\nPerforming Direct Boltzmann Inversion (DBI) to estimate angles force constants")
+            logger.info("")
+            logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate angles force constants")
             
         for grp_angle in range(opti_cycle["nb_geoms"]["angle"]):
             hists_geoms_bi, std_rad_grp_angle, bi_xrange = data_BI["angle"][grp_angle]
@@ -190,14 +199,19 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     itp_obj["angle"][grp_angle]["fct"] = 30
 
             if verbose:
-                 print("  Angle group", grp_angle + 1, "estimated force constant:", round(itp_obj["angle"][grp_angle]["fct"], 2))
+                logger.info(
+                    "  Angle group %s estimated force constant: %s",
+                    grp_angle + 1,
+                    round(itp_obj["angle"][grp_angle]["fct"], 2),
+                )
 
         performed_init_BI["angle"] = True
 
     # Check dihedrals
     if not performed_init_BI["dihedral"] and opti_cycle["nb_geoms"]["dihedral"] > 0:
-         if verbose:
-            print("\nPerforming Direct Boltzmann Inversion (DBI) to estimate dihedrals force constants")
+        if verbose:
+            logger.info("")
+            logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate dihedrals force constants")
          
          for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
             hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = data_BI["dihedral"][grp_dihedral]
@@ -233,7 +247,11 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                  pass
             
             if verbose:
-                print("  Dihedral group", grp_dihedral + 1, "estimated force constant:", round(itp_obj["dihedral"][grp_dihedral]["fct"], 2))
+                logger.info(
+                    "  Dihedral group %s estimated force constant: %s",
+                    grp_dihedral + 1,
+                    round(itp_obj["dihedral"][grp_dihedral]["fct"], 2),
+                )
 
          performed_init_BI["dihedral"] = True
 

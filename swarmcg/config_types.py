@@ -3,6 +3,9 @@ import os
 from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from swarmcg import config as config_module
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 class GromacsConfig(BaseModel):
     gmx_path: str = "gmx"
@@ -16,9 +19,9 @@ class GromacsConfig(BaseModel):
     @model_validator(mode='after')
     def check_gmx_args_conflict(self):
         if self.gmx_args_str != "" and (self.nb_threads != 0 or self.gpu_id != ""):
-            print(
-                "Warning: Argument -gmx_args_str is provided together with one of arguments: "
-                "-nb_threads, -gpu_id\nOnly argument -gmx_args_str will be used during this execution"
+            logger.warning(
+                "Argument -gmx_args_str is provided together with -nb_threads or -gpu_id; "
+                "only -gmx_args_str will be used."
             )
         return self
 

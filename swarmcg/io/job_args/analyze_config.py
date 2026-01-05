@@ -1,16 +1,10 @@
 from argparse import ArgumentParser, RawTextHelpFormatter, SUPPRESS
-import sys
 
 from swarmcg.shared import styling
 from swarmcg.io.job_args import defaults
 
 
 def get_analyze_args():
-    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
-        print(styling.header_simple("monitor"))
-    else:
-        print(styling.header_package("Module: Optimization run analysis\n"))
-
     formatter = lambda prog: RawTextHelpFormatter(prog, width=135, max_help_position=52)
     args_parser = ArgumentParser(
         description=styling.ANALYSE_DESCR,

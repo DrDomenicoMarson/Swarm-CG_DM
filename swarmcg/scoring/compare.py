@@ -18,9 +18,12 @@ from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg import config
 from swarmcg.shared import styling
+from swarmcg.shared.logging_utils import get_logger
 
 # Use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 matplotlib.use("AGG")
+
+logger = get_logger(__name__)
 
 def compare_models(context: OptimizationContext, manual_mode: bool = True, ignore_dihedrals: bool = False, 
                   calc_sasa: bool = False, record_best_indep_params: bool = False):
@@ -50,16 +53,19 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     if ns.scoring.atom_only:
         # scores.compute_Rg(ns, traj_type="AA")
         ns.scoring.gyr_aa, ns.scoring.gyr_aa_std = scores.compute_Rg(ns.scoring.aa_universe, ns.scoring.aa_universe.atoms[:len(ns.scoring.all_atoms)], backend=ns.scoring.mda_backend)
-        print("Radius of gyration (AA reference, NOT CG-mapped):", ns.scoring.gyr_aa, "nm")
+        logger.info(
+            "Radius of gyration (AA reference, NOT CG-mapped): %s nm",
+            ns.scoring.gyr_aa,
+        )
 
     # proceed with CG data
     if not ns.scoring.atom_only:
         config_obj = ns.config if ns.config else SwarmConfig.from_namespace(ns) # Fallback for safety
 
-        print("Reading CG trajectory")
+        logger.info("Reading CG trajectory")
         ns.scoring.cg_universe = mda.Universe(ns.files.cg_tpr_filename, ns.files.cg_traj_filename, in_memory=True, refresh_offsets=True,
                                       guess_bonds=False)
-        print("  Found", len(ns.scoring.cg_universe.trajectory), "frames")
+        logger.info("  Found %s frames", len(ns.scoring.cg_universe.trajectory))
 
         if manual_mode or any(atom["mass"] is None for atom in ns.cg_itp["atoms"]):
             # Sync masses from CG trajectory (TPR) to avoid None masses in mapped universe.
@@ -91,13 +97,20 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         if ns.results.gyr_aa_mapped is None:
             # scores.compute_Rg(ns, traj_type="AA_mapped")
             ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(ns.scoring.aa2cg_universe, ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend, offset=ns.config.reference.aa_rg_offset)
-            print()
-            print("Radius of gyration (AA reference, CG-mapped, no bonds scaling):", ns.results.gyr_aa_mapped, "+/-",
-                  ns.results.gyr_aa_mapped_std, "nm")
+            logger.info("")
+            logger.info(
+                "Radius of gyration (AA reference, CG-mapped, no bonds scaling): %s +/- %s nm",
+                ns.results.gyr_aa_mapped,
+                ns.results.gyr_aa_mapped_std,
+            )
 
         # scores.compute_Rg(ns, traj_type="CG")
         ns.results.gyr_cg, ns.results.gyr_cg_std = scores.compute_Rg(ns.scoring.cg_universe, ns.scoring.cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend)
-        print("Radius of gyration (CG model):", ns.results.gyr_cg, "+/-", ns.results.gyr_cg_std, "nm")
+        logger.info(
+            "Radius of gyration (CG model): %s +/- %s nm",
+            ns.results.gyr_cg,
+            ns.results.gyr_cg_std,
+        )
 
 
 
@@ -108,20 +121,20 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
             # scores.compute_SASA(ns, traj_type="CG")
             ns.results.sasa_cg, ns.results.sasa_cg_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="CG")
-            print()
+            logger.info("")
 
             # this line checks that gmx trjconv could read the md.xtc trajectory from the opti
             if ns.results.sasa_cg is None:
                 return 0, 0, 0, 0, 0, None  # ns.sasa_cg == None will be checked in eval_function and worst score will be attributed
 
-    print()
-    print(styling.sep_close, flush=True)
-    print("| SCORING AND PLOTTING                                                                        |", flush=True)
-    print(styling.sep_close, flush=True)
-    print()
+    logger.info("")
+    logger.info(styling.sep_close)
+    logger.info("| SCORING AND PLOTTING                                                                        |")
+    logger.info(styling.sep_close)
+    logger.info("")
 
     # constraints
-    print("Processing constraints ...", flush=True)
+    logger.info("Processing constraints ...")
     diff_ordered_grp_constraints = list(range(ns.cg_itp["nb_constraints"]))
     avg_diff_grp_constraints, row_wise_ranges["constraints"] = [], {}
     constraints = {}
@@ -189,7 +202,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                key=lambda pair: pair[0], reverse=True)]
 
     # bonds
-    print("Processing bonds ...", flush=True)
+    logger.info("Processing bonds ...")
     diff_ordered_grp_bonds = list(range(ns.cg_itp["nb_bonds"]))
     avg_diff_grp_bonds, row_wise_ranges["bonds"] = [], {}
     bonds = {}
@@ -254,7 +267,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                          reverse=True)]
 
     # angles
-    print("Processing angles ...", flush=True)
+    logger.info("Processing angles ...")
     diff_ordered_grp_angles = list(range(ns.cg_itp["nb_angles"]))
     avg_diff_grp_angles, row_wise_ranges["angles"] = [], {}
     angles = {}
@@ -312,7 +325,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                           reverse=True)]
 
     # dihedrals
-    print("Processing dihedrals ...", flush=True)
+    logger.info("Processing dihedrals ...")
     diff_ordered_grp_dihedrals = list(range(ns.cg_itp["nb_dihedrals"]))
     avg_diff_grp_dihedrals, row_wise_ranges["dihedrals"] = [], {}
     dihedrals = {}
@@ -381,22 +394,33 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     if larger_group > ncols:
         hidden_cols = larger_group - ncols
         if ns.scoring.atom_only:
-            print(
-                f"Displaying max {ncols} distributions per row using the CG ITP file ordering of distributions groups ({hidden_cols} more are hidden)")
+            logger.info(
+                "Displaying max %s distributions per row using the CG ITP file ordering of distributions groups (%s more are hidden)",
+                ncols,
+                hidden_cols,
+            )
         else:
             if not ns.scoring.mismatch_order:
-                print(
-                    f"{styling.header_warning}Displaying max {ncols} distributions groups per row and this can be MISLEADING because ordering by pairwise AA-mapped vs. CG distributions mismatch is DISABLED ({hidden_cols} more are hidden)")
+                logger.warning(
+                    "%sDisplaying max %s distributions groups per row and this can be MISLEADING because ordering by pairwise AA-mapped vs. CG distributions mismatch is DISABLED (%s more are hidden)",
+                    styling.header_warning,
+                    ncols,
+                    hidden_cols,
+                )
             else:
-                print(
-                    f"Displaying max {ncols} distributions groups per row ordered by pairwise AA-mapped vs. CG distributions difference ({hidden_cols} more are hidden)")
+                logger.info(
+                    "Displaying max %s distributions groups per row ordered by pairwise AA-mapped vs. CG distributions difference (%s more are hidden)",
+                    ncols,
+                    hidden_cols,
+                )
     else:
-        print()
+        logger.info("")
         if not ns.scoring.mismatch_order:
-            print("Distributions groups will be displayed using the CG ITP file groups ordering")
+            logger.info("Distributions groups will be displayed using the CG ITP file groups ordering")
         else:
-            print(
-                "Distributions groups will be displayed using ranked mismatch score between pairwise AA-mapped and CG distributions")
+            logger.info(
+                "Distributions groups will be displayed using ranked mismatch score between pairwise AA-mapped and CG distributions"
+            )
     nrows -= sum([ns.cg_itp["nb_constraints"] == 0, ns.cg_itp["nb_bonds"] == 0, ns.cg_itp["nb_angles"] == 0,
                   ns.cg_itp["nb_dihedrals"] == 0])
 
@@ -409,7 +433,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # constraints
     if ns.cg_itp["nb_constraints"] != 0:
-        print()
+        logger.info("")
         nrow += 1
         for i in range(ncols):
             if i < ns.cg_itp["nb_constraints"]:
@@ -444,13 +468,20 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                  constraints[grp_constraint]["CG"]["y"], color=config.cg_color,
                                                  alpha=config.fill_alpha)
                     ax[nrow][i].plot(constraints[grp_constraint]["CG"]["avg"], 0, color=config.cg_color, marker="D")
-                    print(
-                        f"Constraint {grp_constraint + 1} -- AA Avg: {round(constraints[grp_constraint]['AA']['avg'], 3)} nm -- CG Avg: {round(constraints[grp_constraint]['CG']['avg'], 3)}")
+                    logger.info(
+                        "Constraint %s -- AA Avg: %s nm -- CG Avg: %s",
+                        grp_constraint + 1,
+                        round(constraints[grp_constraint]["AA"]["avg"], 3),
+                        round(constraints[grp_constraint]["CG"]["avg"], 3),
+                    )
                 else:
                     ax[nrow][i].set_title(
                         f"Constraint grp {grp_constraint + 1} - Avg {round(avg_diff_grp_constraints[grp_constraint], 3)} nm")
-                    print(
-                        f"Constraint {grp_constraint + 1} -- AA Avg: {round(constraints[grp_constraint]['AA']['avg'], 3)}")
+                    logger.info(
+                        "Constraint %s -- AA Avg: %s",
+                        grp_constraint + 1,
+                        round(constraints[grp_constraint]["AA"]["avg"], 3),
+                    )
                 ax[nrow][i].grid(zorder=0.5)
                 if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["constraints"][grp_constraint]) - row_wise_ranges[
@@ -468,7 +499,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # bonds
     if ns.cg_itp["nb_bonds"] != 0:
-        print()
+        logger.info("")
         nrow += 1
         for i in range(ncols):
             if i < ns.cg_itp["nb_bonds"]:
@@ -498,11 +529,19 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         ax[nrow][i].fill_between(bonds[grp_bond]["CG"]["x"], bonds[grp_bond]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
                     ax[nrow][i].plot(bonds[grp_bond]["CG"]["avg"], 0, color=config.cg_color, marker="D")
-                    print(
-                        f"Bond {grp_bond + 1} -- AA Avg: {round(bonds[grp_bond]['AA']['avg'], 3)} nm -- CG Avg: {round(bonds[grp_bond]['CG']['avg'], 3)} nm")
+                    logger.info(
+                        "Bond %s -- AA Avg: %s nm -- CG Avg: %s nm",
+                        grp_bond + 1,
+                        round(bonds[grp_bond]["AA"]["avg"], 3),
+                        round(bonds[grp_bond]["CG"]["avg"], 3),
+                    )
                 else:
                     ax[nrow][i].set_title(f"Bond grp {grp_bond + 1} - Avg {round(avg_diff_grp_bonds[grp_bond], 3)} nm")
-                    print(f"Bond {grp_bond + 1} -- AA Avg: {round(bonds[grp_bond]['AA']['avg'], 3)}")
+                    logger.info(
+                        "Bond %s -- AA Avg: %s",
+                        grp_bond + 1,
+                        round(bonds[grp_bond]["AA"]["avg"], 3),
+                    )
                 ax[nrow][i].grid(zorder=0.5)
                 if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(
@@ -519,7 +558,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # angles
     if ns.cg_itp["nb_angles"] != 0:
-        print()
+        logger.info("")
         nrow += 1
         for i in range(ncols):
             if i < ns.cg_itp["nb_angles"]:
@@ -550,12 +589,20 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         ax[nrow][i].fill_between(angles[grp_angle]["CG"]["x"], angles[grp_angle]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
                     ax[nrow][i].plot(angles[grp_angle]["CG"]["avg"], 0, color=config.cg_color, marker="D")
-                    print(
-                        f"Angle {grp_angle + 1} -- AA Avg: {round(angles[grp_angle]['AA']['avg'], 1)}° -- CG Avg: {round(angles[grp_angle]['CG']['avg'], 1)}°")
+                    logger.info(
+                        "Angle %s -- AA Avg: %s° -- CG Avg: %s°",
+                        grp_angle + 1,
+                        round(angles[grp_angle]["AA"]["avg"], 1),
+                        round(angles[grp_angle]["CG"]["avg"], 1),
+                    )
                 else:
                     ax[nrow][i].set_title(
                         f"Angle grp {grp_angle + 1} - Avg {round(avg_diff_grp_angles[grp_angle], 1)}°")
-                    print(f"Angle {grp_angle + 1} -- AA Avg: {round(angles[grp_angle]['AA']['avg'], 1)}")
+                    logger.info(
+                        "Angle %s -- AA Avg: %s",
+                        grp_angle + 1,
+                        round(angles[grp_angle]["AA"]["avg"], 1),
+                    )
                 ax[nrow][i].grid(zorder=0.5)
                 if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(
@@ -572,7 +619,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # dihedrals
     if ns.cg_itp["nb_dihedrals"] != 0:
-        print()
+        logger.info("")
         nrow += 1
         for i in range(ncols):
             if i < ns.cg_itp["nb_dihedrals"]:
@@ -603,12 +650,20 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         ax[nrow][i].fill_between(dihedrals[grp_dihedral]["CG"]["x"], dihedrals[grp_dihedral]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
                     ax[nrow][i].plot(dihedrals[grp_dihedral]["CG"]["avg"], 0, color=config.cg_color, marker="D")
-                    print(
-                        f"Dihedral {grp_dihedral + 1} -- AA Avg: {round(dihedrals[grp_dihedral]['AA']['avg'], 1)}° -- CG Avg: {round(dihedrals[grp_dihedral]['CG']['avg'], 1)}°")
+                    logger.info(
+                        "Dihedral %s -- AA Avg: %s° -- CG Avg: %s°",
+                        grp_dihedral + 1,
+                        round(dihedrals[grp_dihedral]["AA"]["avg"], 1),
+                        round(dihedrals[grp_dihedral]["CG"]["avg"], 1),
+                    )
                 else:
                     ax[nrow][i].set_title(
                         f"Dihedral grp {grp_dihedral + 1} - Avg {round(avg_diff_grp_dihedrals[grp_dihedral], 1)}°")
-                    print(f"Dihedral {grp_dihedral + 1} -- AA Avg: {round(dihedrals[grp_dihedral]['AA']['avg'], 1)}")
+                    logger.info(
+                        "Dihedral %s -- AA Avg: %s",
+                        grp_dihedral + 1,
+                        round(dihedrals[grp_dihedral]["AA"]["avg"], 1),
+                    )
                 ax[nrow][i].grid(zorder=0.5)
                 if ns.scoring.row_x_scaling:
                     ax[nrow][i].set_xlim(np.mean(row_wise_ranges["dihedrals"][grp_dihedral]) - row_wise_ranges[
@@ -721,13 +776,19 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                                                                                     3), round(
             fit_score_constraints_bonds, 3), round(fit_score_angles, 3), round(fit_score_dihedrals, 3)
         all_dist_pairwise += "\n"
-        print()
-        print("Using bonds to angles/dihedrals (C) scoring constant:", ns.config.optimization.bonds2angles_scoring_factor)
-        print()
-        print("Global fitness score:", fit_score_total, "(lower is better)", flush=True)
-        print("  Bonds/Constraints constribution to fitness score:", fit_score_constraints_bonds, flush=True)
-        print("  Angles constribution to fitness score:", fit_score_angles, flush=True)
-        print("  Dihedrals constribution to fitness score:", fit_score_dihedrals, flush=True)
+        logger.info("")
+        logger.info(
+            "Using bonds to angles/dihedrals (C) scoring constant: %s",
+            ns.config.optimization.bonds2angles_scoring_factor,
+        )
+        logger.info("")
+        logger.info("Global fitness score: %s (lower is better)", fit_score_total)
+        logger.info(
+            "  Bonds/Constraints constribution to fitness score: %s",
+            fit_score_constraints_bonds,
+        )
+        logger.info("  Angles constribution to fitness score: %s", fit_score_angles)
+        logger.info("  Dihedrals constribution to fitness score: %s", fit_score_dihedrals)
 
         plt.tight_layout(rect=[0, 0, 1, 0.9])
         eval_score = fit_score_total
@@ -743,9 +804,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     # here we close everything we can close because there was a memory leak from plotting
     plt.savefig(ns.files.plot_filename)
     plt.close(fig)
-    print()
-    print("Distributions plot written at location:\n ", ns.files.plot_filename, flush=True)
-    print()
+    logger.info("")
+    logger.info("Distributions plot written at location:\n %s", ns.files.plot_filename)
+    logger.info("")
 
     if not manual_mode and not ns.scoring.atom_only:
         return fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms

@@ -77,8 +77,7 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
         with open(os.path.join(input_dir, "dummy.txt"), "w") as fp:
             fp.write("dummy")
 
-        os.makedirs(os.path.join(tmpdir, config_module.distrib_plots_all_evals_dirname))
-        os.makedirs(os.path.join(tmpdir, config_module.log_files_all_evals_dirname))
+        os.makedirs(os.path.join(tmpdir, config_module.all_evals_files_dirname))
 
         original_cwd = os.getcwd()
         with patch("swarmcg.scoring.evaluation_function.sim.SimulationManager.run_simulation", return_value=None):

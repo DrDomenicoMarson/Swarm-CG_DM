@@ -6,6 +6,9 @@ from swarmcg import config
 from swarmcg.shared import exceptions
 from swarmcg.config_types import SwarmConfig
 from swarmcg.simulations import vs_functions as vsf
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 class Mapping:
     def __init__(self, config: SwarmConfig):
@@ -93,7 +96,7 @@ class Mapping:
         """Calculate weight ratio of atom ID in given CG bead."""
         self.atom_w = dict()
         if self.config.output.verbose:
-            print("Calculating atoms weights ratio within mapped CG beads")
+            logger.info("Calculating atoms weights ratio within mapped CG beads")
             
         for bead_id in self.all_beads:
             self.atom_w[bead_id] = dict()
@@ -101,10 +104,14 @@ class Mapping:
             for atom_id in beads_atoms_counts:
                 self.atom_w[bead_id][atom_id] = round(beads_atoms_counts[atom_id] / self.atoms_occ_total[atom_id], 3)
                 if self.config.output.verbose and self.reference_config.mapping_type == "COM":
-                    print("  CG bead ID", bead_id + 1, "-- Atom ID", atom_id + 1, "has weight ratio =",
-                          self.atom_w[bead_id][atom_id])
+                    logger.info(
+                        "  CG bead ID %s -- Atom ID %s has weight ratio = %s",
+                        bead_id + 1,
+                        atom_id + 1,
+                        self.atom_w[bead_id][atom_id],
+                    )
         if self.config.output.verbose:
-            print()
+            logger.info("")
 
     def get_beads_MDA_atomgroups(self, universe: mda.Universe):
         """For each CG bead, create atom groups for trajectory geoms calculation."""
@@ -128,9 +135,9 @@ class Mapping:
     def map_aa2cg_traj(self, aa_universe: mda.Universe, aa2cg_universe: mda.Universe, cg_itp: dict):
         """Map AA trajectory to CG trajectory."""
         if self.reference_config.mapping_type == "COM":
-            print("  Interpretation: Center of Mass (COM)")
+            logger.info("  Interpretation: Center of Mass (COM)")
         elif self.reference_config.mapping_type == "COG":
-            print("  Interpretation: Center of Geometry (COG)")
+            logger.info("  Interpretation: Center of Geometry (COG)")
 
         # Regular beads
         n_frames = len(aa_universe.trajectory)
@@ -140,7 +147,7 @@ class Mapping:
         # Pre-calculate processing order
         regular_beads_ids = [i for i in range(n_beads) if not cg_itp["atoms"][i]["bead_type"].startswith("v")]
         
-        print(f"  Processing {n_frames} frames...", flush=True)
+        logger.info("  Processing %s frames...", n_frames)
         
         # Iterate trajectory once
         for ts in aa_universe.trajectory:

@@ -1,7 +1,9 @@
 import MDAnalysis as mda
 import numpy as np
 from swarmcg.config_types import SwarmConfig
+from swarmcg.shared.logging_utils import get_logger
 
+logger = get_logger(__name__)
 
 
 
@@ -45,19 +47,34 @@ def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmCon
     if opt_config.bonds_scaling != 1.0:
         bond_values = [x * opt_config.bonds_scaling for x in bond_values]
         bond_avg_final = round(np.average(bond_values), 3)
-        print(f"  Ref. AA-mapped distrib. rescaled to avg {bond_avg_final} nm for {grp_type} {grp_nb + 1}")
+        logger.info(
+            "  Ref. AA-mapped distrib. rescaled to avg %s nm for %s %s",
+            bond_avg_final,
+            grp_type,
+            grp_nb + 1,
+        )
     elif bond_avg_init < opt_config.min_bonds_length:
         factor = opt_config.min_bonds_length / bond_avg_init
         bond_values = [x * factor for x in bond_values]
         bond_avg_final = round(np.average(bond_values), 3)
-        print(f"  Ref. AA-mapped distrib. rescaled to avg {bond_avg_final} nm for {grp_type} {grp_nb + 1}")
+        logger.info(
+            "  Ref. AA-mapped distrib. rescaled to avg %s nm for %s %s",
+            bond_avg_final,
+            grp_type,
+            grp_nb + 1,
+        )
     elif bonds_scaling_specific is not None:
         geom_id_full = f"C{grp_nb + 1}" if grp_type.startswith("constraint") else f"B{grp_nb + 1}"
         if geom_id_full in bonds_scaling_specific:
             bond_rescale_factor = bonds_scaling_specific[geom_id_full] / bond_avg_init
             bond_values = [x * bond_rescale_factor for x in bond_values]
             bond_avg_final = round(np.average(bond_values), 3)
-            print(f"  Ref. AA-mapped distrib. rescaled to avg {bond_avg_final} nm for {grp_type} {grp_nb + 1}")
+            logger.info(
+                "  Ref. AA-mapped distrib. rescaled to avg %s nm for %s %s",
+                bond_avg_final,
+                grp_type,
+                grp_nb + 1,
+            )
     
     # Binning
     bond_hist = None

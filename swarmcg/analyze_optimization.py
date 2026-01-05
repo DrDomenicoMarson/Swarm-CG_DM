@@ -11,7 +11,9 @@ import swarmcg.io as io
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.math_utils import forward_fill
+from swarmcg.shared.logging_utils import get_logger, setup_logging
 
+logger = get_logger(__name__)
 
 @catch_warnings(DeprecationWarning)  # filter matplotlib warnings
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
@@ -53,7 +55,7 @@ def run(ns):
 
         eval_lines = fp.read().split("\n")
         nb_evals = len(eval_lines) - 7
-        print("Found", nb_evals, "optimization steps")
+        logger.info("Found %s optimization steps", nb_evals)
 
         # to make sure the 2 opti recap files contain the same number of iterations (avoid buffering/writing problems so that this script can be executed anytime)
         iter_indep_scores = iter_indep_scores[:nb_evals, ]
@@ -205,16 +207,26 @@ def run(ns):
     cyc_mask = np.where((all_opti_cycles > 0) & (all_fit_score_total != None))[0]
     id_best_all = np.where(all_fit_score_total == np.amin(all_fit_score_total[cyc_mask]))[0][0]
 
-    print("Best bonded terms found at step", id_best_all + 1, "with estimated Rg", all_gyr_cg[id_best_all],
-          "nm and SASA", all_sasa_cg[id_best_all], "nm2")
+    logger.info(
+        "Best bonded terms found at step %s with estimated Rg %s nm and SASA %s nm2",
+        id_best_all + 1,
+        all_gyr_cg[id_best_all],
+        all_sasa_cg[id_best_all],
+    )
 
-    print()
-    print("  Rg CG: ", " " + str(round(all_gyr_cg[id_best_all], 3)), "nm   (Error abs.", str(
-        round(abs(1 - all_gyr_cg[id_best_all] / all_gyr_aa_mapped[id_best_all]) * 100,
-              1)) + "% -- Reference Rg AA-mapped:", str(all_gyr_aa_mapped[id_best_all]) + " nm)")
-    print("  SASA CG:", round(all_sasa_cg[id_best_all], 2), "nm2   (Error abs.", str(
-        round(abs(1 - all_sasa_cg[id_best_all] / all_sasa_aa_mapped[id_best_all]) * 100,
-              1)) + "% -- Reference SASA AA-mapped:", str(all_sasa_aa_mapped[id_best_all]) + " nm2)")
+    logger.info("")
+    logger.info(
+        "  Rg CG:  %s nm   (Error abs. %s%% -- Reference Rg AA-mapped: %s nm)",
+        round(all_gyr_cg[id_best_all], 3),
+        round(abs(1 - all_gyr_cg[id_best_all] / all_gyr_aa_mapped[id_best_all]) * 100, 1),
+        all_gyr_aa_mapped[id_best_all],
+    )
+    logger.info(
+        "  SASA CG: %s nm2   (Error abs. %s%% -- Reference SASA AA-mapped: %s nm2)",
+        round(all_sasa_cg[id_best_all], 2),
+        round(abs(1 - all_sasa_cg[id_best_all] / all_sasa_aa_mapped[id_best_all]) * 100, 1),
+        all_sasa_aa_mapped[id_best_all],
+    )
 
     # display indicator when simulation(s) crashed for any reason -- check for None gyr_cg to identify a simulation as crashed
     crashes_ids = np.where(all_gyr_cg == None)[0] + 1
@@ -622,13 +634,22 @@ def run(ns):
 
     plt.tight_layout()
     plt.savefig(ns.opti_dirname + "/" + ns.plot_filename)
-    print()
-    print("Wrote visual optimization summary file at location:\n ",
-          os.path.normpath(ns.opti_dirname + "/" + ns.plot_filename))
-    print()
+    logger.info("")
+    logger.info(
+        "Wrote visual optimization summary file at location:\n %s",
+        os.path.normpath(ns.opti_dirname + "/" + ns.plot_filename),
+    )
+    logger.info("")
 
 
 def main():
+    module_name = "monitor"
+    setup_logging(module_name=module_name, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
+    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
+        logger.info(swarmcg.shared.styling.header_simple(module_name))
+    else:
+        logger.info(swarmcg.shared.styling.header_package("Module: Optimization run analysis\n"))
+
     args_parser = io.get_analyze_args()
 
     # display help if script was called without arguments
@@ -638,15 +659,15 @@ def main():
 
     # arguments handling, display command line if help or no arguments provided
     ns = args_parser.parse_args()
+    setup_logging(module_name=module_name, log_dir=ns.opti_dirname, verbose=getattr(ns, "verbose", False))
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
-    print("Working directory:", os.getcwd())
-    print("Command line:", input_cmdline)
-    print()
-    print(swarmcg.shared.styling.sep_close)
-    print(
-        "| SUMMARIZING OPTIMIZATION PROCEDURE                                                          |")
-    print(swarmcg.shared.styling.sep_close)
-    print()
+    logger.info("Working directory: %s", os.getcwd())
+    logger.info("Command line: %s", input_cmdline)
+    logger.info("")
+    logger.info(swarmcg.shared.styling.sep_close)
+    logger.info("| SUMMARIZING OPTIMIZATION PROCEDURE                                                          |")
+    logger.info(swarmcg.shared.styling.sep_close)
+    logger.info("")
 
     run(ns)
 

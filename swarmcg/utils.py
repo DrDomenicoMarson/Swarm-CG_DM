@@ -4,12 +4,17 @@ import sys
 import MDAnalysis as mda
 from swarmcg import config
 from swarmcg.shared import exceptions
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def print_stdout_forced(*args, **kwargs):
     """Print forced stdout enabled"""
+    sep = kwargs.get("sep", " ")
+    message = sep.join(str(arg) for arg in args)
     with contextlib.redirect_stdout(sys.__stdout__):
-        print(*args, **kwargs, flush=True)
+        logger.info(message)
 
 
 def set_MDA_backend(ns):

@@ -11,6 +11,9 @@ from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_
 from swarmcg.scoring.compare import compare_models
 from swarmcg import scoring as scores
 from swarmcg import utils
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 class SwarmEvaluator:
     """
@@ -50,7 +53,8 @@ class SwarmEvaluator:
         utils.process_scaling_str(self.ns)
         
         # 5. Load AA Trajectory
-        print("\nLoading Reference AA Trajectory...")
+        logger.info("")
+        logger.info("Loading Reference AA Trajectory...")
         self.ns.scoring.aa_universe = io.read_aa_traj(self.config.reference)
         
         self.mapping.load_aa_data(self.ns.scoring.aa_universe)
@@ -69,7 +73,8 @@ class SwarmEvaluator:
         self.ns.scoring.domains_val = {}
         
         # 7. Map AA to CG
-        print("\nMapping AA Trajectory to CG representation...")
+        logger.info("")
+        logger.info("Mapping AA Trajectory to CG representation...")
         self.ns.scoring.aa2cg_universe = initialize_cg_traj(self.ns.cg_itp)
         self.mapping.map_aa2cg_traj(self.ns.scoring.aa_universe, self.ns.scoring.aa2cg_universe, self.ns.cg_itp)
         
@@ -82,7 +87,7 @@ class SwarmEvaluator:
         if not self.ns or not self.ns.cg_itp:
             raise RuntimeError("Evaluator not initialized.")
             
-        print("Calculating reference distributions...")
+        logger.info("Calculating reference distributions...")
         
         # Constraints
         for i, grp in enumerate(self.ns.cg_itp["constraint"]):
@@ -197,4 +202,3 @@ class SwarmEvaluator:
         except Exception as e:
             # Handle scoring failures
             raise e
-

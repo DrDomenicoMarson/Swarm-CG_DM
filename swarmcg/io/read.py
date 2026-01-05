@@ -3,6 +3,9 @@ import MDAnalysis as mda
 from swarmcg.config_types import ReferenceModelConfig, SwarmConfig
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 @catch_warnings(ImportWarning)
 def read_aa_traj(config: ReferenceModelConfig):
@@ -11,11 +14,11 @@ def read_aa_traj(config: ReferenceModelConfig):
     Returns:
         aa_universe (mda.Universe)
     """
-    print("Reading All Atom (AA) trajectory")
+    logger.info("Reading All Atom (AA) trajectory")
     aa_universe = mda.Universe(config.aa_tpr_filename, config.aa_traj_filename,
                                   in_memory=True, refresh_offsets=True,
                                   guess_bonds=False)
-    print("  Found", len(aa_universe.trajectory), "frames")
+    logger.info("  Found %s frames", len(aa_universe.trajectory))
     return aa_universe
 
 
@@ -114,7 +117,7 @@ def validate_cg_itp(cg_itp, **kwargs):
 def read_cg_itp_file(config: SwarmConfig):
     """Read coarse-grain ITP
     """
-    print("Reading Coarse-Grained (CG) ITP file")
+    logger.info("Reading Coarse-Grained (CG) ITP file")
     from swarmcg.io.itp import CGITP
     cg_itp = CGITP()
     
@@ -547,12 +550,12 @@ def read_cg_itp_file(config: SwarmConfig):
     nb_bonds += 1
     nb_angles += 1
     nb_dihedrals += 1
-    print(f"  Found {len(real_beads_ids)} beads")
-    print(f"  Found {len(vs_beads_ids)} virtual sites")
-    print(f"  Found {nb_constraints} constraints groups")
-    print(f"  Found {nb_bonds} bonds groups")
-    print(f"  Found {nb_angles} angles groups")
-    print(f"  Found {nb_dihedrals} dihedrals groups")
+    logger.info("  Found %s beads", len(real_beads_ids))
+    logger.info("  Found %s virtual sites", len(vs_beads_ids))
+    logger.info("  Found %s constraints groups", nb_constraints)
+    logger.info("  Found %s bonds groups", nb_bonds)
+    logger.info("  Found %s angles groups", nb_angles)
+    logger.info("  Found %s dihedrals groups", nb_dihedrals)
     cg_itp["real_beads_ids"] = real_beads_ids
     cg_itp["vs_beads_ids"] = vs_beads_ids
     cg_itp["nb_bonds"] = nb_bonds

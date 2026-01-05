@@ -1,5 +1,8 @@
 import numpy as np
 import MDAnalysis as mda
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 # All these functions for virtual sites definitions are explained
@@ -194,9 +197,10 @@ def vsn_func_2(universe, traj, vs_def_beads_ids, bead_id, cg_itp=None):
                 zero_mass_beads_ids.append(bid)
     if len(zero_mass_beads_ids) > 0:
         ids_str = " ".join(str(bid + 1) for bid in zero_mass_beads_ids)
-        print(
-            f"  WARNING: Virtual site ID {bead_id + 1} uses function 2 for COM, "
-            f"but its definition contains IDs {ids_str} which have no mass"
+        logger.warning(
+            "  WARNING: Virtual site ID %s uses function 2 for COM, but its definition contains IDs %s which have no mass",
+            bead_id + 1,
+            ids_str,
         )
 
     for ts in universe.trajectory:

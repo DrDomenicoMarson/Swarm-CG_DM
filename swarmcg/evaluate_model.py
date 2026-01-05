@@ -8,12 +8,14 @@ import matplotlib
 import swarmcg.io as io
 import swarmcg.shared.styling
 from swarmcg.shared import catch_warnings
+from swarmcg.shared.logging_utils import get_logger, setup_logging
 from swarmcg.scoring.compare import compare_models
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 
 matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 
+logger = get_logger(__name__)
 
 def run(config_obj: SwarmConfig):
     """
@@ -29,11 +31,11 @@ def run(config_obj: SwarmConfig):
     ns.scoring.row_y_scaling = config_obj.output.row_y_scaling
     ns.scoring.ncols_max = config_obj.output.ncols_max
 
-    print()
-    print(swarmcg.shared.styling.sep_close)
-    print("| PRE-PROCESSING                                                                              |")
-    print(swarmcg.shared.styling.sep_close)
-    print()
+    logger.info("")
+    logger.info(swarmcg.shared.styling.sep_close)
+    logger.info("| PRE-PROCESSING                                                                              |")
+    logger.info(swarmcg.shared.styling.sep_close)
+    logger.info("")
 
     # TODO: make it possible to feed a delta/offset for Rg in case the model has bonds scaling ?
 
@@ -56,7 +58,7 @@ def run(config_obj: SwarmConfig):
     try:
         config_obj.validate_files_exist()
     except FileNotFoundError as e:
-        print(e)
+        logger.error("%s", e)
         sys.exit(1)
 
     # Create Evaluator
@@ -66,9 +68,9 @@ def run(config_obj: SwarmConfig):
     # display parameters for function compare_models
     if not os.path.isfile(ns.cg_tpr_filename) or not os.path.isfile(ns.cg_traj_filename):
         # switch to atomistic mapping inspection exclusively (= do NOT plot the CG distributions)
-        print("Could not find file(s) for either CG topology or trajectory")
-        print("  Going for inspection of AA-mapped distributions exclusively")
-        print()
+        logger.warning("Could not find file(s) for either CG topology or trajectory")
+        logger.info("  Going for inspection of AA-mapped distributions exclusively")
+        logger.info("")
         ns.atom_only = True
     else:
         ns.atom_only = False
@@ -87,13 +89,23 @@ def run(config_obj: SwarmConfig):
 
 
 def main():
+    module_name = "evaluate"
+    setup_logging(module_name=module_name, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
+    logger = get_logger(__name__)
+    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
+        logger.info(swarmcg.shared.styling.header_simple(module_name))
+    else:
+        logger.info(swarmcg.shared.styling.header_package("                Module: Model bonded terms assessment\n"))
+
     args_parser = io.get_evaluate_args()
 
     # arguments handling, display command line if help or no arguments provided
     ns_args = args_parser.parse_args()
+    plot_dir = os.path.dirname(os.path.abspath(ns_args.plot_filename or "distributions.png"))
+    setup_logging(module_name=module_name, log_dir=plot_dir, verbose=ns_args.verbose)
     input_cmdline = " ".join(map(cmd_quote, sys.argv))
-    print("Working directory:", os.getcwd())
-    print("Command line:", input_cmdline)
+    logger.info("Working directory: %s", os.getcwd())
+    logger.info("Command line: %s", input_cmdline)
 
     swarm_config = SwarmConfig.from_namespace(ns_args)
     run(swarm_config)

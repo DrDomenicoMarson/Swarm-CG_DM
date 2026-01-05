@@ -6,7 +6,8 @@ from shlex import quote as cmd_quote
 import swarmcg.io as io
 from swarmcg.config_types import SwarmConfig
 from swarmcg.core.optimization import SwarmOptimizer
-from swarmcg.shared import catch_warnings
+from swarmcg.shared import catch_warnings, styling
+from swarmcg.shared.logging_utils import get_logger, setup_logging
 
 @catch_warnings(ImportWarning)
 @catch_warnings(UserWarning)
@@ -22,6 +23,14 @@ def run(config_obj: SwarmConfig):
 
 
 def main():
+    module_name = "optimize"
+    setup_logging(module_name=module_name, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
+    logger = get_logger(__name__)
+    if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
+        logger.info(styling.header_simple(module_name))
+    else:
+        logger.info(styling.header_package("                    Module: CG model optimization\n"))
+
     args_parser = io.get_optimize_args()
 
     # display help if script was called without arguments
@@ -31,6 +40,7 @@ def main():
 
     # arguments handling, display command line if help or no arguments provided
     ns_args = args_parser.parse_args()
+    setup_logging(module_name=module_name, verbose=ns_args.verbose)
 
     # do NOT display the stack by default
     if not ns_args.verbose:
@@ -50,9 +60,9 @@ def main():
     else:
          exec_folder = time.strftime("MODEL_OPTI__STARTED_%d-%m-%Y_%Hh%Mm%Ss")
 
-    print("Working directory:", os.getcwd())
-    print("Command line:", input_cmdline)
-    print("Results directory:", exec_folder)
+    logger.info(f"Working directory: {os.getcwd()}")
+    logger.info(f"Command line: {input_cmdline}")
+    logger.info(f"Results directory: {exec_folder}")
 
     run(swarm_config)
 
