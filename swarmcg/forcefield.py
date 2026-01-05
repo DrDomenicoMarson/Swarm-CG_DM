@@ -9,7 +9,7 @@ from swarmcg.shared.logging_utils import get_logger
 from swarmcg.shared.math_utils import draw_float
 from swarmcg.simulations.potentials import (
     gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2, gmx_angles_func_10,
-    gmx_dihedrals_func_1, gmx_dihedrals_func_2
+    gmx_dihedrals_func_1, gmx_dihedrals_func_2, gmx_dihedrals_func_3
 )
 
 logger = get_logger(__name__)
@@ -25,40 +25,53 @@ def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
     nb_angles = opti_cycle["nb_geoms"]["angle"]
     nb_dihedrals = opti_cycle["nb_geoms"]["dihedral"]
 
+    idx = 0
+
     # Constraints
-    for i in range(nb_constraints):
-        if exec_mode == 1:
-            itp_obj["constraint"][i]["value"] = round(parameters_set[i], 3)
+    if exec_mode == 1:
+        for i in range(nb_constraints):
+            itp_obj["constraint"][i]["value"] = round(parameters_set[idx], 3)
+            idx += 1
 
     # Bonds
+    if exec_mode == 1:
+        for i in range(nb_bonds):
+            itp_obj["bond"][i]["value"] = round(parameters_set[idx], 3)
+            idx += 1
+
     for i in range(nb_bonds):
-        if exec_mode == 1:
-            itp_obj["bond"][i]["value"] = round(parameters_set[nb_constraints + i], 3)
-            itp_obj["bond"][i]["fct"] = round(parameters_set[nb_constraints + nb_bonds + i], 3)
-        else:
-            itp_obj["bond"][i]["fct"] = round(parameters_set[i], 3)
+        itp_obj["bond"][i]["fct"] = round(parameters_set[idx], 3)
+        idx += 1
 
     # Angles
+    if exec_mode == 1:
+        for i in range(nb_angles):
+            itp_obj["angle"][i]["value"] = round(parameters_set[idx], 2)
+            idx += 1
+
     for i in range(nb_angles):
-        if exec_mode == 1:
-            itp_obj["angle"][i]["value"] = round(
-                parameters_set[nb_constraints + 2 * nb_bonds + i], 2)
-            itp_obj["angle"][i]["fct"] = round(
-                parameters_set[nb_constraints + 2 * nb_bonds + nb_angles + i], 2)
-        else:
-            itp_obj["angle"][i]["fct"] = round(
-                parameters_set[nb_bonds + i], 2)
+        itp_obj["angle"][i]["fct"] = round(parameters_set[idx], 2)
+        idx += 1
 
     # Dihedrals
     for i in range(nb_dihedrals):
-        if exec_mode == 1:
-            itp_obj["dihedral"][i]["value"] = round(
-                parameters_set[nb_constraints + 2 * nb_bonds + 2 * nb_angles + i], 2)
-            itp_obj["dihedral"][i]["fct"] = round(
-                parameters_set[nb_constraints + 2 * nb_bonds + 2 * nb_angles + nb_dihedrals + i], 2)
+        func = itp_obj["dihedral"][i]["func"]
+        if func == 3:
+            coeffs = [round(param, 2) for param in parameters_set[idx:idx + 6]]
+            idx += 6
+            itp_obj["dihedral"][i]["params"] = coeffs
         else:
-            itp_obj["dihedral"][i]["fct"] = round(
-                parameters_set[nb_bonds + nb_angles + i], 2)
+            if exec_mode == 1:
+                itp_obj["dihedral"][i]["value"] = round(parameters_set[idx], 2)
+                itp_obj["dihedral"][i]["fct"] = round(parameters_set[idx + 1], 2)
+                idx += 2
+            else:
+                itp_obj["dihedral"][i]["fct"] = round(parameters_set[idx], 2)
+                idx += 1
+            itp_obj["dihedral"][i]["params"] = [
+                itp_obj["dihedral"][i]["value"],
+                itp_obj["dihedral"][i]["fct"],
+            ]
 
 
 def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, config_obj: SwarmConfig):
@@ -89,14 +102,21 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, conf
                 search_space_boundaries.extend([[0, opt_config.default_max_fct_angles_opti_f10]])
 
     if opti_cycle["nb_geoms"]["dihedral"] > 0:
-        if exec_mode == 1:
-            search_space_boundaries.extend(domains_val["dihedral"])
-
         for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
-            if cg_itp["dihedral"][grp_dihedral]["func"] == 2:
-                search_space_boundaries.extend([[-opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult, opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult]])
-            elif cg_itp["dihedral"][grp_dihedral]["func"] in config.dihedral_func_with_mult:
-                search_space_boundaries.extend([[-opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult, opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult]])
+            func = cg_itp["dihedral"][grp_dihedral]["func"]
+            if func == 3:
+                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_rb
+                search_space_boundaries.extend([[-max_abs, max_abs]] * 6)
+                continue
+
+            if exec_mode == 1:
+                search_space_boundaries.append(domains_val["dihedral"][grp_dihedral])
+
+            if func == 2:
+                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
+            else:
+                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
+            search_space_boundaries.append([-max_abs, max_abs])
 
     return search_space_boundaries
 
@@ -240,8 +260,8 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
             func = itp_obj["dihedral"][grp_dihedral]["func"]
 
             if exec_mode == 2:
-                avg_rad = np.deg2rad(itp_obj["dihedral"][grp_dihedral].get("value_user", 0))  # Fallback if missing
-                pass
+                value_user = itp_obj["dihedral"][grp_dihedral].get("value_user")
+                avg_rad = np.deg2rad(value_user) if value_user is not None else 0
 
             if func in config.dihedral_func_with_mult:
                 multiplicity = itp_obj["dihedral"][grp_dihedral]["mult"]
@@ -274,16 +294,30 @@ def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj
                     itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
                 except:
                     pass
-
-            if exec_mode == 1:
+            elif func == 3:
+                # Keep RB coefficients from input (no BI fit currently applied)
                 pass
 
+            if func != 3:
+                itp_obj["dihedral"][grp_dihedral]["params"] = [
+                    itp_obj["dihedral"][grp_dihedral]["value"],
+                    itp_obj["dihedral"][grp_dihedral]["fct"],
+                ]
+
             if verbose:
-                logger.info(
-                    "  Dihedral group %s estimated force constant: %s",
-                    grp_dihedral + 1,
-                    round(itp_obj["dihedral"][grp_dihedral]["fct"], 2),
-                )
+                if func == 3:
+                    coeffs = itp_obj["dihedral"][grp_dihedral]["params"]
+                    logger.info(
+                        "  Dihedral group %s RB coefficients: %s",
+                        grp_dihedral + 1,
+                        [round(coeff, 2) for coeff in coeffs],
+                    )
+                else:
+                    logger.info(
+                        "  Dihedral group %s estimated force constant: %s",
+                        grp_dihedral + 1,
+                        round(itp_obj["dihedral"][grp_dihedral]["fct"], 2),
+                    )
 
         performed_init_BI["dihedral"] = True
 
@@ -308,6 +342,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     default_max_fct_angles_opti_f10 = opt_config.default_max_fct_angles_opti_f10
     default_abs_range_fct_dihedrals_opti_func_without_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
     default_abs_range_fct_dihedrals_opti_func_with_mult = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
+    default_abs_range_fct_dihedrals_opti_func_rb = opt_config.default_abs_range_fct_dihedrals_opti_func_rb
     bond_dist_guess_variation = opt_config.bond_dist_guess_variation
     angle_value_guess_variation = opt_config.angle_value_guess_variation
     dihedral_value_guess_variation = opt_config.dihedral_value_guess_variation
@@ -347,20 +382,23 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
             input_guess.append(
                 min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f10))
 
-    if exec_mode == 1:
-        for i in range(opti_cycle["nb_geoms"]["dihedral"]):
+    for i in range(opti_cycle["nb_geoms"]["dihedral"]):
+        func = cg_itp["dihedral"][i]["func"]
+        if func == 3:
+            max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+            for coeff in out_itp["dihedral"][i]["params"]:
+                input_guess.append(min(max(coeff, -max_abs), max_abs))
+            continue
+
+        if exec_mode == 1:
             input_guess.append(min(max(out_itp["dihedral"][i]["value"], domains_val["dihedral"][i][0]),
                                    domains_val["dihedral"][i][1]))
 
-    for i in range(opti_cycle["nb_geoms"]["dihedral"]):
-        if cg_itp["dihedral"][i]["func"] == 2:
-            input_guess.append(
-                min(max(out_itp["dihedral"][i]["fct"], -default_abs_range_fct_dihedrals_opti_func_without_mult),
-                    default_abs_range_fct_dihedrals_opti_func_without_mult))
+        if func == 2:
+            max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
         else:
-            input_guess.append(
-                min(max(out_itp["dihedral"][i]["fct"], -default_abs_range_fct_dihedrals_opti_func_with_mult),
-                    default_abs_range_fct_dihedrals_opti_func_with_mult))
+            max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
+        input_guess.append(min(max(out_itp["dihedral"][i]["fct"], -max_abs), max_abs))
 
     initial_guess_list.append(input_guess)
     num_particle_random_start = 1
@@ -412,26 +450,36 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                      input_guess.append(min(max(out_itp["angle"][i]["fct"], 0), default_max_fct_angles_opti_f10))
 
         # Dihedrals
-        if exec_mode == 1:
-            for i in range(opti_cycle["nb_geoms"]["dihedral"]):
-                if all_best_emd_dist_geoms["dihedrals"][i] != sim_crash_EMD_indep_score:
-                    input_guess.append(all_best_params_dist_geoms["dihedrals"][i]["params"][0])
-                else:
-                    input_guess.append(min(max(out_itp["dihedral"][i]["value"], domains_val["dihedral"][i][0]), domains_val["dihedral"][i][1]))
-
         for i in range(opti_cycle["nb_geoms"]["dihedral"]):
+            func = cg_itp["dihedral"][i]["func"]
+            best_params = None
             if all_best_emd_dist_geoms["dihedrals"][i] != sim_crash_EMD_indep_score:
-                input_guess.append(all_best_params_dist_geoms["dihedrals"][i]["params"][1])
-            else:
-                if cg_itp["dihedral"][i]["func"] == 2:
-                    input_guess.append(
-                        min(max(out_itp["dihedral"][i]["fct"],
-                                -default_abs_range_fct_dihedrals_opti_func_without_mult),
-                            default_abs_range_fct_dihedrals_opti_func_without_mult))
+                best_params = all_best_params_dist_geoms["dihedrals"][i]["params"]
+
+            if func == 3:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+                params = best_params if best_params is not None else out_itp["dihedral"][i]["params"]
+                for coeff in params:
+                    input_guess.append(min(max(coeff, -max_abs), max_abs))
+                continue
+
+            if exec_mode == 1:
+                if best_params is not None:
+                    input_guess.append(best_params[0])
                 else:
-                    input_guess.append(min(
-                        max(out_itp["dihedral"][i]["fct"], -default_abs_range_fct_dihedrals_opti_func_with_mult),
-                        default_abs_range_fct_dihedrals_opti_func_with_mult))
+                    input_guess.append(min(max(out_itp["dihedral"][i]["value"], domains_val["dihedral"][i][0]),
+                                           domains_val["dihedral"][i][1]))
+
+            if best_params is not None:
+                fct_val = best_params[1]
+            else:
+                fct_val = out_itp["dihedral"][i]["fct"]
+
+            if func == 2:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
+            else:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
+            input_guess.append(min(max(fct_val, -max_abs), max_abs))
 
         initial_guess_list.append(input_guess)
 
@@ -466,15 +514,23 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 input_guess.append(min(max(out_itp["angle"][i]["fct_user"], 0), default_max_fct_angles_opti_f10))
 
         # dihedrals
-        if exec_mode == 1:
-            for i in range(opti_cycle["nb_geoms"]["dihedral"]):
-                input_guess.append(min(max(out_itp["dihedral"][i]["value_user"], domains_val["dihedral"][i][0]), domains_val["dihedral"][i][1]))
-        
         for i in range(opti_cycle["nb_geoms"]["dihedral"]):
-            if cg_itp["dihedral"][i]["func"] == 2:
-                input_guess.append(min(max(out_itp["dihedral"][i]["fct_user"], -default_abs_range_fct_dihedrals_opti_func_without_mult), default_abs_range_fct_dihedrals_opti_func_without_mult))
+            func = cg_itp["dihedral"][i]["func"]
+            if func == 3:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+                for coeff in out_itp["dihedral"][i]["params_user"]:
+                    input_guess.append(min(max(coeff, -max_abs), max_abs))
+                continue
+
+            if exec_mode == 1:
+                input_guess.append(min(max(out_itp["dihedral"][i]["value_user"], domains_val["dihedral"][i][0]),
+                                       domains_val["dihedral"][i][1]))
+
+            if func == 2:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
             else:
-                 input_guess.append(min(max(out_itp["dihedral"][i]["fct_user"], -default_abs_range_fct_dihedrals_opti_func_with_mult), default_abs_range_fct_dihedrals_opti_func_with_mult))
+                max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
+            input_guess.append(min(max(out_itp["dihedral"][i]["fct_user"], -max_abs), max_abs))
 
         initial_guess_list.append(input_guess)
 
@@ -529,18 +585,32 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
             init_guess.append(draw_float(draw_low, draw_high, 3))
 
         # dihedrals
-        if exec_mode == 1:
-             for j in range(opti_cycle["nb_geoms"]["dihedral"]):
-                try: emd_err_fact = max(1, all_best_emd_dist_geoms["dihedrals"][j] / 5)
-                except: emd_err_fact = 1
+        for j in range(opti_cycle["nb_geoms"]["dihedral"]):
+            try:
+                emd_err_fact = max(1, all_best_emd_dist_geoms["dihedrals"][j] / 5)
+            except:
+                emd_err_fact = 1
+
+            func = cg_itp["dihedral"][j]["func"]
+            if func == 3:
+                max_abs = default_abs_range_fct_dihedrals_opti_func_rb
+                for coeff in out_itp["dihedral"][j]["params"]:
+                    if coeff > 0:
+                        draw_low = coeff * (1 - fct_guess_fact * emd_err_fact)
+                        draw_high = coeff * (1 + fct_guess_fact * emd_err_fact)
+                    else:
+                        draw_low = coeff * (1 + fct_guess_fact * emd_err_fact)
+                        draw_high = coeff * (1 - fct_guess_fact * emd_err_fact)
+                    draw_low = max(min(draw_low, coeff - fct_guess_min_flat_diff_dihedrals_without_mult), -max_abs)
+                    draw_high = min(max(draw_high, coeff + fct_guess_min_flat_diff_dihedrals_without_mult), max_abs)
+                    init_guess.append(draw_float(draw_low, draw_high, 3))
+                continue
+
+            if exec_mode == 1:
                 draw_low = max(out_itp["dihedral"][j]["value"] - dihedral_value_guess_variation * val_guess_fact * emd_err_fact, domains_val["dihedral"][j][0])
                 draw_high = min(out_itp["dihedral"][j]["value"] + dihedral_value_guess_variation * val_guess_fact * emd_err_fact, domains_val["dihedral"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
-        
-        for j in range(opti_cycle["nb_geoms"]["dihedral"]):
-            try: emd_err_fact = max(1, all_best_emd_dist_geoms["dihedrals"][j] / 5)
-            except: emd_err_fact = 1
-            
+
             if out_itp["dihedral"][j]["fct"] > 0:
                 draw_low = out_itp["dihedral"][j]["fct"] * (1 - fct_guess_fact * emd_err_fact)
                 draw_high = out_itp["dihedral"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact)
@@ -548,12 +618,12 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 draw_low = out_itp["dihedral"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact)
                 draw_high = out_itp["dihedral"][j]["fct"] * (1 - fct_guess_fact * emd_err_fact)
 
-            if cg_itp["dihedral"][j]["func"] == 2:
+            if func == 2:
                 draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_without_mult), -default_abs_range_fct_dihedrals_opti_func_without_mult if default_abs_range_fct_dihedrals_opti_func_without_mult > 0 else 0) # Fallback bound
                 draw_high = min(max(draw_high, out_itp["dihedral"][j]["fct"] + fct_guess_min_flat_diff_dihedrals_without_mult), default_abs_range_fct_dihedrals_opti_func_without_mult)
             else:
-                 draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_with_mult), -default_abs_range_fct_dihedrals_opti_func_with_mult)
-                 draw_high = min(max(draw_high, out_itp["dihedral"][j]["fct"] + fct_guess_min_flat_diff_dihedrals_with_mult), default_abs_range_fct_dihedrals_opti_func_with_mult)
+                draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_with_mult), -default_abs_range_fct_dihedrals_opti_func_with_mult)
+                draw_high = min(max(draw_high, out_itp["dihedral"][j]["fct"] + fct_guess_min_flat_diff_dihedrals_with_mult), default_abs_range_fct_dihedrals_opti_func_with_mult)
             init_guess.append(draw_float(draw_low, draw_high, 3))
 
         initial_guess_list.append(init_guess)

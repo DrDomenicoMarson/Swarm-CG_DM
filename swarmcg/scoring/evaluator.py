@@ -164,7 +164,7 @@ class SwarmEvaluator:
                 self.config.optimization.bw_dihedrals
             )
             # exec_mode 1 logic handled later/in optimize
-            if self.config.optimization.exec_mode == 1:
+            if self.config.optimization.exec_mode == 1 and grp["func"] != 3:
                 grp["value"] = avg 
             grp["avg"] = avg 
             grp["avg"] = avg

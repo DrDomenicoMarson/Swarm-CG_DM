@@ -24,6 +24,7 @@ default_max_fct_angles_opti_f10 = 1700
 
 default_abs_range_fct_dihedrals_bi_func_without_mult = 250
 default_abs_range_fct_dihedrals_opti_func_without_mult = 1500
+default_abs_range_fct_dihedrals_opti_func_rb = 1500
 default_abs_range_fct_dihedrals_bi_func_with_mult = 3.5  # TODO: these limits for dihedrals are probably far too low but they guarantee we don"t have all sims crashing at start
 default_abs_range_fct_dihedrals_opti_func_with_mult = 15
 
@@ -56,8 +57,8 @@ handled_functions = {
     "constraint": [1],  # tested and verified: 1
     "bond": [1],  # tested and verified: 1
     "angle": [1, 2, 10],  # tested and verified: 1, 2; added: 10 (ReB)
-    "dihedral": [1, 2, 4],
-    # tested and verified: 1, 2, 4 -- ongoing: 9 (need to merge the 1+ dihedrals groups on plots)
+    "dihedral": [1, 2, 3, 4],
+    # tested and verified: 1, 2, 4 -- added: 3 (Ryckaert-Bellemans) -- ongoing: 9 (need to merge the 1+ dihedrals groups on plots)
     "virtual_sites2": [1],  # tested and verified: 1 -- ongoing: 2 (need GMX 2020)
     "virtual_sites3": [1, 2, 3, 4],  # tested and verified: 1, 2, 3, 4
     "virtual_sites4": [2],  # tested and verified: 2 -- irrelevant: 1

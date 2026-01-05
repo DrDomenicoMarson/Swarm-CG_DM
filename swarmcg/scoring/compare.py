@@ -760,8 +760,12 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             if record_best_indep_params and not ignore_dihedrals:
                 if dist_pairwise < ns.pso.all_best_emd_dist_geoms["dihedrals"][i]:
                     ns.pso.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["dihedrals"][i]["params"] = [ns.out_itp["dihedral"][i]["value"],
-                                                                               ns.out_itp["dihedral"][i]["fct"]]
+                    func = ns.cg_itp["dihedral"][i]["func"]
+                    if func == 3:
+                        params = list(ns.out_itp["dihedral"][i]["params"])
+                    else:
+                        params = [ns.out_itp["dihedral"][i]["value"], ns.out_itp["dihedral"][i]["fct"]]
+                    ns.pso.all_best_params_dist_geoms["dihedrals"][i]["params"] = params
 
             dist_pairwise = dist_pairwise ** 2
             fit_score_dihedrals += dist_pairwise

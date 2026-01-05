@@ -45,7 +45,7 @@ def get_optimize_args():
 
     optional_args6 = args_parser.add_argument_group(bullet + "CG MODEL FORCE CONSTANTS")
     for arg in ["max_fct_bonds_f1", "max_fct_angles_f1", "max_fct_angles_f2", "max_fct_angles_f10",
-                "max_fct_dihedrals_f149", "max_fct_dihedrals_f2"]:
+                "max_fct_dihedrals_f149", "max_fct_dihedrals_f2", "max_fct_dihedrals_f3"]:
         optional_args6.add_argument(f"-{arg}", **getattr(defaults, arg).args)
 
     optional_args5 = args_parser.add_argument_group(bullet + "CG MODEL SCORING")

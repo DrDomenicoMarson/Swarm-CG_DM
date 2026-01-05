@@ -234,6 +234,12 @@ max_fct_dihedrals_f2 = BaseField(
     default=config.default_abs_range_fct_dihedrals_opti_func_without_mult,
     help="Max. force ct. for dihedrals function 2 (abs. kJ.mol⁻¹.rad⁻²)",
 )
+max_fct_dihedrals_f3 = BaseField(
+    dest="default_abs_range_fct_dihedrals_opti_func_rb",
+    type=float,
+    default=config.default_abs_range_fct_dihedrals_opti_func_rb,
+    help="Max. force ct. for dihedrals function 3 (abs. kJ.mol⁻¹)",
+)
 # MODEL SCORING
 cg_time_short = BaseField(
     dest="sim_duration_short",

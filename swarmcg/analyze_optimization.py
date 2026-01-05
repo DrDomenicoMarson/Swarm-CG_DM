@@ -9,6 +9,7 @@ from matplotlib.ticker import MaxNLocator
 import swarmcg.shared.styling
 import swarmcg.io as io
 from swarmcg import config
+from swarmcg.config_types import SwarmConfig
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.math_utils import forward_fill
 from swarmcg.shared.logging_utils import get_logger, setup_logging
@@ -66,12 +67,40 @@ def run(ns):
         nb_angles = int(eval_lines[2].split()[3])
         nb_dihedrals = int(eval_lines[3].split()[3])
 
+        dihedral_funcs = [None] * nb_dihedrals
+        if nb_dihedrals > 0:
+            itp_candidates = [
+                os.path.join(ns.opti_dirname, config.best_fitted_model_dirname),
+                os.path.join(ns.opti_dirname, "boltzmann_inv_CG_model"),
+                ns.opti_dirname,
+            ]
+            itp_path = None
+            for cand in itp_candidates:
+                if os.path.isdir(cand):
+                    itp_files = [fname for fname in os.listdir(cand) if fname.endswith(".itp")]
+                    if itp_files:
+                        itp_path = os.path.join(cand, sorted(itp_files)[0])
+                        break
+            if itp_path:
+                cfg = SwarmConfig()
+                cfg.cg_model.cg_itp_filename = itp_path
+                try:
+                    cg_itp = io.read_cg_itp_file(cfg)
+                    dihedral_funcs = [grp["func"] for grp in cg_itp["dihedral"]]
+                except Exception as exc:
+                    logger.warning("Failed to read dihedral functions from %s: %s", itp_path, exc)
+            else:
+                logger.warning("No ITP file found in %s; defaulting to 2 params per dihedral.", ns.opti_dirname)
+            if len(dihedral_funcs) != nb_dihedrals:
+                logger.warning("Dihedral functions mismatch in analysis; defaulting to 2 params per dihedral.")
+                dihedral_funcs = [None] * nb_dihedrals
+
         # results storage structure
         parameters_vals = {
             "constraints": {"values": {}},
             "bonds": {"values": {}, "force_ctr": {}},
             "angles": {"values": {}, "force_ctr": {}},
-            "dihedrals": {"values": {}, "force_ctr": {}}
+            "dihedrals": {"values": {}, "force_ctr": {}, "coeffs": {}}
         }
 
         for i in range(nb_constraints):
@@ -85,6 +114,7 @@ def run(ns):
         for i in range(nb_dihedrals):
             parameters_vals["dihedrals"]["values"][i] = []
             parameters_vals["dihedrals"]["force_ctr"][i] = []
+            parameters_vals["dihedrals"]["coeffs"][i] = []
 
         all_eval_scores, all_eval_times, all_total_times = [], [], []
         all_fit_score_total, all_fit_score_constraints_bonds, all_fit_score_angles, all_fit_score_dihedrals = np.array(
@@ -130,14 +160,7 @@ def run(ns):
             except ValueError:
                 sasa_cg, sasa_cg_std = None, None
 
-            eval_time = float(
-                sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + nb_angles * 2 + nb_dihedrals * 2])
-            total_time = float(
-                sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + nb_angles * 2 + nb_dihedrals * 2 + 1])
-
             all_eval_scores = np.append(all_eval_scores, eval_score)
-            all_eval_times = np.append(all_eval_times, eval_time)
-            all_total_times = np.append(all_total_times, total_time)
             all_fit_score_total = np.append(all_fit_score_total, fit_score_total)
             all_fit_score_constraints_bonds = np.append(all_fit_score_constraints_bonds, fit_score_constraints_bonds)
             all_fit_score_angles = np.append(all_fit_score_angles, fit_score_angles)
@@ -151,13 +174,16 @@ def run(ns):
             all_sasa_aa_mapped_std = np.append(all_sasa_aa_mapped_std, sasa_aa_mapped_std)
             all_sasa_cg_std = np.append(all_sasa_cg_std, sasa_cg_std)
 
+            param_idx = read_offset
+
             # hide profiles when both value and force constant are 0
             for j in range(nb_constraints):
-                parameters_vals["constraints"]["values"][j].append(float(sp_eval_line[read_offset + j]))
+                parameters_vals["constraints"]["values"][j].append(float(sp_eval_line[param_idx]))
+                param_idx += 1
 
             for j in range(nb_bonds):
-                val, fct = float(sp_eval_line[read_offset + nb_constraints + j * 2]), float(
-                    sp_eval_line[read_offset + nb_constraints + j * 2 + 1])
+                val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
+                param_idx += 2
                 if val == 0 and fct == 0:
                     val, fct = None, None
                 else:
@@ -169,8 +195,8 @@ def run(ns):
                 parameters_vals["bonds"]["force_ctr"][j].append(fct)
 
             for j in range(nb_angles):
-                val, fct = float(sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + j * 2]), float(
-                    sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + j * 2 + 1])
+                val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
+                param_idx += 2
                 if val == 0 and fct == 0:
                     val, fct = None, None
                 else:
@@ -182,18 +208,35 @@ def run(ns):
                 parameters_vals["angles"]["force_ctr"][j].append(fct)
 
             for j in range(nb_dihedrals):
-                val, fct = float(
-                    sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + nb_angles * 2 + j * 2]), float(
-                    sp_eval_line[read_offset + nb_constraints + nb_bonds * 2 + nb_angles * 2 + j * 2 + 1])
-                if val == 0 and fct == 0:
-                    val, fct = None, None
+                func = dihedral_funcs[j]
+                if func == 3:
+                    coeffs = list(map(float, sp_eval_line[param_idx:param_idx + 6]))
+                    param_idx += 6
+                    parameters_vals["dihedrals"]["coeffs"][j].append(coeffs)
+                    parameters_vals["dihedrals"]["values"][j].append(None)
+                    parameters_vals["dihedrals"]["force_ctr"][j].append(None)
                 else:
-                    if fct > y_fct_range["dihedrals"][1]:
-                        y_fct_range["dihedrals"][1] = fct
-                    if fct < y_fct_range["dihedrals"][0]:
-                        y_fct_range["dihedrals"][0] = fct
-                parameters_vals["dihedrals"]["values"][j].append(val)
-                parameters_vals["dihedrals"]["force_ctr"][j].append(fct)
+                    val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
+                    param_idx += 2
+                    if val == 0 and fct == 0:
+                        val, fct = None, None
+                    else:
+                        if fct > y_fct_range["dihedrals"][1]:
+                            y_fct_range["dihedrals"][1] = fct
+                        if fct < y_fct_range["dihedrals"][0]:
+                            y_fct_range["dihedrals"][0] = fct
+                    parameters_vals["dihedrals"]["values"][j].append(val)
+                    parameters_vals["dihedrals"]["force_ctr"][j].append(fct)
+                    parameters_vals["dihedrals"]["coeffs"][j].append(None)
+
+            try:
+                eval_time = float(sp_eval_line[param_idx])
+                total_time = float(sp_eval_line[param_idx + 1])
+            except (IndexError, ValueError):
+                eval_time, total_time = np.nan, np.nan
+
+            all_eval_times = np.append(all_eval_times, eval_time)
+            all_total_times = np.append(all_total_times, total_time)
 
     # find separations between opti cycles
     opti_cycles_sep = []
@@ -568,45 +611,57 @@ def run(ns):
                        1 + nb_constraints + nb_bonds + nb_angles:1 + nb_constraints + nb_bonds + nb_angles + nb_dihedrals])
         for i in range(ncols):
             if i < nb_dihedrals:
-                # value and force constant
-                ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - Value & Force constant")
-                ax[nrow - 1][i].grid(zorder=0.5)
-                color = "tab:blue"
-                ax[nrow - 1][i].plot(x_evals, parameters_vals["dihedrals"]["values"][i], color=color)
-                if display_sim_crashes:
-                    ax[nrow - 1][i].scatter(crashes_ids,
-                                            np.array(parameters_vals["dihedrals"]["values"][i])[crashes_ids - 1],
-                                            marker="x", color="black", zorder=2)
-                ax[nrow - 1][i].tick_params(axis="y", labelcolor=color)
-                ax[nrow - 1][i].set_xlim(x_min, x_max)
-                ax2 = ax[nrow - 1][i].twinx()
-                color = "tab:red"
-                ax2.plot(x_evals, parameters_vals["dihedrals"]["force_ctr"][i], color=color)
-                if display_sim_crashes:
-                    ax2.scatter(crashes_ids, np.array(parameters_vals["dihedrals"]["force_ctr"][i])[crashes_ids - 1],
-                                marker="x", color="black", zorder=2)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-                try:
-                    ax2.set_ylim(bottom=y_fct_range["dihedrals"][0] - (
-                                y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace,
-                                 top=y_fct_range["dihedrals"][1] + (
-                                             y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace)
-                except ValueError:
-                    pass  # TODO: modify this once we handle dihedrals properly
-                if i == nb_dihedrals - 1:
-                    ax2.tick_params(axis="y", labelcolor=color)
+                func = dihedral_funcs[i]
+                if func == 3:
+                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - RB coeffs")
+                    ax[nrow - 1][i].grid(zorder=0.5)
+                    ax[nrow - 1][i].set_xlim(x_min, x_max)
+                    ax[nrow - 1][i].set_ylim(0, 1)
+                    ax[nrow - 1][i].text(0.5, 0.5, "RB coefficients\nnot plotted",
+                                         ha="center", va="center", transform=ax[nrow - 1][i].transAxes)
+                    if display_opti_cycles_sep:
+                        for j in range(len(opti_cycles_sep)):
+                            ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
                 else:
-                    ax2.yaxis.set_ticklabels([])
+                    # value and force constant
+                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - Value & Force constant")
+                    ax[nrow - 1][i].grid(zorder=0.5)
+                    color = "tab:blue"
+                    ax[nrow - 1][i].plot(x_evals, parameters_vals["dihedrals"]["values"][i], color=color)
+                    if display_sim_crashes:
+                        ax[nrow - 1][i].scatter(crashes_ids,
+                                                np.array(parameters_vals["dihedrals"]["values"][i])[crashes_ids - 1],
+                                                marker="x", color="black", zorder=2)
+                    ax[nrow - 1][i].tick_params(axis="y", labelcolor=color)
+                    ax[nrow - 1][i].set_xlim(x_min, x_max)
+                    ax2 = ax[nrow - 1][i].twinx()
+                    color = "tab:red"
+                    ax2.plot(x_evals, parameters_vals["dihedrals"]["force_ctr"][i], color=color)
+                    if display_sim_crashes:
+                        ax2.scatter(crashes_ids, np.array(parameters_vals["dihedrals"]["force_ctr"][i])[crashes_ids - 1],
+                                    marker="x", color="black", zorder=2)
+                    if display_opti_cycles_sep:
+                        for j in range(len(opti_cycles_sep)):
+                            ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
+                    try:
+                        ax2.set_ylim(bottom=y_fct_range["dihedrals"][0] - (
+                                    y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace,
+                                     top=y_fct_range["dihedrals"][1] + (
+                                                 y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace)
+                    except ValueError:
+                        pass  # TODO: modify this once we handle dihedrals properly
+                    if i == nb_dihedrals - 1:
+                        ax2.tick_params(axis="y", labelcolor=color)
+                    else:
+                        ax2.yaxis.set_ticklabels([])
 
-                # best models parameters
-                if parameters_vals["dihedrals"]["values"][i][id_best_all] != None:
-                    ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["dihedrals"]["values"][i][id_best_all],
-                                         marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
-                                         markeredgecolor="black", zorder=3)
-                    ax2.plot(id_best_all + 1, parameters_vals["dihedrals"]["force_ctr"][i][id_best_all], marker="D",
-                             color="salmon", markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
+                    # best models parameters
+                    if parameters_vals["dihedrals"]["values"][i][id_best_all] != None:
+                        ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["dihedrals"]["values"][i][id_best_all],
+                                             marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
+                                             markeredgecolor="black", zorder=3)
+                        ax2.plot(id_best_all + 1, parameters_vals["dihedrals"]["force_ctr"][i][id_best_all], marker="D",
+                                 color="salmon", markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
 
                 # independant score
                 ax[nrow][i].set_title("Dihedral " + str(i + 1) + " - Score")

@@ -78,7 +78,11 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
 
         if "dihedral" in print_sections and "dihedral" in itp_obj and len(itp_obj["dihedral"]) > 0:
             fp.write("\n\n[ dihedrals ]\n")
-            fp.write(";   i     j     k     l   funct     dihedral   force.c.   mult.\n")
+            has_rb = any(dihedral["func"] == 3 for dihedral in itp_obj["dihedral"])
+            if has_rb:
+                fp.write(";   i     j     k     l   funct    params\n")
+            else:
+                fp.write(";   i     j     k     l   funct     dihedral   force.c.   mult.\n")
 
             for j in range(len(itp_obj["dihedral"])):
 
@@ -88,16 +92,27 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
 
                 for i in range(len(itp_obj["dihedral"][j]["beads"])):
 
-                    # handle writing of multiplicity
-                    multiplicity = itp_obj["dihedral"][j]["mult"]
-                    if multiplicity == None:
-                        multiplicity = ""
+                    func = itp_obj["dihedral"][j]["func"]
+                    if func == 3:
+                        params = itp_obj["dihedral"][j]["params"]
+                        params_str = " ".join(f"{param:9.2f}" for param in params)
+                        fp.write(
+                            "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7} {1}     ; {2}\n".format(
+                                func,
+                                params_str,
+                                dihedral_type,
+                                beads=[bead_id + 1 for bead_id in itp_obj["dihedral"][j]["beads"][i]]))
+                    else:
+                        # handle writing of multiplicity
+                        multiplicity = itp_obj["dihedral"][j]["mult"]
+                        if multiplicity == None:
+                            multiplicity = ""
 
-                    fp.write(
-                        "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7}    {1:9.2f} {2:7.2f}       {4}     ; {3}\n".format(
-                            itp_obj["dihedral"][j]["func"], grp_val, grp_fct, dihedral_type,
-                            multiplicity,
-                            beads=[bead_id + 1 for bead_id in itp_obj["dihedral"][j]["beads"][i]]))
+                        fp.write(
+                            "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7}    {1:9.2f} {2:7.2f}       {4}     ; {3}\n".format(
+                                func, grp_val, grp_fct, dihedral_type,
+                                multiplicity,
+                                beads=[bead_id + 1 for bead_id in itp_obj["dihedral"][j]["beads"][i]]))
 
         # here starts 4 almost identical blocks, that differ only by vs_2, vs_3, vs_4, vs_n
         # but we could still need to write several of these sections (careful if factorizing this)

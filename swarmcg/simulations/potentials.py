@@ -48,6 +48,15 @@ def gmx_dihedrals_func_2(x, a, b, c):
     """
     return gmx_bonds_func_1(x, a, b, c)  # it's actually the same
 
+
+def gmx_dihedrals_func_3(x, c0, c1, c2, c3, c4, c5):
+    """
+    Gromacs dihedral function 3 (Ryckaert-Bellemans).
+    """
+    psi = x - np.pi
+    cos_psi = np.cos(psi)
+    return c0 + c1 * cos_psi + c2 * cos_psi ** 2 + c3 * cos_psi ** 3 + c4 * cos_psi ** 4 + c5 * cos_psi ** 5
+
 # TODO: for dihedral function 9, this is the merging of several potentials of
 # TODO: gmx_dihedrals_func_1 -- here one of mult=1 together with another of mult=2
 # def f(x,a,b,c,d,e):

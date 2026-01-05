@@ -376,6 +376,7 @@ def read_cg_itp_file(config: SwarmConfig):
                         cg_itp["dihedral"].append(
                             {"geom_type": geom_type, "beads": [], "func": [], "value": [],
                              "value_user": [], "fct": [], "fct_user": [],
+                             "params": [], "params_user": [],
                              "mult": []})  # initialize storage for this new group
 
                     try:
@@ -391,12 +392,36 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     func = verify_handled_functions("dihedral", sp_itp_line[4], i + 1)
                     cg_itp["dihedral"][nb_dihedrals]["func"].append(func)
-                    cg_itp["dihedral"][nb_dihedrals]["value"].append(float(
-                        sp_itp_line[5]))  # issue happens here for functions that are not handled
-                    cg_itp["dihedral"][nb_dihedrals]["value_user"].append(
-                        float(sp_itp_line[5]))
-                    cg_itp["dihedral"][nb_dihedrals]["fct"].append(float(sp_itp_line[6]))
-                    cg_itp["dihedral"][nb_dihedrals]["fct_user"].append(float(sp_itp_line[6]))
+                    if func == 3:
+                        try:
+                            params = [float(param) for param in sp_itp_line[5:11]]
+                        except (IndexError, ValueError):
+                            msg = (
+                                "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
+                                "Function 3 expects 6 coefficients (C0..C5) after the function id."
+                            )
+                            raise exceptions.MissformattedFile(msg)
+                        if len(params) != 6:
+                            msg = (
+                                "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
+                                "Function 3 expects 6 coefficients (C0..C5) after the function id."
+                            )
+                            raise exceptions.MissformattedFile(msg)
+                        cg_itp["dihedral"][nb_dihedrals]["params"].append(params)
+                        cg_itp["dihedral"][nb_dihedrals]["params_user"].append(list(params))
+                    else:
+                        cg_itp["dihedral"][nb_dihedrals]["value"].append(float(
+                            sp_itp_line[5]))  # issue happens here for functions that are not handled
+                        cg_itp["dihedral"][nb_dihedrals]["value_user"].append(
+                            float(sp_itp_line[5]))
+                        cg_itp["dihedral"][nb_dihedrals]["fct"].append(float(sp_itp_line[6]))
+                        cg_itp["dihedral"][nb_dihedrals]["fct_user"].append(float(sp_itp_line[6]))
+                        cg_itp["dihedral"][nb_dihedrals]["params"].append(
+                            [float(sp_itp_line[5]), float(sp_itp_line[6])]
+                        )
+                        cg_itp["dihedral"][nb_dihedrals]["params_user"].append(
+                            [float(sp_itp_line[5]), float(sp_itp_line[6])]
+                        )
 
                     if config.cg_model.user_input:
                         from swarmcg import config as global_config
@@ -414,7 +439,13 @@ def read_cg_itp_file(config: SwarmConfig):
                                                                                     -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     "-max_fct_dihedrals_f2"))
-
+                        elif func == 3:
+                            max_abs = config.optimization.default_abs_range_fct_dihedrals_opti_func_rb
+                            if any(abs(param) > max_abs for param in cg_itp["dihedral"][nb_dihedrals]["params"][-1]):
+                                raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
+                                                                                        -max_abs,
+                                                                                        max_abs,
+                                                                                        "-max_fct_dihedrals_f3"))
 
                     # handle multiplicity if function assumes multiplicity
                     from swarmcg import config as global_config
@@ -537,12 +568,37 @@ def read_cg_itp_file(config: SwarmConfig):
 
     for geom in ["dihedral"]:  # dihedrals only
         for grp_geom in range(len(cg_itp[geom])):
-            for var in ["func", "value", "value_user", "fct", "fct_user"]:
-                var_set = set(cg_itp[geom][grp_geom][var])
-                if len(var_set) == 1:
-                    cg_itp[geom][grp_geom][var] = var_set.pop()
-                else:
-                    raise exceptions.MissformattedFile(msg(geom, grp_geom))
+            func_set = set(cg_itp[geom][grp_geom]["func"])
+            if len(func_set) == 1:
+                func = func_set.pop()
+                cg_itp[geom][grp_geom]["func"] = func
+            else:
+                raise exceptions.MissformattedFile(msg(geom, grp_geom))
+
+            params_set = {tuple(params) for params in cg_itp[geom][grp_geom]["params"]}
+            if len(params_set) == 1:
+                params = list(params_set.pop())
+                cg_itp[geom][grp_geom]["params"] = params
+            else:
+                raise exceptions.MissformattedFile(msg(geom, grp_geom))
+
+            params_user_set = {tuple(params) for params in cg_itp[geom][grp_geom]["params_user"]}
+            if len(params_user_set) == 1:
+                params_user = list(params_user_set.pop())
+                cg_itp[geom][grp_geom]["params_user"] = params_user
+            else:
+                raise exceptions.MissformattedFile(msg(geom, grp_geom))
+
+            if func == 3:
+                cg_itp[geom][grp_geom]["value"] = None
+                cg_itp[geom][grp_geom]["value_user"] = None
+                cg_itp[geom][grp_geom]["fct"] = None
+                cg_itp[geom][grp_geom]["fct_user"] = None
+            else:
+                cg_itp[geom][grp_geom]["value"] = params[0]
+                cg_itp[geom][grp_geom]["value_user"] = params_user[0]
+                cg_itp[geom][grp_geom]["fct"] = params[1]
+                cg_itp[geom][grp_geom]["fct_user"] = params_user[1]
 
             for var in ["mult"]:
                 var_set = set(cg_itp[geom][grp_geom][var])
