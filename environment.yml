@@ -20,5 +20,6 @@ dependencies:
   - setuptools
   - wheel
   - fst-pso
+  - pydantic
   # - pip:
   #     - pyemd>=0.5.1
