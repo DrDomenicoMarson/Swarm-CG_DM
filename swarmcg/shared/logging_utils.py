@@ -60,7 +60,10 @@ def setup_logging(module_name=None, log_dir=None, verbose=False):
             file_handler = logging.FileHandler(log_path, encoding="utf-8")
             file_handler.setLevel(level)
             file_handler.setFormatter(
-                logging.Formatter(fmt="%(asctime)s [%(levelname)s] %(message)s")
+                logging.Formatter(
+                    fmt="%(asctime)s [%(levelname)s] %(message)s",
+                    datefmt="%y-%m-%d %H:%M:%S",
+                )
             )
             logger.addHandler(file_handler)
 
