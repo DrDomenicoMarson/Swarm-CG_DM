@@ -78,6 +78,11 @@ class OptimizationStatus:
     """Stores progress indicators and timings."""
     nb_eval: int = 0
     start_opti_ts: float = 0.0
+
+    # Failure tracking
+    failed_eval_count: int = 0
+    stalled_eval_count: int = 0
+    crashed_eval_count: int = 0
     
     # Timings
     total_eval_time: float = 0.0

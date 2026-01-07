@@ -50,8 +50,12 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
     print_stdout_forced()
     # TODO: this should use logging
+    failed_total = ns.status.failed_eval_count
+    stalled_total = ns.status.stalled_eval_count
+    crashed_total = ns.status.crashed_eval_count
+    failure_suffix = f"(failed {failed_total}; stalled {stalled_total}; crashed {crashed_total})"
     print_stdout_forced(
-        f"Starting iteration {ns.status.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')}"
+        f"Starting iteration {ns.status.nb_eval} at {time.strftime('%H:%M:%S')} on {time.strftime('%d-%m-%Y')} {failure_suffix}"
     )
     
     eval_score = ns.pso.worst_fit_score
@@ -64,6 +68,19 @@ def eval_function(parameters_set, ns: OptimizationContext):
     new_best_fit = False
     current_eval_dir = f"{config.iteration_sim_files_dirname}_eval_step_{ns.status.nb_eval}"
     current_eval_path = os.path.join(exec_dir, current_eval_dir)
+
+    failure_recorded = False
+
+    def record_failure(kind):
+        nonlocal failure_recorded
+        if failure_recorded:
+            return
+        ns.status.failed_eval_count += 1
+        if kind == "stalled":
+            ns.status.stalled_eval_count += 1
+        else:
+            ns.status.crashed_eval_count += 1
+        failure_recorded = True
 
     try:
         os.chdir(exec_dir)
@@ -124,6 +141,7 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     + "Empty bond/constraint distribution; assigning worst score and continuing.\n"
                     + str(exc)
                 )
+                record_failure("crashed")
                 eval_score = ns.pso.worst_fit_score
                 fit_score_total = ns.pso.worst_fit_score
                 fit_score_constraints_bonds = ns.pso.worst_fit_score
@@ -165,6 +183,11 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     ns.pso.all_emd_dist_geoms = all_emd_dist_geoms
 
             elif not scoring_failed:
+                print_stdout_forced(
+                    styling.header_warning
+                    + "SASA calculation failed; assigning worst score and continuing."
+                )
+                record_failure("crashed")
                 eval_score = ns.pso.worst_fit_score
                 fit_score_total = ns.pso.worst_fit_score
                 fit_score_constraints_bonds = ns.pso.worst_fit_score
@@ -179,6 +202,17 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     + "Simulation failed; assigning worst score and continuing.\n"
                     + str(sim_error)
                 )
+                err_msg = str(sim_error).lower() if sim_error else ""
+                if "unstable simulation was killed" in err_msg:
+                    record_failure("stalled")
+                else:
+                    record_failure("crashed")
+            else:
+                print_stdout_forced(
+                    styling.header_warning
+                    + "Simulation output missing; assigning worst score and continuing."
+                )
+                record_failure("crashed")
             eval_score = ns.pso.worst_fit_score
             fit_score_total = ns.pso.worst_fit_score
             fit_score_constraints_bonds = ns.pso.worst_fit_score
