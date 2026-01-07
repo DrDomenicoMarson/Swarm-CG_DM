@@ -112,12 +112,28 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
             start_model_eval_ts = datetime.now().timestamp()
             ignore_dihedrals = ns.opti_cycle["nb_geoms"]["dihedral"] == 0
-            fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms = compare_models(
-                ns, manual_mode=False, ignore_dihedrals=ignore_dihedrals, calc_sasa=True,
-                record_best_indep_params=True)
+            scoring_failed = False
+            try:
+                fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms = compare_models(
+                    ns, manual_mode=False, ignore_dihedrals=ignore_dihedrals, calc_sasa=True,
+                    record_best_indep_params=True)
+            except exceptions.EmptyDistributionError as exc:
+                scoring_failed = True
+                print_stdout_forced(
+                    styling.header_warning
+                    + "Empty bond/constraint distribution; assigning worst score and continuing.\n"
+                    + str(exc)
+                )
+                eval_score = ns.pso.worst_fit_score
+                fit_score_total = ns.pso.worst_fit_score
+                fit_score_constraints_bonds = ns.pso.worst_fit_score
+                fit_score_angles = ns.pso.worst_fit_score
+                fit_score_dihedrals = ns.pso.worst_fit_score
+                ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
+                ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
             ns.status.total_model_eval_time += datetime.now().timestamp() - start_model_eval_ts
 
-            if ns.results.sasa_cg is not None:
+            if not scoring_failed and ns.results.sasa_cg is not None:
 
                 shutil.move(
                     "distributions.png",
@@ -148,7 +164,7 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     ns.pso.best_fitness = global_score, ns.status.nb_eval
                     ns.pso.all_emd_dist_geoms = all_emd_dist_geoms
 
-            else:
+            elif not scoring_failed:
                 eval_score = ns.pso.worst_fit_score
                 fit_score_total = ns.pso.worst_fit_score
                 fit_score_constraints_bonds = ns.pso.worst_fit_score

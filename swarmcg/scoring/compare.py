@@ -17,13 +17,50 @@ import swarmcg.scoring as scores
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg import config
-from swarmcg.shared import styling
+from swarmcg.shared import exceptions, styling
 from swarmcg.shared.logging_utils import get_logger
 
 # Use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 matplotlib.use("AGG")
 
 logger = get_logger(__name__)
+
+def _format_values_range(values, unit="nm"):
+    if values is None:
+        return "n/a"
+    values_arr = np.asarray(values, dtype=float)
+    values_arr = values_arr[np.isfinite(values_arr)]
+    if values_arr.size == 0:
+        return "no finite values"
+    return f"min {values_arr.min():.3f}, max {values_arr.max():.3f} {unit}"
+
+
+def _empty_bond_constraint_message(
+    geom_label,
+    grp_idx,
+    bonded_max_range,
+    bins,
+    aa_values=None,
+    cg_values=None,
+):
+    bins_arr = np.asarray(bins, dtype=float)
+    if bins_arr.size:
+        bins_min = bins_arr[0]
+        bins_max = bins_arr[-1]
+    else:
+        bins_min = float("nan")
+        bins_max = float("nan")
+    aa_range = _format_values_range(aa_values)
+    cg_range = _format_values_range(cg_values)
+    return (
+        f"Empty {geom_label} distribution for group {grp_idx + 1}.\n"
+        f"Observed {geom_label} lengths (AA): {aa_range}; (CG): {cg_range}.\n"
+        f"Histogram range: [{bins_min:.3f}, {bins_max:.3f}] nm.\n"
+        f"Most probably because you have bonds or constraints that exceed "
+        f"{bonded_max_range} nm.\n"
+        "Increase bins range for bonds and constraints and retry!\n"
+        "See argument -bonds_max_range."
+    )
 
 def compare_models(context: OptimizationContext, manual_mode: bool = True, ignore_dihedrals: bool = False, 
                   calc_sasa: bool = False, record_best_indep_params: bool = False):
@@ -142,9 +179,18 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     for grp_constraint in range(ns.cg_itp["nb_constraints"]):
 
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
+        constraint_values_aa = None
 
         if manual_mode:
-            constraint_avg, constraint_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraints group", grp_nb=grp_constraint, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_constraints, bandwidth=ns.config.optimization.bw_constraints)
+            constraint_avg, constraint_hist, constraint_values_aa = scores.get_AA_bonds_distrib(
+                ns.scoring.aa2cg_universe,
+                beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                grp_type="constraints group",
+                grp_nb=grp_constraint,
+                config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns),
+                bins=ns.scoring.bins_constraints,
+                bandwidth=ns.config.optimization.bw_constraints,
+            )
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -158,8 +204,15 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 constraints[grp_constraint]["AA"]["y"].append(constraints[grp_constraint]["AA"]["hist"][i])
 
         if not ns.scoring.atom_only:
+            constraint_values_cg = None
             try:
-                constraint_avg, constraint_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"], grp_type="constraint", bins=ns.scoring.bins_constraints, bandwidth=ns.config.optimization.bw_constraints)
+                constraint_avg, constraint_hist, constraint_values_cg = scores.get_CG_bonds_distrib(
+                    ns.scoring.cg_universe,
+                    beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                    grp_type="constraint",
+                    bins=ns.scoring.bins_constraints,
+                    bandwidth=ns.config.optimization.bw_constraints,
+                )
                 constraints[grp_constraint]["CG"]["avg"] = constraint_avg
                 constraints[grp_constraint]["CG"]["hist"] = constraint_hist
 
@@ -169,18 +222,32 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         constraints[grp_constraint]["CG"]["x"].append(np.mean(ns.scoring.bins_constraints[i:i + 2]))
                         constraints[grp_constraint]["CG"]["y"].append(constraint_hist[i])
 
+                if not constraints[grp_constraint]["AA"]["x"] or not constraints[grp_constraint]["CG"]["x"]:
+                    msg = _empty_bond_constraint_message(
+                        "constraint",
+                        grp_constraint,
+                        ns.config.optimization.bonded_max_range,
+                        ns.scoring.bins_constraints,
+                        aa_values=constraint_values_aa,
+                        cg_values=constraint_values_cg,
+                    )
+                    raise exceptions.EmptyDistributionError(msg)
+
                 domain_min = min(constraints[grp_constraint]["AA"]["x"][0], constraints[grp_constraint]["CG"]["x"][0])
                 domain_max = max(constraints[grp_constraint]["AA"]["x"][-1], constraints[grp_constraint]["CG"]["x"][-1])
                 avg_diff_grp_constraints.append(
                     emd(constraints[grp_constraint]["AA"]["hist"], constraints[grp_constraint]["CG"]["hist"],
                         ns.scoring.bins_constraints_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
             except IndexError:
-                msg = (
-                    f"Most probably because you have bonds or constraints that "
-                    f"exceed {ns.config.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
-                    f"constraints and retry!\nSee argument -bonds_max_range."
+                msg = _empty_bond_constraint_message(
+                    "constraint",
+                    grp_constraint,
+                    ns.config.optimization.bonded_max_range,
+                    ns.scoring.bins_constraints,
+                    aa_values=constraint_values_aa,
+                    cg_values=constraint_values_cg,
                 )
-                raise ValueError(msg)
+                raise exceptions.EmptyDistributionError(msg)
         else:
             avg_diff_grp_constraints.append(constraints[grp_constraint]["AA"]["avg"])
 
@@ -210,9 +277,18 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     for grp_bond in range(ns.cg_itp["nb_bonds"]):
 
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
+        bond_values_aa = None
 
         if manual_mode:
-            bond_avg, bond_hist, _ = scores.get_AA_bonds_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bonds group", grp_nb=grp_bond, config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns), bins=ns.scoring.bins_bonds, bandwidth=ns.config.optimization.bw_bonds)
+            bond_avg, bond_hist, bond_values_aa = scores.get_AA_bonds_distrib(
+                ns.scoring.aa2cg_universe,
+                beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
+                grp_type="bonds group",
+                grp_nb=grp_bond,
+                config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns),
+                bins=ns.scoring.bins_bonds,
+                bandwidth=ns.config.optimization.bw_bonds,
+            )
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
         else:  # use atomistic reference that was loaded by the optimization routines
@@ -226,8 +302,15 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 bonds[grp_bond]["AA"]["y"].append(bonds[grp_bond]["AA"]["hist"][i])
 
         if not ns.scoring.atom_only:
+            bond_values_cg = None
             try:
-                bond_avg, bond_hist, _ = scores.get_CG_bonds_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["bond"][grp_bond]["beads"], grp_type="bond", bins=ns.scoring.bins_bonds, bandwidth=ns.config.optimization.bw_bonds)
+                bond_avg, bond_hist, bond_values_cg = scores.get_CG_bonds_distrib(
+                    ns.scoring.cg_universe,
+                    beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
+                    grp_type="bond",
+                    bins=ns.scoring.bins_bonds,
+                    bandwidth=ns.config.optimization.bw_bonds,
+                )
                 bonds[grp_bond]["CG"]["avg"] = bond_avg
                 bonds[grp_bond]["CG"]["hist"] = bond_hist
 
@@ -236,17 +319,31 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         bonds[grp_bond]["CG"]["x"].append(np.mean(ns.scoring.bins_bonds[i:i + 2]))
                         bonds[grp_bond]["CG"]["y"].append(bond_hist[i])
 
+                if not bonds[grp_bond]["AA"]["x"] or not bonds[grp_bond]["CG"]["x"]:
+                    msg = _empty_bond_constraint_message(
+                        "bond",
+                        grp_bond,
+                        ns.config.optimization.bonded_max_range,
+                        ns.scoring.bins_bonds,
+                        aa_values=bond_values_aa,
+                        cg_values=bond_values_cg,
+                    )
+                    raise exceptions.EmptyDistributionError(msg)
+
                 domain_min = min(bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["CG"]["x"][0])
                 domain_max = max(bonds[grp_bond]["AA"]["x"][-1], bonds[grp_bond]["CG"]["x"][-1])
                 avg_diff_grp_bonds.append(emd(bonds[grp_bond]["AA"]["hist"], bonds[grp_bond]["CG"]["hist"],
                                               ns.scoring.bins_bonds_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
             except IndexError:
-                msg = (
-                    f"Most probably because you have bonds or constraints that "
-                    f"exceed {ns.config.optimization.bonded_max_range} nm.\nIncrease bins range for bonds and "
-                    f"constraints and retry!\nSee argument -bonds_max_range."
+                msg = _empty_bond_constraint_message(
+                    "bond",
+                    grp_bond,
+                    ns.config.optimization.bonded_max_range,
+                    ns.scoring.bins_bonds,
+                    aa_values=bond_values_aa,
+                    cg_values=bond_values_cg,
                 )
-                raise ValueError(msg)
+                raise exceptions.EmptyDistributionError(msg)
         else:
             avg_diff_grp_bonds.append(bonds[grp_bond]["AA"]["avg"])
 

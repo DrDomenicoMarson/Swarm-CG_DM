@@ -79,7 +79,11 @@ def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmCon
     # Binning
     bond_hist = None
     if bins is not None and bandwidth is not None:
-         bond_hist = np.histogram(bond_values, bins, density=True)[0] * bandwidth
+        counts = np.histogram(bond_values, bins, density=False)[0]
+        if counts.sum() == 0:
+            bond_hist = np.zeros_like(counts, dtype=float)
+        else:
+            bond_hist = counts / counts.sum()
 
     return bond_avg_final, bond_hist, bond_values
 
@@ -107,6 +111,10 @@ def get_CG_bonds_distrib(universe, beads_ids, grp_type, bins=None, bandwidth=Non
     
     bond_hist = None
     if bins is not None and bandwidth is not None:
-        bond_hist = np.histogram(bond_values, bins, density=True)[0] * bandwidth
+        counts = np.histogram(bond_values, bins, density=False)[0]
+        if counts.sum() == 0:
+            bond_hist = np.zeros_like(counts, dtype=float)
+        else:
+            bond_hist = counts / counts.sum()
 
     return bond_avg, bond_hist, bond_values
