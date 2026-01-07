@@ -10,6 +10,7 @@ logger = get_logger(__name__)
 class GromacsConfig(BaseModel):
     gmx_path: str = "gmx"
     nb_threads: int = 0
+    ntomp: int = 0
     mpi_tasks: int = 0
     gpu_id: str = ""
     gmx_args_str: str = ""
@@ -18,9 +19,9 @@ class GromacsConfig(BaseModel):
 
     @model_validator(mode='after')
     def check_gmx_args_conflict(self):
-        if self.gmx_args_str != "" and (self.nb_threads != 0 or self.gpu_id != ""):
+        if self.gmx_args_str != "" and (self.nb_threads != 0 or self.ntomp != 0 or self.gpu_id != ""):
             logger.warning(
-                "Argument -gmx_args_str is provided together with -nb_threads or -gpu_id; "
+                "Argument -gmx_args_str is provided together with -nb_threads, -ntomp or -gpu_id; "
                 "only -gmx_args_str will be used."
             )
         return self
@@ -199,6 +200,7 @@ class SwarmConfig(BaseModel):
         gromacs = GromacsConfig(
             gmx_path=getattr(ns, 'gmx_path', 'gmx'),
             nb_threads=getattr(ns, 'nb_threads', 0),
+            ntomp=getattr(ns, 'ntomp', 0),
             mpi_tasks=getattr(ns, 'mpi_tasks', 0),
             gpu_id=getattr(ns, 'gpu_id', ""),
             gmx_args_str=getattr(ns, 'gmx_args_str', ""),

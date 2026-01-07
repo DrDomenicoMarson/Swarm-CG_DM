@@ -69,6 +69,10 @@ class SimulationStep:
         if threads > 0:
             cmd = f"{cmd} -nt {threads}"
 
+        omp_threads = int(self.sim_setup.get("ntomp", 0))
+        if omp_threads > 0:
+            cmd = f"{cmd} -ntomp {omp_threads}"
+
         gpu = self.sim_setup.get("gpu_id")
         if len(gpu) > 0:
             cmd = f"{cmd} -gpu_id {gpu}"
@@ -199,6 +203,7 @@ def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, n
         "gpu_id": config.gromacs.gpu_id,
         "mpi_tasks": config.gromacs.mpi_tasks,
         "nb_threads": config.gromacs.nb_threads,
+        "ntomp": config.gromacs.ntomp,
         "maxwarn": config.gromacs.mini_maxwarn,
 
         "swarmcg_flag": sim_config.swarmcg_flag,

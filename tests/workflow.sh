@@ -13,11 +13,14 @@ scg_optimize \
   -cg_mdp_mini ./data/mini.mdp \
   -cg_mdp_equi ./data/equi.mdp \
   -cg_mdp_md ./data/md.mdp \
-  -nt 8 \
   -out_dir workflow_output \
   -v \
-  -cg_time_short 2 \
-  -cg_time_long 3 \
+  -cg_time_short 5 \
+  -cg_time_long 5 \
+  -ntomp 8 \
+  -gpu_id 0 \
+
+
 
 
 

@@ -40,7 +40,7 @@ def get_optimize_args():
         optional_args4.add_argument(f"-{arg}", **getattr(defaults, arg).args)
 
     optional_args1 = args_parser.add_argument_group(bullet + "GROMACS SETTINGS")
-    for arg in ["gmx", "nt", "mpi", "gpu_id", "gmx_args_str", "mini_maxwarn", "sim_kill_delay"]:
+    for arg in ["gmx", "nt", "ntomp", "mpi", "gpu_id", "gmx_args_str", "mini_maxwarn", "sim_kill_delay"]:
         optional_args1.add_argument(f"-{arg}", **getattr(defaults, arg).args)
 
     optional_args6 = args_parser.add_argument_group(bullet + "CG MODEL FORCE CONSTANTS")

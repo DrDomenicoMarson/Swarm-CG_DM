@@ -35,6 +35,7 @@ def ns_opt():
         "out_dir": "",
         "gmx_path": config.gmx_path,
         "nb_threads": 0,
+        "ntomp": 0,
         "mpi_tasks": 0,
         "gpu_id": "",
         "gmx_args_str": "",

@@ -7,11 +7,13 @@ def test_swarm_config_defaults():
     assert isinstance(config.gromacs, GromacsConfig)
     assert config.gromacs.gmx_path == "gmx"
     assert config.gromacs.nb_threads == 0
+    assert config.gromacs.ntomp == 0
 
 def test_swarm_config_from_namespace():
     ns = Namespace(
         gmx_path="gmx_mpi",
         nb_threads=4,
+        ntomp=2,
         mpi_tasks=2,
         gpu_id="0",
         gmx_args_str="-v",
@@ -26,6 +28,7 @@ def test_swarm_config_from_namespace():
     
     assert config.gromacs.gmx_path == "gmx_mpi"
     assert config.gromacs.nb_threads == 4
+    assert config.gromacs.ntomp == 2
     assert config.gromacs.mpi_tasks == 2
     assert config.gromacs.gpu_id == "0"
     assert config.gromacs.gmx_args_str == "-v"

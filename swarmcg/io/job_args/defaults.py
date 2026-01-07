@@ -53,6 +53,12 @@ nt = BaseField(
     default=0,
     help="Nb of threads to use, forwarded to 'gmx mdrun -nt'",
 )
+ntomp = BaseField(
+    dest="ntomp",
+    type=int,
+    default=0,
+    help="Nb of OpenMP threads per MPI rank, forwarded to 'gmx mdrun -ntomp'",
+)
 mpi = BaseField(
     dest="mpi_tasks",
     type=int,
@@ -69,7 +75,7 @@ gmx_args_str = BaseField(
     dest="gmx_args_str",
     type=str,
     default="",
-    help="String (use quotes) of arguments to forward to gmx mdrun\nIf provided, arguments -nt and -gpu_id are ignored",
+    help="String (use quotes) of arguments to forward to gmx mdrun\nIf provided, arguments -nt, -ntomp and -gpu_id are ignored",
 )
 mini_maxwarn = BaseField(
     dest="mini_maxwarn",
