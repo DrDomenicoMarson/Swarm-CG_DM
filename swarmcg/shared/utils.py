@@ -2,14 +2,17 @@ import warnings
 from functools import wraps
 
 
-def catch_warnings(warning):
+def catch_warnings(*warning_categories):
+    if len(warning_categories) == 1 and isinstance(warning_categories[0], (list, tuple, set)):
+        warning_categories = tuple(warning_categories[0])
+
     def decorator(function):
         @wraps(function)
         def wrapper(*args, **kwargs):
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=warning)
-                result = function(*args, **kwargs)
-            return result
+                for warning in warning_categories:
+                    warnings.filterwarnings("ignore", category=warning)
+                return function(*args, **kwargs)
 
         return wrapper
 

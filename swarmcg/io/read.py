@@ -7,7 +7,7 @@ from swarmcg.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
-@catch_warnings(ImportWarning)
+@catch_warnings(ImportWarning, SyntaxWarning)
 def read_aa_traj(config: ReferenceModelConfig):
     """Read atomistic trajectory
     
