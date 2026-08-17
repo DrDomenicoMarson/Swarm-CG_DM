@@ -67,3 +67,41 @@ def test_read_cg_itp_file_basic(ns_opt):
     assert result["nb_dihedrals"] == 0
     assert result["nb_constraints"] == 0
     assert all([field in result for field in required_itp_fields])
+
+
+def test_restricted_bending_rejects_unsafe_input_equilibrium(tmp_path, ns_opt):
+    source = open("tests/data/restricted_bending_safe.itp").read()
+    unsafe = tmp_path / "unsafe_reb.itp"
+    unsafe.write_text(source.replace("120.0   25.0", "180.0   25.0"))
+    config = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(unsafe)))
+
+    with pytest.raises(exceptions.MissformattedFile, match="10, 170"):
+        read_cg_itp_file(config)
+
+
+def test_standard_rb_and_cbt_records_are_read_and_canonicalized(tmp_path, ns_opt):
+    topology = tmp_path / "polynomial.itp"
+    topology.write_text(
+        """[ moleculetype ]
+MOL 1
+
+[ atoms ]
+1 P1 1 MOL B1 1 0 72
+2 P1 1 MOL B2 2 0 72
+3 P1 1 MOL B3 3 0 72
+4 P1 1 MOL B4 4 0 72
+
+[ dihedrals ]
+; dihedral type RB
+1 2 3 4 3  9 1 2 3 4 5
+
+; dihedral type CBT
+1 2 3 4 11  2 1 -2 3 -4 5
+"""
+    )
+    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+
+    parsed = read_cg_itp_file(cfg)
+
+    assert parsed["dihedral"][0]["params"] == [-15.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    assert parsed["dihedral"][1]["params"] == [10.0, 0.2, -0.4, 0.6, -0.8, 1.0]

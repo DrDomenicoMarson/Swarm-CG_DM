@@ -1,6 +1,8 @@
 import pytest
 from argparse import Namespace
-from swarmcg.config_types import SwarmConfig, GromacsConfig
+from pydantic import ValidationError
+
+from swarmcg.config_types import GromacsConfig, OptimizationConfig, SimulationConfig, SwarmConfig
 
 def test_swarm_config_defaults():
     config = SwarmConfig()
@@ -40,3 +42,19 @@ def test_config_immutability_partial():
     config = SwarmConfig()
     config.gromacs.gmx_path = "new_path"
     assert config.gromacs.gmx_path == "new_path"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: GromacsConfig(nb_threads=-1),
+        lambda: GromacsConfig(sim_kill_delay=9),
+        lambda: SimulationConfig(temp=0),
+        lambda: SimulationConfig(sim_duration_short=-1),
+        lambda: OptimizationConfig(bw_dihedrals=0),
+        lambda: OptimizationConfig(max_abs_rb_coefficient=0),
+    ],
+)
+def test_scientific_numeric_validation(factory):
+    with pytest.raises(ValidationError):
+        factory()

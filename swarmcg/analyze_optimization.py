@@ -11,18 +11,42 @@ import swarmcg.io as io
 from swarmcg import config
 from swarmcg.config_types import SwarmConfig
 from swarmcg.shared import exceptions, catch_warnings
-from swarmcg.shared.math_utils import forward_fill
 from swarmcg.shared.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
+
+
+def _finite_max(values, default=1.0):
+    """Return the largest finite value, or a plotting-safe default.
+
+    Args:
+        values: Numeric values that may contain failed-evaluation ``NaN`` entries.
+        default: Value returned when no finite entry is present.
+
+    Returns:
+        Largest finite value or *default*.
+    """
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(np.max(finite)) if finite.size else float(default)
 
 @catch_warnings(DeprecationWarning)  # filter matplotlib warnings
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
 def run(ns):
+    """Read an optimization recap and write its monitoring summary plot.
+
+    Args:
+        ns: Parsed monitor arguments containing the optimization directory,
+            output plot path, and plot scale.
+
+    Raises:
+        IncompleteOptimisationFile: If recap files contain no complete rows.
+        OptimisationResultsError: If no selectable evaluation is available.
+    """
     # TODO: print some text to tell user if opti run finished or not -- then we can only look at the results files, not the running processes on the machine
 
-    display_sim_crashes = False
+    display_sim_crashes = True
     display_opti_cycles_sep = True
     plot_control_std = True
     opti_cycles_sep_color = "black"
@@ -41,9 +65,9 @@ def run(ns):
     # read scores for each geom at each fitness evaluation/simulation
     iter_indep_scores = np.genfromtxt(ns.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
 
+    iter_indep_scores = np.atleast_2d(iter_indep_scores)
     try:
-        for i in range(1, iter_indep_scores.shape[1]):
-            iter_indep_scores[:, i] = forward_fill(iter_indep_scores[:, i], config.sim_crash_EMD_indep_score)
+        iter_indep_scores.shape[1]
     except IndexError:
         msg = (
             "The optimization recap file seems empty. Please wait for your optimization process\n"
@@ -140,25 +164,23 @@ def run(ns):
                 gyr_aa_mapped, gyr_aa_mapped_std = float(sp_eval_line[read_offset - 8]), float(
                     sp_eval_line[read_offset - 7])
             except ValueError:
-                gyr_aa_mapped, gyr_aa_mapped_std = None, None
+                gyr_aa_mapped, gyr_aa_mapped_std = np.nan, np.nan
             try:
                 gyr_cg, gyr_cg_std = float(sp_eval_line[read_offset - 6]), float(sp_eval_line[read_offset - 5])
             # this controls if simulation has crashed
             except ValueError:
-                gyr_cg, gyr_cg_std = None, None
-                eval_score, fit_score_total, fit_score_constraints_bonds = None, None, None
-                fit_score_angles, fit_score_dihedrals = None, None
+                gyr_cg, gyr_cg_std = np.nan, np.nan
 
             try:
                 sasa_aa_mapped, sasa_aa_mapped_std = float(sp_eval_line[read_offset - 4]), float(
                     sp_eval_line[read_offset - 3])
             except ValueError:
-                sasa_aa_mapped, sasa_aa_mapped_std = None, None
+                sasa_aa_mapped, sasa_aa_mapped_std = np.nan, np.nan
             try:
                 sasa_cg, sasa_cg_std = float(sp_eval_line[read_offset - 2]), float(sp_eval_line[read_offset - 1])
             # this controls if simulation has crashed
             except ValueError:
-                sasa_cg, sasa_cg_std = None, None
+                sasa_cg, sasa_cg_std = np.nan, np.nan
 
             all_eval_scores = np.append(all_eval_scores, eval_score)
             all_fit_score_total = np.append(all_fit_score_total, fit_score_total)
@@ -247,14 +269,13 @@ def run(ns):
     all_opti_cycles = np.array(all_opti_cycles)
 
     # select lowest bonded fitness score
-    cyc_mask = np.where((all_opti_cycles > 0) & (all_fit_score_total != None))[0]
+    cyc_mask = np.where((all_opti_cycles > 0) & np.isfinite(all_fit_score_total))[0]
     id_best_all = np.where(all_fit_score_total == np.amin(all_fit_score_total[cyc_mask]))[0][0]
 
     logger.info(
-        "Best bonded terms found at step %s with estimated Rg %s nm and SASA %s nm2",
+        "Best bonded terms found at step %s with estimated Rg %s nm",
         id_best_all + 1,
         all_gyr_cg[id_best_all],
-        all_sasa_cg[id_best_all],
     )
 
     logger.info("")
@@ -264,29 +285,24 @@ def run(ns):
         round(abs(1 - all_gyr_cg[id_best_all] / all_gyr_aa_mapped[id_best_all]) * 100, 1),
         all_gyr_aa_mapped[id_best_all],
     )
-    logger.info(
-        "  SASA CG: %s nm2   (Error abs. %s%% -- Reference SASA AA-mapped: %s nm2)",
-        round(all_sasa_cg[id_best_all], 2),
-        round(abs(1 - all_sasa_cg[id_best_all] / all_sasa_aa_mapped[id_best_all]) * 100, 1),
-        all_sasa_aa_mapped[id_best_all],
-    )
+    sasa_available = bool(np.any(np.isfinite(all_sasa_cg)))
+    if sasa_available and np.isfinite(all_sasa_cg[id_best_all]):
+        logger.info(
+            "  SASA CG: %s nm2   (Error abs. %s%% -- Reference SASA AA-mapped: %s nm2)",
+            round(all_sasa_cg[id_best_all], 2),
+            round(abs(1 - all_sasa_cg[id_best_all] / all_sasa_aa_mapped[id_best_all]) * 100, 1),
+            all_sasa_aa_mapped[id_best_all],
+        )
 
     # display indicator when simulation(s) crashed for any reason -- check for None gyr_cg to identify a simulation as crashed
-    crashes_ids = np.where(all_gyr_cg == None)[0] + 1
-
-    all_eval_scores = forward_fill(all_eval_scores, None)
-    all_fit_score_total = forward_fill(all_fit_score_total, None)
-    all_fit_score_constraints_bonds = forward_fill(all_fit_score_constraints_bonds, None)
-    all_fit_score_angles = forward_fill(all_fit_score_angles, None)
-    all_fit_score_dihedrals = forward_fill(all_fit_score_dihedrals, None)
-    all_gyr_aa_mapped = forward_fill(all_gyr_aa_mapped, None)
-    all_gyr_aa_mapped_std = forward_fill(all_gyr_aa_mapped_std, None)
-    all_gyr_cg = forward_fill(all_gyr_cg, None)
-    all_gyr_cg_std = forward_fill(all_gyr_cg_std, None)
-    all_sasa_aa_mapped = forward_fill(all_sasa_aa_mapped, None)
-    all_sasa_aa_mapped_std = forward_fill(all_sasa_aa_mapped_std, None)
-    all_sasa_cg = forward_fill(all_sasa_cg, None)
-    all_sasa_cg_std = forward_fill(all_sasa_cg_std, None)
+    independent_failed = np.any(~np.isfinite(iter_indep_scores[:, 1:]), axis=1)
+    crashes_ids = np.where(independent_failed | ~np.isfinite(all_gyr_cg))[0] + 1
+    if crashes_ids.size:
+        logger.warning(
+            "Detected %s failed evaluations at steps: %s",
+            crashes_ids.size,
+            ", ".join(map(str, crashes_ids)),
+        )
 
     for i in range(len(all_gyr_aa_mapped)):
         all_gyr_aa_mapped[i] += all_gyr_aa_mapped_offset
@@ -385,7 +401,10 @@ def run(ns):
     ax[0][5].legend(loc="lower right")
 
     ax[0][6].set_title("SASA")
-    ax[0][6].grid(zorder=0.5)
+    if not sasa_available:
+        ax[0][6].set_visible(False)
+    else:
+        ax[0][6].grid(zorder=0.5)
     ax[0][6].plot(x_evals, all_sasa_aa_mapped, color=config.atom_color, label="AA-mapped", lw=2.5)
     if plot_control_std:
         ax[0][6].fill_between(x_evals, list(all_sasa_aa_mapped - all_sasa_aa_mapped_std),
@@ -431,7 +450,7 @@ def run(ns):
     # constraints
     if nb_constraints != 0:
         nrow += 2
-        y_max = np.max(iter_indep_scores[:, 1 + nb_constraints])
+        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints])
         for i in range(ncols):
             if i < nb_constraints:
                 # value
@@ -476,7 +495,7 @@ def run(ns):
     # bonds
     if nb_bonds != 0:
         nrow += 2
-        y_max = np.max(iter_indep_scores[:, 1 + nb_constraints:1 + nb_constraints + nb_bonds])
+        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints:1 + nb_constraints + nb_bonds])
         for i in range(ncols):
             if i < nb_bonds:
                 # value and force constant
@@ -541,7 +560,7 @@ def run(ns):
     # angles
     if nb_angles != 0:
         nrow += 2
-        y_max = np.max(iter_indep_scores[:, 1 + nb_constraints + nb_bonds:1 + nb_constraints + nb_bonds + nb_angles])
+        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints + nb_bonds:1 + nb_constraints + nb_bonds + nb_angles])
         for i in range(ncols):
             if i < nb_angles:
                 # value and force constant
@@ -607,7 +626,7 @@ def run(ns):
     # dihedrals
     if nb_dihedrals != 0:
         nrow += 2
-        y_max = np.max(iter_indep_scores[:,
+        y_max = _finite_max(iter_indep_scores[:,
                        1 + nb_constraints + nb_bonds + nb_angles:1 + nb_constraints + nb_bonds + nb_angles + nb_dihedrals])
         for i in range(ncols):
             if i < nb_dihedrals:

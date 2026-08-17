@@ -1,9 +1,21 @@
 import MDAnalysis as mda
 import numpy as np
 
+from swarmcg.scoring.distances import circular_mean_degrees
+
 
 def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
-    """Calculate dihedrals distribution from AA trajectory."""
+    """Calculate an AA-mapped circular dihedral distribution.
+
+    Args:
+        universe: MDAnalysis universe containing the mapped AA trajectory.
+        beads_ids: Quadruplets of zero-based bead indices.
+        bins: Optional histogram edges in degrees.
+        bandwidth: Retained for API compatibility; normalization uses counts.
+
+    Returns:
+        Circular mean, probability masses, degree values, and radian values.
+    """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
@@ -30,17 +42,28 @@ def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
         len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values
 
     dihedral_values_deg = np.rad2deg(dihedral_values_rad)
-    dihedral_avg = round(np.mean(dihedral_values_deg), 3)
+    dihedral_avg = round(circular_mean_degrees(dihedral_values_deg), 3)
     
     dihedral_hist = None
     if bins is not None and bandwidth is not None:
-        dihedral_hist = np.histogram(dihedral_values_deg, bins, density=True)[0] * bandwidth
+        counts = np.histogram(dihedral_values_deg, bins, density=False)[0]
+        dihedral_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
 
     return dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad
 
 
 def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
-    """Calculate dihedrals using MDAnalysis."""
+    """Calculate a CG circular dihedral distribution.
+
+    Args:
+        universe: MDAnalysis universe containing the CG trajectory.
+        beads_ids: Quadruplets of zero-based bead indices.
+        bins: Optional histogram edges in degrees.
+        bandwidth: Retained for API compatibility; normalization uses counts.
+
+    Returns:
+        Circular mean, probability masses, degree values, and radian values.
+    """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
@@ -69,10 +92,11 @@ def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
     dihedral_values_deg = np.rad2deg(dihedral_values_rad)
 
     # get group average and histogram non-null values for comparison and display
-    dihedral_avg = round(np.mean(dihedral_values_deg), 3)
+    dihedral_avg = round(circular_mean_degrees(dihedral_values_deg), 3)
     
     dihedral_hist = None
     if bins is not None and bandwidth is not None:
-        dihedral_hist = np.histogram(dihedral_values_deg, bins, density=True)[0] * bandwidth
+        counts = np.histogram(dihedral_values_deg, bins, density=False)[0]
+        dihedral_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
 
     return dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad

@@ -24,13 +24,10 @@ default_max_fct_angles_opti_f10 = 1700
 
 default_abs_range_fct_dihedrals_bi_func_without_mult = 250
 default_abs_range_fct_dihedrals_opti_func_without_mult = 1500
-default_abs_range_fct_dihedrals_opti_func_rb = 1500
-default_abs_range_fct_dihedrals_opti_func_cbt = 1500
 default_abs_range_fct_dihedrals_bi_func_with_mult = 3.5  # TODO: these limits for dihedrals are probably far too low but they guarantee we don"t have all sims crashing at start
 default_abs_range_fct_dihedrals_opti_func_with_mult = 15
 
 bonds2angles_scoring_factor = 500  # multiplier applied to constraints/bonds EMD scores to retrieve angles/dihedrals mismatches that are comparable, for the opti scoring function
-sim_crash_EMD_indep_score = 150  # when a simulation crashes or does not finish for any reason: EMD distance between 2 distributions, for 1 geom
 
 # bonds scaling, default
 bonds_scaling = 1.0  # ratio

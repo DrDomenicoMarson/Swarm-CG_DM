@@ -16,7 +16,8 @@ Swarm-CG works with MARTINI version 2 or 3. The AA-to-CG mapping can be interpre
 
 ### Installation & Usage
 
-Swarm-CG has been tested with Python versions >= 3.11 and Gromacs versions >= 2018.1.
+This fork supports Python 3.13+ and GROMACS 2025+. Older Python and GROMACS
+releases are outside the supported platform.
 
     yum install python3-devel        # python dev tools CentOS (optional)
     pip3 install python-dev-tools    # python dev tools Ubuntu (optional)
@@ -52,7 +53,7 @@ It can also be used for inspecting AA-mapped distributions exclusively.
 
 	scg_evaluate -aa_tpr G1_DATA/aa_topol.tpr -aa_traj G1_DATA/aa_traj.xtc -cg_map G1_DATA/cg_map.ndx -cg_itp G1_DATA/cg_model.itp
 
-This module is particularly useful to assess the need to run an optimization procedure (assuming one already has a CG model). It is also suited to the assessment of geometrical changes triggered by a modification of CG beads types (defining non-bonded parameters) or after manually editing bonded parameters while working on a model. This command also provides publication-quality figures to support the parametrization of your models (also in vectorized formats). Radius of gyration (Rg) and solvent accessible surface area (SASA) are also calculated. 
+This module is particularly useful to assess the need to run an optimization procedure (assuming one already has a CG model). It is also suited to the assessment of geometrical changes triggered by a modification of CG beads types (defining non-bonded parameters) or after manually editing bonded parameters while working on a model. This command also provides publication-quality figures to support the parametrization of your models (also in vectorized formats). Radius of gyration (Rg) is always calculated. SASA is an optional diagnostic enabled with `-sasa`/`--sasa`; a SASA failure is reported but never changes a fitness score or model selection.
 
 ### 2. Optimize bonded terms of a CG model
 
@@ -60,11 +61,11 @@ The module `scg_optimize` allows to automatically optimize the bonded parameters
 
 For example, using demonstration data of [PAMAM G1](https://github.com/GMPavanLab/Swarm-CG/tree/master/G1_DATA):
 
-	scg_optimize -in_dir G1_DATA/ -gmx gmx_2018.6_p
+	scg_optimize -in_dir G1_DATA/ -gmx gmx
 
 Which will use all default filenames of the software and is *exactly identical* to this command:
 
-	scg_optimize -aa_tpr G1_DATA/aa_topol.tpr -aa_traj G1_DATA/aa_traj.xtc -cg_map G1_DATA/cg_map.ndx -cg_itp G1_DATA/cg_model.itp -cg_gro G1_DATA/start_conf.gro -cg_top G1_DATA/system.top -cg_mdp_mini G1_DATA/mini.mdp -cg_mdp_equi G1_DATA/equi.mdp -cg_mdp_md G1_DATA/md.mdp -gmx gmx_2018.6_p
+	scg_optimize -aa_tpr G1_DATA/aa_topol.tpr -aa_traj G1_DATA/aa_traj.xtc -cg_map G1_DATA/cg_map.ndx -cg_itp G1_DATA/cg_model.itp -cg_gro G1_DATA/start_conf.gro -cg_top G1_DATA/system.top -cg_mdp_mini G1_DATA/mini.mdp -cg_mdp_equi G1_DATA/equi.mdp -cg_mdp_md G1_DATA/md.mdp -gmx gmx
 
 We recommend to first prepare files in a directory to be fed to Swarm-CG via argument `-in_dir`.
 
@@ -82,13 +83,32 @@ The AA trajectory is mapped on-the-fly (if atoms are mapped to multiple CG beads
 
 For information about the different execution modes, please see paper sections 2.4 and 4 and command help (-h).
 
+The paper's class-wise L2 composition and bond conversion factor of 500 are
+retained. Production (`OPTIMAL`) swarm sizes and iteration limits are based on
+the actual number `D` of free parameters: `max(3, round(2 + sqrt(D)))`
+particles and `round(6 + sqrt(D))` iterations. Each optimization cycle starts
+from the preceding cycle's optimum; global-best selection remains a separate
+whole-model decision.
+
+Supported added bonded terms include restricted bending (angle function 10),
+Ryckaert--Bellemans (dihedral function 3), and combined bending--torsion
+(dihedral function 11). Function-10 equilibrium angles must lie in 10--170°.
+RB is optimized through the five force-relevant coefficients C1--C5 and is
+written with `C0 = -sum(C1..C5)`. CBT is optimized through the five effective
+products `B_i = k_phi*a_i`; output uses `k_phi = max(abs(B_i))` and
+`a_i = B_i/k_phi` (or all zeros for the zero potential). Consequently,
+canonical output parameters can differ from input while preserving RB forces
+or the full CBT energy. Default RB/CBT bounds are derived from the target PMF;
+use `-max_rb_coeff` or `-max_cbt_coeff` when a deliberately larger input range
+is required.
+
 ### 3. Monitor an ongoing CG model optimization
 
 Optimization procedures can be monitored at any point during execution. The module `scg_monitor` produces a visual summary (see paper Fig. 3) of the progress of an optimization procedure started with module `scg_optimize`. The plot will be produced in the directory provided via arg `-opti_dir`.
 
 	scg_monitor -opti_dir MODEL_OPTI__STARTED_03-07-2020_10h_12m_15s
 
-See the help (-h) for a complete description of `scg_monitor` output. In particular, note that Rg and SASA might be rough estimates in this display, as they are calculated from short simulations used for optimization. These values must probably be validated using longer simulation times. Using `scg_evaluate` can be helpful to this end.
+See the help (-h) for a complete description of `scg_monitor` output. Rg and requested SASA values may be rough estimates because they come from short optimization simulations and should be validated with longer trajectories. The monitor marks failed evaluations explicitly and omits SASA summaries and panels when SASA was not requested or no result is available. Using `scg_evaluate` can be helpful to this end.
 
 ### Extended usage (untested)
 
@@ -101,7 +121,6 @@ Please feel free to open an [Issue](https://github.com/GMPavanLab/SwarmCG/issues
 ### Credits
 
 Swarm-CG makes extensive use of [FST-PSO](https://doi.org/10.1016/j.swevo.2017.09.001) and [MDAnalysis](https://doi.org/10.1002/jcc.21787). We thank [Marco S. Nobile](http://msnobile.it/personal/) for his valuable insights.
-
 
 
 

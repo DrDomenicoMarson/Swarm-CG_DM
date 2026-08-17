@@ -1,45 +1,68 @@
 name: swarm-cg-tests
 
 on:
+  push:
   pull_request:
-    branches:
-      - master
-      - develop
+
 jobs:
-  unittest:
+  unit:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.7, 3.8]
-
+        python-version: ["3.13", "3.14"]
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest
-        if [ -f environment.txt ]; then pip install -r environment.txt; fi
-    - name: Install package
-      run: |
-        python setup.py install
-    - name: Test with pytest
-      run: |
-        pytest tests/
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --editable . pytest
+      - run: python -m pytest tests --ignore=tests/integration
 
-  itests:
-    needs: unittest
-    runs-on: ubuntu-20.04
-
+  wheel-install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
     steps:
-    - uses: actions/checkout@v2
-    - name: Docker build
-      run: |
-        docker build -f ./itests/Dockerfile.test -t swarmcg .
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - run: python -m pip install dist/*.whl
+      - run: python -c "import swarmcg; print(swarmcg.__version__)"
+      - run: scg_evaluate --help
 
-    - name: Run tests
-      run: |
-        docker run swarmcg
+  gromacs-integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "2025.4"
+            gromacs-spec: "gromacs=2025.4"
+          - label: "current"
+            gromacs-spec: "gromacs"
+    name: GROMACS ${{ matrix.label }} integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: swarmcg-ci
+          create-args: >-
+            python=3.13
+            ${{ matrix.gromacs-spec }}
+            pip
+      - name: Install package and test dependencies
+        shell: bash -el {0}
+        run: python -m pip install --editable . pytest
+      - name: Report GROMACS version
+        shell: bash -el {0}
+        run: gmx --version
+      - name: Run real GROMACS integration tests
+        shell: bash -el {0}
+        run: python -m pytest tests/integration/test_gromacs_integration.py

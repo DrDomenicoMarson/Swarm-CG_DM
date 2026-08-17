@@ -8,6 +8,7 @@ from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 import swarmcg.config as config
+from swarmcg.evaluate_model import run as run_evaluation
 
 TEST_DATA = "tests/data/"
 logger = logging.getLogger(__name__)
@@ -117,3 +118,24 @@ def test_evaluator_workflow_real_data(real_data_config):
         assert first_angle["avg"] > 0
         
     logger.info("Verified %s bond groups and %s angle groups.", nb_bonds, nb_angles)
+
+
+@pytest.mark.parametrize("include_cg", [False, True])
+def test_evaluate_bundled_trajectories_create_plot(tmp_path, include_cg):
+    """Exercise AA-only and full evaluation against the bundled trajectories."""
+    cfg = SwarmConfig()
+    cfg.reference.aa_tpr_filename = "tests/data/aa_topol.tpr"
+    cfg.reference.aa_traj_filename = "tests/data/aa_traj.xtc"
+    cfg.reference.cg_map_filename = "tests/data/cg_map.ndx"
+    cfg.cg_model.cg_itp_filename = "tests/data/cg_model.itp"
+    if include_cg:
+        cfg.cg_model.cg_tpr_filename = "tests/data/cg_topol.tpr"
+        cfg.cg_model.cg_traj_filename = "tests/data/cg_traj.xtc"
+    else:
+        cfg.cg_model.cg_tpr_filename = str(tmp_path / "missing.tpr")
+        cfg.cg_model.cg_traj_filename = str(tmp_path / "missing.xtc")
+    cfg.output.plot_filename = str(tmp_path / ("full.svg" if include_cg else "aa_only.svg"))
+
+    run_evaluation(cfg)
+
+    assert os.path.isfile(cfg.output.plot_filename)

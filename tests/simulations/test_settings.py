@@ -9,11 +9,11 @@ from swarmcg.context import OptimizationContext
 def test_get_settings_fail(ns_opt):
     # when:
     ns = ns_opt(sim_type="NO_VALID")
-    config = SwarmConfig.from_namespace(ns)
-    context = OptimizationContext(config=config)
-    
+
     # then:
     with pytest.raises(ValueError):
+        config = SwarmConfig.from_namespace(ns)
+        context = OptimizationContext(config=config)
         _ = get_settings(context)
 
 
@@ -47,4 +47,3 @@ def test_get_settings_test(ns_opt):
     assert particle_setter([1, 2, 3, 4]) == 2
     assert particle_setter(list(range(50))) == 2
     assert opti_cycles == [["constraint", "bond", "angle"], ["dihedral"], ["constraint", "bond", "angle", "dihedral"]]
-

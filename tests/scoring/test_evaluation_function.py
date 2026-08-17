@@ -91,3 +91,58 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
             f"{config_module.iteration_sim_files_dirname}_eval_step_1",
         )
         assert not os.path.exists(eval_dir)
+
+
+def test_missing_optional_sasa_never_changes_valid_fitness():
+    from swarmcg.scoring.evaluation_function import eval_function
+
+    config = SwarmConfig()
+    config.output.calculate_sasa = True
+    ctx = OptimizationContext(config=config)
+    ctx.cg_itp = _make_min_itp()
+    ctx.out_itp = _make_min_itp()
+    ctx.opti_cycle = {
+        "nb_cycle": 1,
+        "geoms": ["bond"],
+        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
+    }
+    ctx.pso.opti_geoms_all = {"bond"}
+    ctx.pso.best_fitness = (-1.0, None)
+    ctx.pso.worst_fit_score = 999.0
+    ctx.status.start_opti_ts = 0.0
+    ctx.files.cg_itp_basename = "cg_model.itp"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ctx.files.exec_folder = tmpdir
+        os.makedirs(os.path.join(tmpdir, ".internal"))
+        input_dir = os.path.join(tmpdir, config_module.input_sim_files_dirname)
+        os.makedirs(input_dir)
+        with open(os.path.join(input_dir, "dummy.txt"), "w") as handle:
+            handle.write("dummy")
+        os.makedirs(os.path.join(tmpdir, config_module.all_evals_files_dirname))
+
+        def simulation_side_effect(working_dir, **kwargs):
+            with open(os.path.join(working_dir, "md.gro"), "w") as handle:
+                handle.write("created")
+
+        def compare_side_effect(*args, **kwargs):
+            ctx.results.gyr_aa_mapped = ctx.results.gyr_cg = 1.0
+            ctx.results.gyr_aa_mapped_std = ctx.results.gyr_cg_std = 0.0
+            ctx.results.sasa_aa_mapped = ctx.results.sasa_cg = None
+            return 1.0, 1.0, 0.0, 0.0, "\n", {
+                "constraints": [], "bonds": [], "angles": [], "dihedrals": []
+            }
+
+        with (
+            patch(
+                "swarmcg.scoring.evaluation_function.sim.SimulationManager.run_simulation",
+                side_effect=simulation_side_effect,
+            ),
+            patch(
+                "swarmcg.scoring.evaluation_function.compare_models",
+                side_effect=compare_side_effect,
+            ),
+        ):
+            score = eval_function([], ctx)
+
+    assert score == 1.0

@@ -1,13 +1,17 @@
 
 import os
 from typing import Any, Optional
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
 from swarmcg import config as config_module
 from swarmcg.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
 class GromacsConfig(BaseModel):
+    """Configuration for GROMACS preprocessing and simulation commands."""
+
     gmx_path: str = "gmx"
     nb_threads: int = 0
     ntomp: int = 0
@@ -17,8 +21,46 @@ class GromacsConfig(BaseModel):
     mini_maxwarn: int = 1
     sim_kill_delay: int = 60
 
+    @field_validator("nb_threads", "ntomp", "mpi_tasks", "mini_maxwarn")
+    @classmethod
+    def check_non_negative_integer(cls, value: int, info: Any) -> int:
+        """Require non-negative GROMACS integer options.
+
+        Args:
+            value: Value supplied for the field.
+            info: Pydantic validation metadata.
+
+        Returns:
+            The validated value.
+
+        Raises:
+            ValueError: If the value is negative.
+        """
+        if value < 0:
+            raise ValueError(f"{info.field_name} must be greater than or equal to zero.")
+        return value
+
+    @field_validator("sim_kill_delay")
+    @classmethod
+    def check_stall_timeout(cls, value: int) -> int:
+        """Require at least one ten-second simulation monitoring interval.
+
+        Args:
+            value: Requested stall timeout in seconds.
+
+        Returns:
+            Validated timeout.
+
+        Raises:
+            ValueError: If the timeout is shorter than one interval.
+        """
+        if value < 10:
+            raise ValueError("sim_kill_delay must be at least 10 seconds.")
+        return value
+
     @model_validator(mode='after')
-    def check_gmx_args_conflict(self):
+    def check_gmx_args_conflict(self) -> "GromacsConfig":
+        """Warn when a free-form mdrun argument string takes precedence."""
         if self.gmx_args_str != "" and (self.nb_threads != 0 or self.ntomp != 0 or self.gpu_id != ""):
             logger.warning(
                 "Argument -gmx_args_str is provided together with -nb_threads, -ntomp or -gpu_id; "
@@ -27,6 +69,8 @@ class GromacsConfig(BaseModel):
         return self
 
 class ReferenceModelConfig(BaseModel):
+    """Input files and mapping rules for the atomistic reference model."""
+
     aa_tpr_filename: str = "aa_topol.tpr"
     aa_traj_filename: str = "aa_traj.xtc"
     cg_map_filename: str = "cg_map.ndx"
@@ -44,6 +88,8 @@ class ReferenceModelConfig(BaseModel):
         return v.upper()
 
 class CGModelConfig(BaseModel):
+    """Input files and parameter-source policy for the CG model."""
+
     cg_itp_filename: str = "cg_model.itp"
     gro_input_filename: str = "start_conf.gro"
     top_input_filename: str = "system.top"
@@ -52,6 +98,8 @@ class CGModelConfig(BaseModel):
     user_input: bool = False
 
 class SimulationConfig(BaseModel):
+    """MDP files and physical conditions for optimization simulations."""
+
     # MDP files
     mdp_minimization_filename: str = "honeycomb/data/mini.mdp"
     mdp_equi_filename: str = "honeycomb/data/equi.mdp"
@@ -62,7 +110,28 @@ class SimulationConfig(BaseModel):
     sim_duration_long: float = 25.0 # ns
     temp: float = 300.0 # Kelvin
 
+    @field_validator("sim_duration_short", "sim_duration_long", "temp")
+    @classmethod
+    def check_positive_simulation_value(cls, value: float, info: Any) -> float:
+        """Require positive simulation durations and temperature.
+
+        Args:
+            value: Duration or temperature value.
+            info: Pydantic field metadata.
+
+        Returns:
+            Validated positive value.
+
+        Raises:
+            ValueError: If *value* is not positive.
+        """
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be greater than zero.")
+        return value
+
 class OptimizationConfig(BaseModel):
+    """Search-space and scoring configuration for bonded optimization."""
+
     exec_mode: int = 1
     sim_type: str = "OPTIMAL"
     
@@ -73,8 +142,14 @@ class OptimizationConfig(BaseModel):
     default_max_fct_angles_opti_f10: float = 1700.0
     default_abs_range_fct_dihedrals_opti_func_with_mult: float = 15.0
     default_abs_range_fct_dihedrals_opti_func_without_mult: float = 1500.0
-    default_abs_range_fct_dihedrals_opti_func_rb: float = 1500.0
-    default_abs_range_fct_dihedrals_opti_func_cbt: float = 1500.0
+    max_abs_rb_coefficient: Optional[float] = Field(
+        default=None,
+        description="Optional absolute bound for independent RB C1--C5 coefficients in kJ/mol.",
+    )
+    max_abs_cbt_effective_coefficient: Optional[float] = Field(
+        default=None,
+        description="Optional absolute bound for effective CBT k_phi*a_i coefficients in kJ/mol.",
+    )
     
     # Scoring
     bonds2angles_scoring_factor: float = 500.0
@@ -99,17 +174,85 @@ class OptimizationConfig(BaseModel):
     fct_guess_min_flat_diff_angles: float = config_module.fct_guess_min_flat_diff_angles
     fct_guess_min_flat_diff_dihedrals_without_mult: float = config_module.fct_guess_min_flat_diff_dihedrals_without_mult
     fct_guess_min_flat_diff_dihedrals_with_mult: float = config_module.fct_guess_min_flat_diff_dihedrals_with_mult
-    sim_crash_EMD_indep_score: float = config_module.sim_crash_EMD_indep_score
+    @field_validator("exec_mode")
+    @classmethod
+    def check_exec_mode(cls, value: int) -> int:
+        """Require one of the two documented optimization modes.
+
+        Args:
+            value: Requested execution mode.
+
+        Returns:
+            Validated mode.
+
+        Raises:
+            ValueError: If the mode is not 1 or 2.
+        """
+        if value not in (1, 2):
+            raise ValueError("exec_mode must be either 1 or 2.")
+        return value
+
+    @field_validator("sim_type")
+    @classmethod
+    def normalize_sim_type(cls, value: str) -> str:
+        """Normalize and validate the optimization strategy name.
+
+        Args:
+            value: Requested strategy name.
+
+        Returns:
+            Uppercase validated strategy.
+
+        Raises:
+            ValueError: If the strategy is unsupported.
+        """
+        normalized = value.upper()
+        if normalized not in {"OPTIMAL", "FAST", "TEST"}:
+            raise ValueError("sim_type must be OPTIMAL, FAST, or TEST.")
+        return normalized
 
     @field_validator('default_max_fct_bonds_opti', 'default_max_fct_angles_opti_f1',
                      'default_max_fct_angles_opti_f2', 'default_max_fct_angles_opti_f10',
-                     'default_abs_range_fct_dihedrals_opti_func_rb',
-                     'default_abs_range_fct_dihedrals_opti_func_cbt')
+                     'default_abs_range_fct_dihedrals_opti_func_with_mult',
+                     'default_abs_range_fct_dihedrals_opti_func_without_mult',
+                     'bonds2angles_scoring_factor', 'bw_constraints', 'bw_bonds',
+                     'bw_angles', 'bw_dihedrals', 'bonded_max_range', 'bi_nb_bins')
     @classmethod
     def check_positive(cls, v: float, info: Any) -> float:
+        """Require positive force, scoring, histogram, and bin-count values.
+
+        Args:
+            v: Numeric value to validate.
+            info: Pydantic field metadata.
+
+        Returns:
+            Validated positive value.
+
+        Raises:
+            ValueError: If *v* is not positive.
+        """
         if v <= 0:
             raise ValueError(f"Please provide a value > 0 for argument corresponding to {info.field_name}.")
         return v
+
+    @field_validator("max_abs_rb_coefficient", "max_abs_cbt_effective_coefficient")
+    @classmethod
+    def check_optional_positive(cls, value: Optional[float], info: Any) -> Optional[float]:
+        """Validate optional explicit polynomial coefficient bounds.
+
+        Args:
+            value: Optional absolute bound.
+            info: Pydantic field metadata.
+
+        Returns:
+            ``None`` or the validated positive bound.
+
+        Raises:
+            ValueError: If a supplied bound is not positive.
+        """
+        if value is not None and value <= 0:
+            raise ValueError(f"{info.field_name} must be greater than zero when provided.")
+        return value
     
     @model_validator(mode='after')
     def check_bonds_scaling_conflicts(self):
@@ -145,6 +288,8 @@ class OptimizationConfig(BaseModel):
         return self
 
 class OutputConfig(BaseModel):
+    """Output, plotting, and optional diagnostic settings."""
+
     input_folder: str = ""
     output_folder: str = ""
     opti_dirname: str = ""
@@ -155,8 +300,50 @@ class OutputConfig(BaseModel):
     ncols_max: int = 0
     plot_scale: float = 1.0
     verbose: bool = False
+    calculate_sasa: bool = Field(
+        default=False,
+        description="Calculate SASA as a nonfatal diagnostic that never enters fitness.",
+    )
+
+    @field_validator("ncols_max")
+    @classmethod
+    def check_nonnegative_columns(cls, value: int) -> int:
+        """Require a nonnegative optional plot-column limit.
+
+        Args:
+            value: Requested maximum column count.
+
+        Returns:
+            Validated column count.
+
+        Raises:
+            ValueError: If *value* is negative.
+        """
+        if value < 0:
+            raise ValueError("ncols_max must be greater than or equal to zero.")
+        return value
+
+    @field_validator("plot_scale")
+    @classmethod
+    def check_positive_plot_scale(cls, value: float) -> float:
+        """Require a positive plot scaling factor.
+
+        Args:
+            value: Requested plot scale.
+
+        Returns:
+            Validated plot scale.
+
+        Raises:
+            ValueError: If *value* is not positive.
+        """
+        if value <= 0:
+            raise ValueError("plot_scale must be greater than zero.")
+        return value
 
 class SwarmConfig(BaseModel):
+    """Complete validated configuration for a Swarm-CG command."""
+
     gromacs: GromacsConfig = Field(default_factory=GromacsConfig)
     reference: ReferenceModelConfig = Field(default_factory=ReferenceModelConfig)
     cg_model: CGModelConfig = Field(default_factory=CGModelConfig)
@@ -168,8 +355,15 @@ class SwarmConfig(BaseModel):
     # but Pydantic validators usually validate *data*, not external state (like file existence).
     # However, for a CLI tool, validating file existence at configuration load is good practice.
     
-    def validate_files_exist(self):
-        """Check for existence of input files."""
+    def validate_files_exist(self, require_cg_trajectory: bool = False) -> None:
+        """Check that required model and optional CG trajectory files exist.
+
+        Args:
+            require_cg_trajectory: Require both the CG topology and trajectory.
+
+        Raises:
+            FileNotFoundError: If a required input file cannot be found.
+        """
         # Reference files
         if not os.path.isfile(self.reference.aa_tpr_filename):
             raise FileNotFoundError(
@@ -190,11 +384,29 @@ class SwarmConfig(BaseModel):
         # CG Model file
         if not os.path.isfile(self.cg_model.cg_itp_filename):
             raise FileNotFoundError(f"Cannot find ITP file of the CG model at location: {self.cg_model.cg_itp_filename}")
+        if require_cg_trajectory:
+            if not os.path.isfile(self.cg_model.cg_tpr_filename):
+                raise FileNotFoundError(
+                    f"Cannot find topology file of the CG simulation at location: {self.cg_model.cg_tpr_filename}"
+                )
+            if not os.path.isfile(self.cg_model.cg_traj_filename):
+                raise FileNotFoundError(
+                    f"Cannot find trajectory file of the CG simulation at location: {self.cg_model.cg_traj_filename}"
+                )
 
     @classmethod
     def from_namespace(cls, ns) -> 'SwarmConfig':
-        """
-        Convert argparse Namespace (legacy ns object) to SwarmConfig.
+        """Convert a flat argparse namespace into structured configuration.
+
+        Args:
+            ns: Namespace produced by a Swarm-CG command parser.
+
+        Returns:
+            Fully validated nested configuration.
+
+        Raises:
+            ValidationError: If a numeric, strategy, mapping, or cross-field
+                constraint is invalid.
         """
         # Gromacs
         gromacs = GromacsConfig(
@@ -247,8 +459,8 @@ class SwarmConfig(BaseModel):
             default_max_fct_angles_opti_f10=getattr(ns, 'default_max_fct_angles_opti_f10', 1700.0),
             default_abs_range_fct_dihedrals_opti_func_with_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_with_mult', 15.0),
             default_abs_range_fct_dihedrals_opti_func_without_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_without_mult', 1500.0),
-            default_abs_range_fct_dihedrals_opti_func_rb=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_rb', 1500.0),
-            default_abs_range_fct_dihedrals_opti_func_cbt=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_cbt', 1500.0),
+            max_abs_rb_coefficient=getattr(ns, 'max_abs_rb_coefficient', None),
+            max_abs_cbt_effective_coefficient=getattr(ns, 'max_abs_cbt_effective_coefficient', None),
             bonds2angles_scoring_factor=getattr(ns, 'bonds2angles_scoring_factor', 500.0),
             bw_constraints=getattr(ns, 'bw_constraints', 0.002),
             bw_bonds=getattr(ns, 'bw_bonds', 0.01),
@@ -267,7 +479,6 @@ class SwarmConfig(BaseModel):
             fct_guess_min_flat_diff_angles=getattr(ns, 'fct_guess_min_flat_diff_angles', config_module.fct_guess_min_flat_diff_angles),
             fct_guess_min_flat_diff_dihedrals_without_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_without_mult', config_module.fct_guess_min_flat_diff_dihedrals_without_mult),
             fct_guess_min_flat_diff_dihedrals_with_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_with_mult', config_module.fct_guess_min_flat_diff_dihedrals_with_mult),
-            sim_crash_EMD_indep_score=getattr(ns, 'sim_crash_EMD_indep_score', config_module.sim_crash_EMD_indep_score)
         )
 
         # Output
@@ -281,7 +492,8 @@ class SwarmConfig(BaseModel):
             row_y_scaling=getattr(ns, 'row_y_scaling', True),
             ncols_max=getattr(ns, 'ncols_max', 0),
             plot_scale=getattr(ns, 'plot_scale', 1.0),
-            verbose=getattr(ns, 'verbose', False)
+            verbose=getattr(ns, 'verbose', False),
+            calculate_sasa=getattr(ns, 'calculate_sasa', False),
         )
 
         config = cls(

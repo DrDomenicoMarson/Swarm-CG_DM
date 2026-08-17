@@ -2,20 +2,30 @@ import numpy as np
 
 
 def _defatul_particle_setter(search_space_size):
-    """Function to determined the number of particles"""
+    """Return the dimension-aware production swarm size.
+
+    Args:
+        search_space_size: Search-space bounds, one pair per free parameter.
+
+    Returns:
+        ``max(3, round(2 + sqrt(D)))`` where ``D`` is the free dimension.
+    """
     return max(int(round(2 + np.sqrt(len(search_space_size)))), 3)
 
 
 def get_settings(ns):
-    """Get simulation and optimzation settings.
+    """Return simulation-cycle settings for a configured strategy.
 
-    ns requires:
-        sim_type
+    Args:
+        ns: Optimization context containing the normalized strategy name and
+            modern simulation durations.
 
-    pass ns to:
-        _optimal
-        _fast
-        _test
+    Returns:
+        Simulation types, geometry cycles, simulation-cycle indices, and a
+        dimension-aware particle-count function.
+
+    Raises:
+        ValueError: If the strategy is not ``OPTIMAL``, ``FAST``, or ``TEST``.
     """
     sim_type = ns.config.optimization.sim_type
     
@@ -47,22 +57,19 @@ def _optimal(ns):
     sim_types = {
         0: {"sim_duration": sim_short,
             "prod_nb_frames": 15000,
-            "max_swarm_iter": int(
-                round(6 + np.sqrt(ns.cg_itp["nb_constraints"] + ns.cg_itp["nb_bonds"] + ns.cg_itp["nb_angles"]))),
+            "max_swarm_iter": None,
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 1,
             "fct_guess_fact": 0.40},
         1: {"sim_duration": sim_short,
             "prod_nb_frames": 15000,
-            "max_swarm_iter": int(round(6 + np.sqrt(ns.cg_itp["nb_angles"] + ns.cg_itp["nb_dihedrals"]))),
+            "max_swarm_iter": None,
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 0.25,
             "fct_guess_fact": 0.30},
         2: {"sim_duration": sim_long,
             "prod_nb_frames": 15000,
-            "max_swarm_iter": int(round(6 + np.sqrt(
-                ns.cg_itp["nb_constraints"] + ns.cg_itp["nb_bonds"] + ns.cg_itp["nb_angles"] + ns.cg_itp[
-                    "nb_dihedrals"]))),
+            "max_swarm_iter": None,
             "max_swarm_iter_without_new_global_best": 6,
             "val_guess_fact": 0.25,
             "fct_guess_fact": 0.20}

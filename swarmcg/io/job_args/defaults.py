@@ -240,17 +240,17 @@ max_fct_dihedrals_f2 = BaseField(
     default=config.default_abs_range_fct_dihedrals_opti_func_without_mult,
     help="Max. force ct. for dihedrals function 2 (abs. kJ.mol⁻¹.rad⁻²)",
 )
-max_fct_dihedrals_f3 = BaseField(
-    dest="default_abs_range_fct_dihedrals_opti_func_rb",
+max_rb_coeff = BaseField(
+    dest="max_abs_rb_coefficient",
     type=float,
-    default=config.default_abs_range_fct_dihedrals_opti_func_rb,
-    help="Max. force ct. for dihedrals function 3 (abs. kJ.mol⁻¹)",
+    default=None,
+    help="Optional absolute bound for independent RB C1..C5 coefficients\n(kJ.mol⁻¹; default is derived from the target PMF)",
 )
-max_fct_dihedrals_f11 = BaseField(
-    dest="default_abs_range_fct_dihedrals_opti_func_cbt",
+max_cbt_coeff = BaseField(
+    dest="max_abs_cbt_effective_coefficient",
     type=float,
-    default=config.default_abs_range_fct_dihedrals_opti_func_cbt,
-    help="Max. force ct. for dihedrals function 11 (abs. kJ.mol⁻¹)",
+    default=None,
+    help="Optional absolute bound for effective CBT coefficients k_phi*a_i\n(kJ.mol⁻¹; default is derived from the target PMF)",
 )
 # MODEL SCORING
 cg_time_short = BaseField(
@@ -312,6 +312,13 @@ bonds_max_range = BaseField(
     type=float,
     default=config.bonds_max_range,  # nm 15 -- used to define grid for EMD calculations
     help="Max. range of grid for bonds/constraints distributions (nm)",
+)
+
+sasa = BaseField(
+    dest="calculate_sasa",
+    default=False,
+    help="Calculate SASA as an optional diagnostic; SASA never affects fitness",
+    action="store_true",
 )
 
 # MODEL SCALING

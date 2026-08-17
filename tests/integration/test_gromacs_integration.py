@@ -5,7 +5,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from swarmcg.config_types import SwarmConfig, SimulationConfig, CGModelConfig, GromacsConfig
-from swarmcg.simulations.runner import SimulationManager, SimulationStep, select_class
+from swarmcg.simulations.runner import SimulationManager, SimulationStep, config_to_runner, select_class
 
 # Check for GROMACS
 gmx_path = shutil.which("gmx")
@@ -55,8 +55,6 @@ def test_gromacs_minimization_run():
         # We need to Select the class (Mini)
         sim_config = select_class("minimization", config.simulation)
         
-        from swarmcg.simulations.runner import config_to_runner
-        
         # Setup runner dict
         # config_to_runner uses filenames from config passed to it or sim_config?
         # It uses sim_config.base_name for MDP input to grompp.
@@ -76,45 +74,26 @@ def test_gromacs_minimization_run():
         
         step = SimulationStep(setup)
         
-        # Change to tmp dir context
-        cwd = os.getcwd()
-        os.chdir(tmp_path)
-        try:
-            step.run(tmp_path)
+        step.run(tmp_path)
             
             # Assert Output Exists
-            gro_file = Path(step.sim_setup['md_output'] + ".gro")
-            assert gro_file.exists(), "Minimization output GRO file missing"
+        gro_file = tmp_path / (step.sim_setup['md_output'] + ".gro")
+        assert gro_file.exists(), "Minimization output GRO file missing"
             
-            tpr_file = Path(step.sim_setup['md_output'] + ".tpr")
-            assert tpr_file.exists(), "TPR file missing"
+        tpr_file = tmp_path / (step.sim_setup['md_output'] + ".tpr")
+        assert tpr_file.exists(), "TPR file missing"
             
-            log_file = Path(step.sim_setup['monitor_file'])
-            assert log_file.exists(), "Log file missing"
+        log_file = tmp_path / step.sim_setup['monitor_file']
+        assert log_file.exists(), "Log file missing"
 
             # 6. Verify Data Extraction
             # We use MDAnalysis to check we can read the generated trajectory
-            import MDAnalysis as mda
-            
-            # Load the universe
-            u = mda.Universe(str(gro_file), str(step.sim_setup['md_output'] + ".trr")) 
-            # Note: minimisation usually outputs trr/gro, checks mdp nstxout
-            # mini.mdp has nstxout=0, so maybe no trr? 
-            # Default md output is usually .trr or .xtc
-            # SimulationStep sets '-o {md_output}', so it produces default formatted files. 
-            # In GROMACS, -o usually produces .trr by default unless specified.
-            # But let's check what was produced.
-            
-            # Actually let's just check the GRO first for data
-            u_gro = mda.Universe(str(gro_file))
-            assert len(u_gro.atoms) > 0, "GRO file is empty"
-            
-            # Check we can extract coordinates
-            coords = u_gro.atoms.positions
-            assert coords.shape == (len(u_gro.atoms), 3)
-            
-        finally:
-            os.chdir(cwd)
+        import MDAnalysis as mda
+
+        u_gro = mda.Universe(str(gro_file))
+        assert len(u_gro.atoms) > 0, "GRO file is empty"
+        coords = u_gro.atoms.positions
+        assert coords.shape == (len(u_gro.atoms), 3)
 
 @pytest.mark.skipif(not GMX_AVAILABLE, reason="GROMACS not found in PATH")
 def test_gromacs_full_chain():
@@ -190,31 +169,52 @@ def test_gromacs_full_chain():
         manager = SimulationManager(config)
         
         # 4. Run Full Simulation Chain
-        cwd = os.getcwd()
-        try:
-             # Run in tmpdir
-             try:
-                 manager.run_simulation(str(tmp_path), sim_time=0.01, nb_frames=1)
-             except Exception:
-                 # If GROMACS fails due to physics (NaN energy) even with steep descent, 
-                 # we accept that the data is broken but verify workflow attempted.
-                 pass
-             
-             # 5. Validate Artifacts
-             
-             # Minimization MUST have succeeded (Step 1)
-             assert (tmp_path / "mini.gro").exists(), "Minimization step failed to produce output"
-             assert (tmp_path / "mini.log").exists()
-             
-             # Equilibration MUST have been attempted (Step 2)
-             # Even if it crashed, it creates the log/tpr
-             assert (tmp_path / "equi.tpr").exists(), "Equilibration step failed to prep (grompp)"
-             
-             # We consider the test passed if we got this far (Mini succeeded, Equi attempted)
-             # Ideally Equi also succeeds (produces .gro)
-             if (tmp_path / "equi.gro").exists():
-                 # Production verification
-                 assert (tmp_path / "md.tpr").exists(), "Production step failed to prep"
+        manager.run_simulation(str(tmp_path), sim_time=0.01, nb_frames=1)
 
-        finally:
-            os.chdir(cwd)
+        for stage in ("mini", "equi", "md"):
+            assert (tmp_path / f"{stage}.tpr").exists(), f"{stage} TPR missing"
+            assert (tmp_path / f"{stage}.gro").exists(), f"{stage} GRO missing"
+            assert (tmp_path / f"{stage}.log").exists(), f"{stage} log missing"
+
+
+@pytest.mark.skipif(not GMX_AVAILABLE, reason="GROMACS not found in PATH")
+def test_gromacs_nonzero_restricted_bending_rb_and_cbt():
+    """Require GROMACS to preprocess and minimize all newly supported terms."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        data_dir = Path("tests/data").absolute()
+        for filename in (
+            "start_conf.gro",
+            "system.top",
+            "cg_model.itp",
+            "martini_v2.0_PEO_PS_CNP.itp",
+            "martini_v2.0_ions.itp",
+        ):
+            shutil.copy(data_dir / filename, tmp_path / filename)
+        shutil.copy(Path("swarmcg/data/mini.mdp").absolute(), tmp_path / "mini.mdp")
+
+        itp_path = tmp_path / "cg_model.itp"
+        topology = itp_path.read_text()
+        topology = topology.replace("10       120         0", "10       120        25", 1)
+        topology += """
+
+[ dihedrals ]
+; i  j  k  l  funct  parameters
+5  4  3  1  3   -1.50  1.00  -0.50  0.25  -0.10  0.05
+6  5  4  3  11   2.00  0.50  -0.40  0.30  -0.20  0.10
+"""
+        itp_path.write_text(topology)
+
+        config = SwarmConfig()
+        config.gromacs.gmx_path = gmx_path
+        config.gromacs.nb_threads = 1
+        config.cg_model.top_input_filename = "system.top"
+        config.cg_model.gro_input_filename = "start_conf.gro"
+        config.simulation.mdp_minimization_filename = str(tmp_path / "mini.mdp")
+        sim_config = select_class("minimization", config.simulation)
+        step = SimulationStep(config_to_runner(config, sim_config, "start_conf.gro"))
+        step.run(tmp_path)
+
+        assert (tmp_path / "mini.tpr").exists()
+        assert (tmp_path / "mini.gro").exists()
+        assert (tmp_path / "mini.log").exists()

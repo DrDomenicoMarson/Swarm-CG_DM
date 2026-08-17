@@ -4,6 +4,7 @@ from swarmcg.config_types import ReferenceModelConfig, SwarmConfig
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import get_logger
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters
 
 logger = get_logger(__name__)
 
@@ -102,6 +103,18 @@ def vs_error_control(cg_itp, bead_id, vs_type, func, line_nb, vs_def_beads_ids=N
 
 
 def validate_cg_itp(cg_itp, **kwargs):
+    """Validate mapped-bead count against a parsed CG topology.
+
+    Args:
+        cg_itp: Parsed CG topology.
+        **kwargs: ``all_beads`` supplies the mapping's real-bead definitions.
+
+    Returns:
+        ``True`` when no mapping was supplied or validation succeeds.
+
+    Raises:
+        MissformattedFile: If mapped and topology real-bead counts differ.
+    """
     # verify we have as many real CG beads (i.e. NOT virtual sites) in the ITP than in the mapping file
     if "all_beads" in kwargs:
         if len(kwargs["all_beads"]) != len(cg_itp["real_beads_ids"]):
@@ -110,12 +123,22 @@ def validate_cg_itp(cg_itp, **kwargs):
                 "Please check the NDX and ITP files you provided."
             )
             raise exceptions.MissformattedFile(msg)
-    else:
-        return True
+    return True
 
 
 def read_cg_itp_file(config: SwarmConfig):
-    """Read coarse-grain ITP
+    """Read, validate, and canonicalize a coarse-grained GROMACS ITP.
+
+    Args:
+        config: Validated application configuration containing the ITP path and
+            optional explicit parameter bounds.
+
+    Returns:
+        Structured :class:`CGITP` topology.
+
+    Raises:
+        MissformattedFile: If syntax, grouping, ReB ranges, coefficient shapes,
+            or explicit bounds are invalid.
     """
     logger.info("Reading Coarse-Grained (CG) ITP file")
     from swarmcg.io.itp import CGITP
@@ -345,6 +368,12 @@ def read_cg_itp_file(config: SwarmConfig):
                     cg_itp["angle"][nb_angles]["fct"].append(float(sp_itp_line[5]))
                     cg_itp["angle"][nb_angles]["fct_user"].append(float(sp_itp_line[5]))
 
+                    if func == 10 and not 10.0 <= float(sp_itp_line[4]) <= 170.0:
+                        raise exceptions.MissformattedFile(
+                            "Restricted-bending angle function 10 requires an equilibrium "
+                            f"angle in [10, 170] degrees (ITP line {i + 1})."
+                        )
+
                     if config.cg_model.user_input:
                         if func == 1 and not 0 <= float(
                                 sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f1:
@@ -407,6 +436,10 @@ def read_cg_itp_file(config: SwarmConfig):
                                 "Function 3/11 expects 6 parameters after the function id."
                             )
                             raise exceptions.MissformattedFile(msg)
+                        if func == 3:
+                            params = list(RBParameters.from_gromacs(params).to_gromacs())
+                        else:
+                            params = list(CBTParameters.from_gromacs(params).to_gromacs())
                         cg_itp["dihedral"][nb_dihedrals]["params"].append(params)
                         cg_itp["dihedral"][nb_dihedrals]["params_user"].append(list(params))
                     else:
@@ -440,19 +473,25 @@ def read_cg_itp_file(config: SwarmConfig):
                                                                                     config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     "-max_fct_dihedrals_f2"))
                         elif func == 3:
-                            max_abs = config.optimization.default_abs_range_fct_dihedrals_opti_func_rb
-                            if any(abs(param) > max_abs for param in cg_itp["dihedral"][nb_dihedrals]["params"][-1]):
+                            max_abs = config.optimization.max_abs_rb_coefficient
+                            independent = RBParameters.from_gromacs(
+                                cg_itp["dihedral"][nb_dihedrals]["params"][-1]
+                            ).coefficients
+                            if max_abs is not None and any(abs(param) > max_abs for param in independent):
                                 raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
                                                                                         -max_abs,
                                                                                         max_abs,
-                                                                                        "-max_fct_dihedrals_f3"))
+                                                                                        "-max_rb_coeff"))
                         elif func == 11:
-                            max_abs = config.optimization.default_abs_range_fct_dihedrals_opti_func_cbt
-                            if any(abs(param) > max_abs for param in cg_itp["dihedral"][nb_dihedrals]["params"][-1]):
+                            max_abs = config.optimization.max_abs_cbt_effective_coefficient
+                            effective = CBTParameters.from_gromacs(
+                                cg_itp["dihedral"][nb_dihedrals]["params"][-1]
+                            ).effective_coefficients
+                            if max_abs is not None and any(abs(param) > max_abs for param in effective):
                                 raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
                                                                                         -max_abs,
                                                                                         max_abs,
-                                                                                        "-max_fct_dihedrals_f11"))
+                                                                                        "-max_cbt_coeff"))
 
                     # handle multiplicity if function assumes multiplicity
                     from swarmcg import config as global_config

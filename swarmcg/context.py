@@ -26,7 +26,7 @@ class SimulationFiles:
 
 @dataclass
 class ScoringState:
-    """Stores state related to scoring, MDAnalysis universes, and histograms."""
+    """Store trajectory, mapping, plotting, and histogram-scoring state."""
     # Universes
     aa_universe: Any = None
     cg_universe: Any = None
@@ -43,10 +43,15 @@ class ScoringState:
     bins_angles: Any = None
     bins_dihedrals: Any = None
 
+    constraints_grid: Any = None
+    bonds_grid: Any = None
+    angles_grid: Any = None
+    dihedrals_grid: Any = None
+
     bins_constraints_dist_matrix: Any = None
     bins_bonds_dist_matrix: Any = None
     bins_angles_dist_matrix: Any = None
-    # bins_dihedrals_dist_matrix: Any = None 
+    bins_dihedrals_dist_matrix: Any = None
 
     # Plotting/Scoring configuration
     mismatch_order: bool = False
@@ -120,7 +125,7 @@ class OptimizationResults:
 
 @dataclass
 class ParticleSwarmState:
-    """Stores PSO specific state."""
+    """Store PSO state, independent bests, and failure penalties."""
     best_fitness: Tuple[float, Any] = field(default_factory=lambda: (np.inf, None))
     
     # Tracking best independent parameters
@@ -128,6 +133,9 @@ class ParticleSwarmState:
     all_best_params_dist_geoms: Dict = field(default_factory=dict)
     
     worst_fit_score: float = 0.0
+    failure_component_scores: Dict[str, float] = field(
+        default_factory=lambda: {"constraints_bonds": 0.0, "angles": 0.0, "dihedrals": 0.0}
+    )
     
     # Active set of geometries being optimized
     opti_geoms_all: Set = field(default_factory=set)
@@ -135,11 +143,7 @@ class ParticleSwarmState:
 
 @dataclass
 class OptimizationContext:
-    """
-    Context object to hold the state of the optimization process.
-    Refactored to compose granular state objects while maintaining 
-    backward compatibility via properties.
-    """
+    """Compose configuration and mutable state for evaluation or optimization."""
     config: SwarmConfig
     
     # Composed State Objects

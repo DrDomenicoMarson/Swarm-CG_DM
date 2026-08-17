@@ -108,6 +108,12 @@ class MissformattedFile(BaseError):
     pass
 
 
+class ScientificValidationError(BaseError):
+    """Raised when an accepted file is scientifically incompatible with a model form."""
+
+    pass
+
+
 class ComputationError(ExecError):
     pass
 

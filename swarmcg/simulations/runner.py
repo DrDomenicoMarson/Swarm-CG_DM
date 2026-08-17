@@ -1,27 +1,57 @@
-import time, subprocess, os, signal, shutil
+import os
+import shlex
+import signal
+import subprocess
+import tempfile
+import time
+from collections.abc import Sequence
 import swarmcg.shared.exceptions as exceptions
 import swarmcg.config as config
 from swarmcg.utils import print_stdout_forced
 from swarmcg.simulations.simulation_steps import select_class
 from swarmcg.config_types import SwarmConfig
 
-def exec_gmx(gmx_cmd):
-    """Execute gmx cmd and return only exit code"""
-    with subprocess.Popen([gmx_cmd], shell=True, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE) as gmx_process:
-        gmx_out = gmx_process.communicate()[1].decode()
-        gmx_process.kill()
-    if gmx_process.returncode != 0:
+
+def exec_gmx(gmx_cmd, *, stdin_text=None, cwd=None):
+    """Execute a GROMACS command without a shell and return its exit code.
+
+    Args:
+        gmx_cmd: Argument sequence. A legacy string is accepted and parsed with
+            :func:`shlex.split`, but shell operators are never interpreted.
+        stdin_text: Optional text supplied to the command's standard input.
+        cwd: Optional working directory.
+
+    Returns:
+        Process exit code.
+    """
+    cmd = shlex.split(gmx_cmd) if isinstance(gmx_cmd, str) else list(gmx_cmd)
+    completed = subprocess.run(
+        cmd,
+        input=stdin_text,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        check=False,
+    )
+    if completed.returncode != 0:
         print_stdout_forced(
-            'NON-ZERO EXIT CODE FOR COMMAND:', gmx_cmd, '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
+            "NON-ZERO EXIT CODE FOR COMMAND:",
+            shlex.join(cmd),
+            "\n\nCOMMAND OUTPUT:\n\n",
+            completed.stdout + completed.stderr,
+            "\n\n",
         )
-    return gmx_process.returncode
+    return completed.returncode
 
 
 class SimulationStep:
-    PREP_CMD = "{exec} grompp -c {gro} -f {mdp} -p {top} -o {md_output} -maxwarn {maxwarn}"
-    MD_CMD = "{exec} mdrun -deffnm {md_output}"
+    """Prepare and run one GROMACS simulation stage.
 
+    Args:
+        sim_setup: Runner settings containing executable, input basenames,
+            resource options, monitoring interval, and stage configuration.
+    """
     REQUIRED_FIELDS = ["exec", "gro", "mdp", "top", "md_output"]
 
     def __init__(self, sim_setup):
@@ -33,15 +63,23 @@ class SimulationStep:
         missing_args = ", ".join([i for i in SimulationStep.REQUIRED_FIELDS if i not in self.sim_setup.keys()])
         if missing_args:
             msg = (
-                "The following arguments are missing: {missing_args}. Please check you input."
+                f"The following arguments are missing: {missing_args}. Please check your input."
             )
             raise exceptions.InputArgumentError(msg)
 
     @staticmethod
     def _validate_exec(exec):
+        """Validate that a GROMACS executable can be launched.
+
+        Args:
+            exec: Executable name or path.
+
+        Raises:
+            ExecutableNotFound: If the executable cannot be launched.
+        """
         with open(os.devnull, 'w') as devnull:
             try:
-                subprocess.call(exec, stdout=devnull, stderr=devnull)
+                subprocess.call([exec, "--version"], stdout=devnull, stderr=devnull)
             except OSError:
                 msg = (
                     f"Cannot find GROMACS using alias {exec}, please provide "
@@ -58,28 +96,46 @@ class SimulationStep:
         return f"{self.sim_setup.get('md_output')}.gro"
 
     def _prepare_cmd(self, **kwargs):
-        return SimulationStep.PREP_CMD.format(**{**self.sim_setup, **kwargs})
+        setup = {**self.sim_setup, **kwargs}
+        return [
+            setup["exec"],
+            "grompp",
+            "-c",
+            setup["gro"],
+            "-f",
+            setup["mdp"],
+            "-p",
+            setup["top"],
+            "-o",
+            setup["md_output"],
+            "-maxwarn",
+            str(setup["maxwarn"]),
+        ]
 
     def _run_cmd(self, aux_command="", mpi=True):
-        cmd = SimulationStep.MD_CMD.format(**self.sim_setup)
+        cmd = [self.sim_setup["exec"], "mdrun", "-deffnm", self.sim_setup["md_output"]]
         if aux_command:
-            cmd = f"{cmd} {aux_command}"
+            cmd.extend(shlex.split(aux_command) if isinstance(aux_command, str) else aux_command)
 
-        threads = int(self.sim_setup.get("nb_threads"))
-        if threads > 0:
-            cmd = f"{cmd} -nt {threads}"
+        custom_args = self.sim_setup.get("gmx_args", ())
+        if custom_args:
+            cmd.extend(custom_args)
+        else:
+            threads = int(self.sim_setup.get("nb_threads"))
+            if threads > 0:
+                cmd.extend(["-nt", str(threads)])
 
-        omp_threads = int(self.sim_setup.get("ntomp", 0))
-        if omp_threads > 0:
-            cmd = f"{cmd} -ntomp {omp_threads}"
+            omp_threads = int(self.sim_setup.get("ntomp", 0))
+            if omp_threads > 0:
+                cmd.extend(["-ntomp", str(omp_threads)])
 
-        gpu = self.sim_setup.get("gpu_id")
-        if len(gpu) > 0:
-            cmd = f"{cmd} -gpu_id {gpu}"
+            gpu = self.sim_setup.get("gpu_id")
+            if gpu:
+                cmd.extend(["-gpu_id", str(gpu)])
 
         mpi_tasks = int(self.sim_setup.get("mpi_tasks"))
         if mpi and mpi_tasks > 0:
-            cmd = f"mpirun -np {mpi_tasks} {cmd}"
+            cmd = ["mpirun", "-np", str(mpi_tasks), *cmd]
         return cmd
 
     def _run_setup(self, exec_path):
@@ -90,7 +146,7 @@ class SimulationStep:
         return self
 
     def _run_prep(self, cmd, cwd=None):
-        with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, cwd=cwd) as gmx_process:
             out, err = gmx_process.communicate()
             gmx_out = f"STDOUT:\n{out.decode()}\nSTDERR:\n{err.decode()}"
@@ -100,11 +156,11 @@ class SimulationStep:
             return self
         else:
             print_stdout_forced(
-                'NON-ZERO EXIT CODE FOR COMMAND:', cmd, '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
+                'NON-ZERO EXIT CODE FOR COMMAND:', shlex.join(cmd), '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
             )
             msg = (
                 f"Gromacs grompp failed at MD {self.step_name} step.\n"
-                f"COMMAND: {cmd}\n"
+                f"COMMAND: {shlex.join(cmd)}\n"
                 f"OUTPUT:\n{gmx_out}\n"
                 f"You may also want to check the parameters of the MDP file provided through "
                 f"argument -{self.swarmcg_flag}. If you think this is a bug, please consider opening "
@@ -121,8 +177,13 @@ class SimulationStep:
 
         keep_alive_n_cycles = self.sim_setup.get("keep_alive_n_cycles")
         seconds_between_checks = self.sim_setup.get("seconds_between_checks")
-        with subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, preexec_fn=os.setsid, cwd=cwd) as gmx_process:
+        with tempfile.TemporaryFile() as process_output, subprocess.Popen(
+            cmd,
+            stdout=process_output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=cwd,
+        ) as gmx_process:
             while gmx_process.poll() is None:  # while process is alive
                 time.sleep(seconds_between_checks)
                 cycles_check += 1
@@ -145,8 +206,9 @@ class SimulationStep:
 
             gmx_process.kill()
             
-            # Capture output after process finishes
-            out, err = gmx_process.communicate()
+            gmx_process.wait()
+            process_output.seek(0)
+            output = process_output.read().decode(errors="replace")
             
         if _run_killed:
             msg = (
@@ -157,13 +219,13 @@ class SimulationStep:
             raise exceptions.ComputationError(msg)
             
         if gmx_process.returncode != 0:
-            gmx_out = f"STDOUT:\n{out.decode()}\nSTDERR:\n{err.decode()}"
+            gmx_out = output
             print_stdout_forced(
-                'NON-ZERO EXIT CODE FOR COMMAND:', cmd, '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
+                'NON-ZERO EXIT CODE FOR COMMAND:', shlex.join(cmd), '\n\nCOMMAND OUTPUT:\n\n', gmx_out, '\n\n'
             )
             msg = (
                 f"Gromacs mdrun failed at MD {self.step_name} step.\n"
-                f"COMMAND: {cmd}\n"
+                f"COMMAND: {shlex.join(cmd)}\n"
                 f"OUTPUT:\n{gmx_out}\n"
                 f"If you think this is a bug, please consider opening an issue on GitHub."
             )
@@ -172,15 +234,33 @@ class SimulationStep:
         return gmx_process.returncode
 
     def run(self, exec_path, aux_command=""):
-        # We use exec_path as the working directory for subprocesses
-        # This replaces the need to os.chdir to the directory
-        
+        """Write the MDP, preprocess it, and execute the simulation stage.
+
+        Args:
+            exec_path: Working directory for inputs and outputs.
+            aux_command: Additional argument string or sequence appended to
+                ``mdrun`` before configured resource arguments.
+
+        Returns:
+            GROMACS ``mdrun`` exit code (zero on success).
+
+        Raises:
+            ComputationError: If preprocessing, execution, or stall monitoring
+                reports a failure.
+        """
         prep_cmd = self._prepare_cmd()
         md_cmd = self._run_cmd(aux_command)
         return self._run_setup(exec_path)._run_prep(prep_cmd, cwd=exec_path)._run_md(md_cmd, cwd=exec_path)
 
 
-def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, nb_frames=None):
+def config_to_runner(
+    config: SwarmConfig,
+    sim_config,
+    prev_gro,
+    sim_time=None,
+    nb_frames=None,
+    gmx_args: Sequence[str] = (),
+):
     """
     Convert SwarmConfig and SimulationConfig into a runner-compatible dictionary.
 
@@ -190,10 +270,17 @@ def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, n
         prev_gro (str): Input structure file for this step.
         sim_time (float, optional): Overwrite simulation duration.
         nb_frames (int, optional): Overwrite number of frames.
+        gmx_args: Pre-parsed custom ``mdrun`` arguments. When nonempty these
+            replace the configured thread and GPU flags.
 
     Returns:
         dict: Setup dictionary for SimulationStep.
     """
+    if sim_time is not None and sim_time <= 0:
+        raise ValueError("simulation duration must be greater than zero")
+    if nb_frames is not None and nb_frames <= 0:
+        raise ValueError("production frame count must be greater than zero")
+
     simulation_setup = {
         "exec": config.gromacs.gmx_path,
         "gro": prev_gro,
@@ -205,6 +292,7 @@ def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, n
         "nb_threads": config.gromacs.nb_threads,
         "ntomp": config.gromacs.ntomp,
         "maxwarn": config.gromacs.mini_maxwarn,
+        "gmx_args": tuple(gmx_args),
 
         "swarmcg_flag": sim_config.swarmcg_flag,
         "step_name": sim_config.step_name,
@@ -216,22 +304,41 @@ def config_to_runner(config: SwarmConfig, sim_config, prev_gro, sim_time=None, n
         "simulation_config": sim_config,
     }
     
-    if sim_time:
+    if sim_time is not None:
         simulation_setup["sim_duration"] = sim_time
-    if nb_frames:
+    if nb_frames is not None:
         simulation_setup["prod_nb_frames"] = nb_frames
 
     return simulation_setup
 
 
 class SimulationManager:
-    """Manages the full lifecycle of a simulation (Mini -> Equi -> Prod)."""
+    """Manage the minimization, equilibration, and production lifecycle.
+
+    Args:
+        config: Validated application configuration. Free-form GROMACS
+            arguments are parsed exactly once during initialization.
+    """
     
     def __init__(self, config: SwarmConfig):
         self.config = config
+        self.gmx_args = tuple(shlex.split(config.gromacs.gmx_args_str))
 
     def run_simulation(self, working_dir, sim_time=None, nb_frames=None):
-        """Run the simulation chain in the specified working directory."""
+        """Run the complete simulation chain in a working directory.
+
+        Args:
+            working_dir: Directory containing staged GROMACS inputs.
+            sim_time: Optional positive production duration in nanoseconds.
+            nb_frames: Optional positive production frame count.
+
+        Returns:
+            ``True`` after all three stages complete.
+
+        Raises:
+            ValueError: If runtime duration or frame count is not positive.
+            ComputationError: If any GROMACS stage fails or stalls.
+        """
          
         # We no longer change global CWD
         
@@ -242,7 +349,14 @@ class SimulationManager:
         
         for step_type in steps:
             sim_config = select_class(step_type, self.config.simulation, base_dir=working_dir)
-            simulation_setup = config_to_runner(self.config, sim_config, prev_gro, sim_time, nb_frames)
+            simulation_setup = config_to_runner(
+                self.config,
+                sim_config,
+                prev_gro,
+                sim_time,
+                nb_frames,
+                self.gmx_args,
+            )
             
             step = SimulationStep(simulation_setup)
             step.run(working_dir) # executing in working_dir via cwd argument

@@ -1,0 +1,13 @@
+[ moleculetype ]
+; name  nrexcl
+REB       1
+
+[ atoms ]
+; id  type  resnr  residue  atom  cgnr  charge  mass
+1     P1    1      REB      B1    1     0.0     72.0
+2     P1    1      REB      B2    2     0.0     72.0
+3     P1    1      REB      B3    3     0.0     72.0
+
+[ angles ]
+; i  j  k  funct  theta0  ktheta
+1    2  3  10     120.0   25.0

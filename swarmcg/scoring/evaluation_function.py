@@ -14,32 +14,22 @@ from swarmcg.utils import print_stdout_forced
 
 
 def eval_function(parameters_set, ns: OptimizationContext):
-    """Evaluation function to be optimized using FST-PSO.
+    """Evaluate one FST-PSO particle through simulation and bonded scoring.
 
-    ns requires:
-        nb_eval (edited inplace)
-        best_fitness (edited inplace)
-        sasa_cg (edited inplace)
-        exec_folder
-        cg_itp_basename
-        opti_cycle
-        out_itp
-        worst_fit_score
+    Args:
+        parameters_set: Flat particle vector in the active cycle's free-
+            parameter order.
+        ns: Mutable optimization context containing topology, paths, counters,
+            theoretical failure bounds, and scoring state.
 
-    ns creates:
-        cg_tpr_filename
-        cg_traj_filename
-        plot_filename
-        all_emd_dist_geoms
-        gyr_cg
-        gyr_cg_std
-        sasa_cg_std
-        total_gmx_time
-        total_eval_time
-        total_model_eval_time
+    Returns:
+        Finite active-cycle objective. Failed evaluations return the next
+        representable float above the active theoretical score maximum.
 
-    pass ns to:
-       compare_models
+    Raises:
+        OSError: If mandatory evaluation workspace files cannot be staged or
+            recorded. Simulation and empty-distribution failures are converted
+            into the finite failure objective.
     """
     original_dir = os.getcwd()
     exec_dir = os.path.abspath(ns.files.exec_folder)
@@ -60,9 +50,9 @@ def eval_function(parameters_set, ns: OptimizationContext):
     
     eval_score = ns.pso.worst_fit_score
     fit_score_total = ns.pso.worst_fit_score
-    fit_score_constraints_bonds = ns.pso.worst_fit_score
-    fit_score_angles = ns.pso.worst_fit_score
-    fit_score_dihedrals = ns.pso.worst_fit_score
+    fit_score_constraints_bonds = ns.pso.failure_component_scores["constraints_bonds"]
+    fit_score_angles = ns.pso.failure_component_scores["angles"]
+    fit_score_dihedrals = ns.pso.failure_component_scores["dihedrals"]
     all_dist_pairwise = ""
     all_emd_dist_geoms = None
     new_best_fit = False
@@ -132,7 +122,10 @@ def eval_function(parameters_set, ns: OptimizationContext):
             scoring_failed = False
             try:
                 fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms = compare_models(
-                    ns, manual_mode=False, ignore_dihedrals=ignore_dihedrals, calc_sasa=True,
+                    ns,
+                    manual_mode=False,
+                    ignore_dihedrals=ignore_dihedrals,
+                    calc_sasa=ns.config.output.calculate_sasa,
                     record_best_indep_params=True)
             except exceptions.EmptyDistributionError as exc:
                 scoring_failed = True
@@ -144,25 +137,26 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 record_failure("crashed")
                 eval_score = ns.pso.worst_fit_score
                 fit_score_total = ns.pso.worst_fit_score
-                fit_score_constraints_bonds = ns.pso.worst_fit_score
-                fit_score_angles = ns.pso.worst_fit_score
-                fit_score_dihedrals = ns.pso.worst_fit_score
+                fit_score_constraints_bonds = ns.pso.failure_component_scores["constraints_bonds"]
+                fit_score_angles = ns.pso.failure_component_scores["angles"]
+                fit_score_dihedrals = ns.pso.failure_component_scores["dihedrals"]
                 ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
                 ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
             ns.status.total_model_eval_time += datetime.now().timestamp() - start_model_eval_ts
 
-            if not scoring_failed and ns.results.sasa_cg is not None:
+            if not scoring_failed:
 
-                shutil.move(
-                    "distributions.png",
-                    os.path.join(
-                        all_evals_dir,
-                        f"distributions_eval_step_{ns.status.nb_eval}.png",
-                    ),
-                )
+                if os.path.isfile("distributions.png"):
+                    shutil.move(
+                        "distributions.png",
+                        os.path.join(
+                            all_evals_dir,
+                            f"distributions_eval_step_{ns.status.nb_eval}.png",
+                        ),
+                    )
 
                 eval_score = 0
-                if "constraint" in ns.opti_cycle["geoms"] and "bond" in ns.opti_cycle["geoms"]:
+                if {"constraint", "bond"}.intersection(ns.opti_cycle["geoms"]):
                     eval_score += fit_score_constraints_bonds
                 if "angle" in ns.opti_cycle["geoms"]:
                     eval_score += fit_score_angles
@@ -170,7 +164,7 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     eval_score += fit_score_dihedrals
 
                 global_score = 0
-                if "constraint" in ns.pso.opti_geoms_all and "bond" in ns.pso.opti_geoms_all:
+                if {"constraint", "bond"}.intersection(ns.pso.opti_geoms_all):
                     global_score += fit_score_constraints_bonds
                 if "angle" in ns.pso.opti_geoms_all:
                     global_score += fit_score_angles
@@ -182,19 +176,6 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     ns.pso.best_fitness = global_score, ns.status.nb_eval
                     ns.pso.all_emd_dist_geoms = all_emd_dist_geoms
 
-            elif not scoring_failed:
-                print_stdout_forced(
-                    styling.header_warning
-                    + "SASA calculation failed; assigning worst score and continuing."
-                )
-                record_failure("crashed")
-                eval_score = ns.pso.worst_fit_score
-                fit_score_total = ns.pso.worst_fit_score
-                fit_score_constraints_bonds = ns.pso.worst_fit_score
-                fit_score_angles = ns.pso.worst_fit_score
-                fit_score_dihedrals = ns.pso.worst_fit_score
-                ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
-                ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
         else:
             if sim_failed:
                 print_stdout_forced(
@@ -215,9 +196,9 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 record_failure("crashed")
             eval_score = ns.pso.worst_fit_score
             fit_score_total = ns.pso.worst_fit_score
-            fit_score_constraints_bonds = ns.pso.worst_fit_score
-            fit_score_angles = ns.pso.worst_fit_score
-            fit_score_dihedrals = ns.pso.worst_fit_score
+            fit_score_constraints_bonds = ns.pso.failure_component_scores["constraints_bonds"]
+            fit_score_angles = ns.pso.failure_component_scores["angles"]
+            fit_score_dihedrals = ns.pso.failure_component_scores["dihedrals"]
             ns.results.gyr_cg, ns.results.gyr_cg_std, ns.results.sasa_cg, ns.results.sasa_cg_std = None, None, None, None
             ns.status.total_gmx_time += datetime.now().timestamp() - start_gmx_ts
 
@@ -262,11 +243,14 @@ def eval_function(parameters_set, ns: OptimizationContext):
             shutil.rmtree(current_eval_path)
 
         if eval_score == ns.pso.worst_fit_score:
-            all_dist_pairwise = ""
-            for _ in range(len(ns.cg_itp["constraint"]) + len(ns.cg_itp["bond"]) + len(ns.cg_itp["angle"]) + len(
-                    ns.cg_itp["dihedral"])):
-                all_dist_pairwise += str(config.sim_crash_EMD_indep_score) + " "
-            all_dist_pairwise += "\n"
+            geometry_count = sum(
+                len(ns.cg_itp[name])
+                for name in ("constraint", "bond", "angle", "dihedral")
+            )
+            all_dist_pairwise = "nan " * geometry_count + "\n"
+            print_stdout_forced(
+                f"  Evaluation failed; finite penalty objective: {eval_score}"
+            )
         else:
             print_stdout_forced("  Total mismatch score:", round(fit_score_total, 3), "(Bonds/Constraints:",
                                 fit_score_constraints_bonds, "-- Angles:", fit_score_angles, "-- Dihedrals:",
@@ -275,8 +259,10 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 print_stdout_forced("    --> Selected as new best bonded parametrization")
             print_stdout_forced(
                 f"  Rg CG:   {round(ns.results.gyr_cg, 2)} nm   (Error abs. {round(abs(1 - ns.results.gyr_cg / ns.results.gyr_aa_mapped) * 100, 1)}% -- Reference Rg AA-mapped: {ns.results.gyr_aa_mapped} nm)")
-            print_stdout_forced(
-                f"  SASA CG: {ns.results.sasa_cg} nm2   (Error abs. {round(abs(1 - ns.results.sasa_cg / ns.results.sasa_aa_mapped) * 100, 1)}% -- Reference SASA AA-mapped: {ns.results.sasa_aa_mapped} nm2)")
+            if ns.config.output.calculate_sasa and ns.results.sasa_cg is not None:
+                print_stdout_forced(
+                    f"  SASA CG: {ns.results.sasa_cg} nm2   (Error abs. {round(abs(1 - ns.results.sasa_cg / ns.results.sasa_aa_mapped) * 100, 1)}% -- Reference SASA AA-mapped: {ns.results.sasa_aa_mapped} nm2)"
+                )
 
         current_total_time = round((datetime.now().timestamp() - ns.status.start_opti_ts) / (60 * 60), 2)
         current_eval_time = datetime.now().timestamp() - start_eval_ts

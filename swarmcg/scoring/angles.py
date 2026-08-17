@@ -3,7 +3,17 @@ import numpy as np
 
 
 def get_AA_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
-    """Calculate angles distribution from AA trajectory."""
+    """Calculate an AA-mapped angle mean and normalized distribution.
+
+    Args:
+        universe: MDAnalysis universe containing the mapped AA trajectory.
+        beads_ids: Triplets of zero-based bead indices.
+        bins: Optional histogram edges in degrees.
+        bandwidth: Retained for API compatibility; normalization uses counts.
+
+    Returns:
+        Mean angle, probability masses, degree values, and radian values.
+    """
     angle_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
@@ -30,13 +40,24 @@ def get_AA_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
     
     angle_hist = None
     if bins is not None and bandwidth is not None:
-        angle_hist = np.histogram(angle_values_deg, bins, density=True)[0] * bandwidth
+        counts = np.histogram(angle_values_deg, bins, density=False)[0]
+        angle_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
 
     return angle_avg, angle_hist, angle_values_deg, angle_values_rad
 
 
 def get_CG_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
-    """Calculate angles using MDAnalysis."""
+    """Calculate a CG angle mean and normalized distribution.
+
+    Args:
+        universe: MDAnalysis universe containing the CG trajectory.
+        beads_ids: Triplets of zero-based bead indices.
+        bins: Optional histogram edges in degrees.
+        bandwidth: Retained for API compatibility; normalization uses counts.
+
+    Returns:
+        Mean angle, probability masses, degree values, and radian values.
+    """
     angle_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
     bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
@@ -65,6 +86,7 @@ def get_CG_angles_distrib(universe, beads_ids, bins=None, bandwidth=None):
     
     angle_hist = None
     if bins is not None and bandwidth is not None:
-        angle_hist = np.histogram(angle_values_deg, bins, density=True)[0] * bandwidth
+        counts = np.histogram(angle_values_deg, bins, density=False)[0]
+        angle_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
 
     return angle_avg, angle_hist, angle_values_deg, angle_values_rad

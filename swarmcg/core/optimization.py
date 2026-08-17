@@ -22,6 +22,12 @@ from swarmcg.context import OptimizationContext
 logger = get_logger(__name__)
 
 class SwarmOptimizer:
+    """Coordinate staged fuzzy-PSO bonded-parameter optimization.
+
+    Args:
+        config_obj: Validated application configuration.
+    """
+
     def __init__(self, config_obj):
         self.config = config_obj
         self.ns = OptimizationContext(config=config_obj)
@@ -29,8 +35,11 @@ class SwarmOptimizer:
     @catch_warnings(ImportWarning)
     @catch_warnings(UserWarning)
     def run(self):
-        """
-        Main execution logic for model optimization.
+        """Run validation, reference mapping, three PSO cycles, and reporting.
+
+        Raises:
+            BaseError: If input validation, mapping, topology, or GROMACS
+                execution cannot be completed.
         """
         self._initialize_context()
         self._setup_execution()
@@ -112,7 +121,11 @@ class SwarmOptimizer:
             fp.write(f"# nb dihedrals: {self.ns.cg_itp['nb_dihedrals']}\n")
             fp.write("#\n")
             fp.write(
-                "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles fit_score_dihedrals eval_score Rg_AA_mapped Rg_CG parameters_set eval_time current_total_time\n")
+                "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles "
+                "fit_score_dihedrals eval_score Rg_AA_mapped Rg_AA_mapped_std Rg_CG "
+                "Rg_CG_std SASA_AA_mapped SASA_AA_mapped_std SASA_CG SASA_CG_std "
+                "parameters_set eval_time current_total_time\n"
+            )
         
         with open(os.path.join(self.ns.files.exec_folder, config.opti_pairwise_distances_file), "w"):
             pass
@@ -150,7 +163,7 @@ class SwarmOptimizer:
         # Initialize tracking dictionaries
         for geom_type in ["constraints", "bonds", "angles", "dihedrals"]:
             nb_geom = self.ns.cg_itp[f"nb_{geom_type}"]
-            self.ns.pso.all_best_emd_dist_geoms[geom_type] = {i: config.sim_crash_EMD_indep_score for i in range(nb_geom)}
+            self.ns.pso.all_best_emd_dist_geoms[geom_type] = {i: np.nan for i in range(nb_geom)}
             self.ns.pso.all_best_params_dist_geoms[geom_type] = {i: {} for i in range(nb_geom)}
 
         for i, cycle_geoms in enumerate(opti_cycles):
@@ -212,6 +225,11 @@ class SwarmOptimizer:
             config_obj=self.ns.config,
         )
 
+        if self.config.optimization.sim_type == "OPTIMAL":
+            self.ns.status.max_swarm_iter = int(
+                round(6 + np.sqrt(len(search_space_boundaries)))
+            )
+
         self._calculate_worst_fit_score()
 
         nb_particles = particle_setter(search_space_boundaries)
@@ -250,6 +268,10 @@ class SwarmOptimizer:
             parameters_set=result[0].X,
             exec_mode=self.config.optimization.exec_mode,
         )
+        # Every cycle is a mandatory staged refinement of the cycle optimum.
+        # The separately tracked global score still controls the final best-model
+        # directory and is intentionally not used as the next-cycle baseline.
+        self.ns.opti_itp = copy.deepcopy(self.ns.out_itp)
 
     def _update_geom_counts_for_cycle(self):
         if "constraint" in self.ns.opti_cycle["geoms"]:
@@ -272,11 +294,43 @@ class SwarmOptimizer:
         return " & ".join(geoms_display)
 
     def _calculate_worst_fit_score(self):
-        self.ns.pso.worst_fit_score = round( \
-            np.sqrt((self.ns.cg_itp["nb_constraints"] + self.ns.cg_itp["nb_bonds"]) * config.sim_crash_EMD_indep_score) + \
-            np.sqrt(self.ns.cg_itp["nb_angles"] * config.sim_crash_EMD_indep_score) + \
-            np.sqrt(self.ns.cg_itp["nb_dihedrals"] * config.sim_crash_EMD_indep_score) \
-            , 3)
+        """Set a finite failure objective strictly above any valid cycle score."""
+        active = set(self.ns.opti_cycle["geoms"])
+        factor = self.config.optimization.bonds2angles_scoring_factor
+
+        constraint_max = float(np.max(self.ns.scoring.constraints_grid.cost_matrix)) * factor
+        bond_max = float(np.max(self.ns.scoring.bonds_grid.cost_matrix)) * factor
+        angle_max = float(np.max(self.ns.scoring.angles_grid.cost_matrix))
+        dihedral_max = float(np.max(self.ns.scoring.dihedrals_grid.cost_matrix))
+
+        bonded_class_active = bool({"constraint", "bond"}.intersection(active))
+        constraints_bonds = (
+            np.sqrt(
+                self.ns.cg_itp["nb_constraints"] * constraint_max**2
+                + self.ns.cg_itp["nb_bonds"] * bond_max**2
+            )
+            if bonded_class_active
+            else 0.0
+        )
+        angles = (
+            np.sqrt(self.ns.cg_itp["nb_angles"] * angle_max**2)
+            if "angle" in active
+            else 0.0
+        )
+        dihedrals = (
+            np.sqrt(self.ns.cg_itp["nb_dihedrals"] * dihedral_max**2)
+            if "dihedral" in active
+            else 0.0
+        )
+        self.ns.pso.failure_component_scores = {
+            "constraints_bonds": float(constraints_bonds),
+            "angles": float(angles),
+            "dihedrals": float(dihedrals),
+        }
+        theoretical_maximum = constraints_bonds + angles + dihedrals
+        self.ns.pso.worst_fit_score = float(
+            np.nextafter(theoretical_maximum, np.inf)
+        )
 
     def _finalize_optimization(self):
         shutil.rmtree(os.path.join(self.ns.files.exec_folder, config.input_sim_files_dirname))

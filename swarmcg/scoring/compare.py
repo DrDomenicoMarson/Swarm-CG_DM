@@ -64,15 +64,25 @@ def _empty_bond_constraint_message(
 
 def compare_models(context: OptimizationContext, manual_mode: bool = True, ignore_dihedrals: bool = False, 
                   calc_sasa: bool = False, record_best_indep_params: bool = False):
-    """
-    Compare 2 models -- atomistic and CG models with plotting.
-    
+    """Compare mapped atomistic and CG bonded distributions and plot them.
+
     Args:
-        context (OptimizationContext): The optimization context containing configuration and state.
-        manual_mode (bool): Whether running in manual mode (scg_evaluate) or optimization mode.
-        ignore_dihedrals (bool): If True, exclude dihedrals from scoring.
-        calc_sasa (bool): Whether to calculate and compare SASA.
-        record_best_indep_params (bool): Use independent parameter recording (optimization feature).
+        context: Optimization context containing configuration and runtime state.
+        manual_mode: Whether to recalculate reference distributions for
+            ``scg_evaluate`` rather than use cached optimization targets.
+        ignore_dihedrals: Exclude dihedrals from the cycle objective.
+        calc_sasa: Calculate SASA after fitness as a nonfatal diagnostic.
+        record_best_indep_params: Record the best parameters for each geometry
+            independently during optimization.
+
+    Returns:
+        In optimization mode, the fitness total, three class contributions,
+        pairwise-score record, and per-geometry EMD dictionary. Manual and
+        AA-only inspection modes return ``None`` after writing the plot.
+
+    Raises:
+        EmptyDistributionError: If a bond/constraint histogram has no support
+            on the configured grid.
     """
     ns = context # Alias for backward compatibility during refactoring
     
@@ -88,12 +98,24 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     row_wise_ranges["max_range_dihedrals"] = 0
 
     if ns.scoring.atom_only:
-        # scores.compute_Rg(ns, traj_type="AA")
         ns.scoring.gyr_aa, ns.scoring.gyr_aa_std = scores.compute_Rg(ns.scoring.aa_universe, ns.scoring.aa_universe.atoms[:len(ns.scoring.all_atoms)], backend=ns.scoring.mda_backend)
         logger.info(
             "Radius of gyration (AA reference, NOT CG-mapped): %s nm",
             ns.scoring.gyr_aa,
         )
+        mapped_masses = np.asarray(ns.scoring.aa2cg_universe.atoms.masses, dtype=float)
+        if np.all(np.isfinite(mapped_masses)) and np.all(mapped_masses > 0):
+            ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(
+                ns.scoring.aa2cg_universe,
+                ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])],
+                backend=ns.scoring.mda_backend,
+                offset=ns.config.reference.aa_rg_offset,
+            )
+            logger.info(
+                "Radius of gyration (AA reference, CG-mapped): %s +/- %s nm",
+                ns.results.gyr_aa_mapped,
+                ns.results.gyr_aa_mapped_std,
+            )
 
     # proceed with CG data
     if not ns.scoring.atom_only:
@@ -150,19 +172,6 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         )
 
 
-
-        if calc_sasa:
-            if ns.results.sasa_aa_mapped is None:
-                # scores.compute_SASA(ns, traj_type="AA_mapped")
-                ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="AA_mapped")
-
-            # scores.compute_SASA(ns, traj_type="CG")
-            ns.results.sasa_cg, ns.results.sasa_cg_std = scores.compute_SASA(config_obj, ns.cg_itp, traj_type="CG")
-            logger.info("")
-
-            # this line checks that gmx trjconv could read the md.xtc trajectory from the opti
-            if ns.results.sasa_cg is None:
-                return 0, 0, 0, 0, 0, None  # ns.sasa_cg == None will be checked in eval_function and worst score will be attributed
 
     logger.info("")
     logger.info(styling.sep_close)
@@ -801,81 +810,78 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     all_emd_dist_geoms = {"constraints": [], "bonds": [], "angles": [], "dihedrals": []}
 
     if not ns.scoring.atom_only:
-        fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals = 0, 0, 0, 0
-
         for i in range(ns.cg_itp["nb_constraints"]):
-            dist_pairwise = avg_diff_grp_constraints[diff_ordered_grp_constraints[i]]
+            group_index = diff_ordered_grp_constraints[i]
+            dist_pairwise = avg_diff_grp_constraints[group_index]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["constraints"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["constraints"][i]:
-                    ns.pso.all_best_emd_dist_geoms["constraints"][i] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["constraints"][i]["params"] = [ns.out_itp["constraint"][i]["value"]]
-
-            dist_pairwise = dist_pairwise ** 2
-            fit_score_constraints_bonds += dist_pairwise
+                previous = ns.pso.all_best_emd_dist_geoms["constraints"][group_index]
+                if not np.isfinite(previous) or dist_pairwise < previous:
+                    ns.pso.all_best_emd_dist_geoms["constraints"][group_index] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["constraints"][group_index]["params"] = [ns.out_itp["constraint"][group_index]["value"]]
 
         for i in range(ns.cg_itp["nb_bonds"]):
-            dist_pairwise = avg_diff_grp_bonds[diff_ordered_grp_bonds[i]]
+            group_index = diff_ordered_grp_bonds[i]
+            dist_pairwise = avg_diff_grp_bonds[group_index]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["bonds"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["bonds"][i]:
-                    ns.pso.all_best_emd_dist_geoms["bonds"][i] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["bonds"][i]["params"] = [ns.out_itp["bond"][i]["value"],
-                                                                           ns.out_itp["bond"][i]["fct"]]
-
-            dist_pairwise = dist_pairwise ** 2
-            fit_score_constraints_bonds += dist_pairwise
+                previous = ns.pso.all_best_emd_dist_geoms["bonds"][group_index]
+                if not np.isfinite(previous) or dist_pairwise < previous:
+                    ns.pso.all_best_emd_dist_geoms["bonds"][group_index] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["bonds"][group_index]["params"] = [ns.out_itp["bond"][group_index]["value"],
+                                                                           ns.out_itp["bond"][group_index]["fct"]]
 
         for i in range(ns.cg_itp["nb_angles"]):
-            dist_pairwise = avg_diff_grp_angles[diff_ordered_grp_angles[i]]
+            group_index = diff_ordered_grp_angles[i]
+            dist_pairwise = avg_diff_grp_angles[group_index]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["angles"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params:
-                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["angles"][i]:
-                    ns.pso.all_best_emd_dist_geoms["angles"][i] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["angles"][i]["params"] = [ns.out_itp["angle"][i]["value"],
-                                                                            ns.out_itp["angle"][i]["fct"]]
-
-            dist_pairwise = dist_pairwise ** 2
-            fit_score_angles += dist_pairwise
+                previous = ns.pso.all_best_emd_dist_geoms["angles"][group_index]
+                if not np.isfinite(previous) or dist_pairwise < previous:
+                    ns.pso.all_best_emd_dist_geoms["angles"][group_index] = dist_pairwise
+                    ns.pso.all_best_params_dist_geoms["angles"][group_index]["params"] = [ns.out_itp["angle"][group_index]["value"],
+                                                                            ns.out_itp["angle"][group_index]["fct"]]
 
         # dihedrals_dist_pairwise = 0
         for i in range(ns.cg_itp["nb_dihedrals"]):
-            dist_pairwise = avg_diff_grp_dihedrals[diff_ordered_grp_dihedrals[i]]
+            group_index = diff_ordered_grp_dihedrals[i]
+            dist_pairwise = avg_diff_grp_dihedrals[group_index]
             all_dist_pairwise += str(dist_pairwise) + " "
             all_emd_dist_geoms["dihedrals"].append(dist_pairwise)
 
             # keep track of independent best parameters
             if record_best_indep_params and not ignore_dihedrals:
-                if dist_pairwise < ns.pso.all_best_emd_dist_geoms["dihedrals"][i]:
-                    ns.pso.all_best_emd_dist_geoms["dihedrals"][i] = dist_pairwise
-                    func = ns.cg_itp["dihedral"][i]["func"]
+                previous = ns.pso.all_best_emd_dist_geoms["dihedrals"][group_index]
+                if not np.isfinite(previous) or dist_pairwise < previous:
+                    ns.pso.all_best_emd_dist_geoms["dihedrals"][group_index] = dist_pairwise
+                    func = ns.cg_itp["dihedral"][group_index]["func"]
                     if func in (3, 11):
-                        params = list(ns.out_itp["dihedral"][i]["params"])
+                        params = list(ns.out_itp["dihedral"][group_index]["params"])
                     else:
-                        params = [ns.out_itp["dihedral"][i]["value"], ns.out_itp["dihedral"][i]["fct"]]
-                    ns.pso.all_best_params_dist_geoms["dihedrals"][i]["params"] = params
+                        params = [ns.out_itp["dihedral"][group_index]["value"], ns.out_itp["dihedral"][group_index]["fct"]]
+                    ns.pso.all_best_params_dist_geoms["dihedrals"][group_index]["params"] = params
 
-            dist_pairwise = dist_pairwise ** 2
-            fit_score_dihedrals += dist_pairwise
+        (
+            fit_score_total,
+            fit_score_constraints_bonds,
+            fit_score_angles,
+            fit_score_dihedrals,
+        ) = scores.compose_classwise_l2_score(
+            all_emd_dist_geoms["constraints"],
+            all_emd_dist_geoms["bonds"],
+            all_emd_dist_geoms["angles"],
+            all_emd_dist_geoms["dihedrals"],
+        )
 
-        fit_score_constraints_bonds = np.sqrt(fit_score_constraints_bonds)
-        fit_score_angles = np.sqrt(fit_score_angles)
-        fit_score_dihedrals = np.sqrt(fit_score_dihedrals)
-
-        fit_score_total = fit_score_constraints_bonds + fit_score_angles + fit_score_dihedrals
-
-        fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals = round(fit_score_total,
-                                                                                                    3), round(
-            fit_score_constraints_bonds, 3), round(fit_score_angles, 3), round(fit_score_dihedrals, 3)
         all_dist_pairwise += "\n"
         logger.info("")
         logger.info(
@@ -883,19 +889,24 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             ns.config.optimization.bonds2angles_scoring_factor,
         )
         logger.info("")
-        logger.info("Global fitness score: %s (lower is better)", fit_score_total)
+        logger.info("Global fitness score: %s (lower is better)", round(fit_score_total, 3))
         logger.info(
             "  Bonds/Constraints constribution to fitness score: %s",
-            fit_score_constraints_bonds,
+            round(fit_score_constraints_bonds, 3),
         )
-        logger.info("  Angles constribution to fitness score: %s", fit_score_angles)
-        logger.info("  Dihedrals constribution to fitness score: %s", fit_score_dihedrals)
+        logger.info("  Angles constribution to fitness score: %s", round(fit_score_angles, 3))
+        logger.info("  Dihedrals constribution to fitness score: %s", round(fit_score_dihedrals, 3))
 
         plt.tight_layout(rect=[0, 0, 1, 0.9])
         eval_score = fit_score_total
         if ignore_dihedrals and ns.cg_itp["nb_dihedrals"] > 0:
             eval_score -= fit_score_dihedrals
-        sup_title = f"FITNESS SCORE\nTotal: {round(eval_score, 3)} -- Constraints/Bonds: {fit_score_constraints_bonds} -- Angles: {fit_score_angles} -- Dihedrals: {fit_score_dihedrals}"
+        sup_title = (
+            f"FITNESS SCORE\nTotal: {round(eval_score, 3)} -- "
+            f"Constraints/Bonds: {round(fit_score_constraints_bonds, 3)} -- "
+            f"Angles: {round(fit_score_angles, 3)} -- "
+            f"Dihedrals: {round(fit_score_dihedrals, 3)}"
+        )
         if ignore_dihedrals and ns.cg_itp["nb_dihedrals"] > 0:
             sup_title += " (ignored)"
         plt.suptitle(sup_title)
@@ -908,6 +919,36 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     logger.info("")
     logger.info("Distributions plot written at location:\n %s", ns.files.plot_filename)
     logger.info("")
+
+    # SASA is deliberately computed only after the complete fitness and plot
+    # have succeeded. It is diagnostic state and cannot participate in model
+    # selection, even when explicitly requested.
+    if calc_sasa and not ns.scoring.atom_only:
+        try:
+            if ns.results.sasa_aa_mapped is None:
+                ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std = scores.compute_SASA(
+                    ns, traj_type="AA_mapped"
+                )
+            ns.results.sasa_cg, ns.results.sasa_cg_std = scores.compute_SASA(
+                ns, traj_type="CG"
+            )
+            logger.info(
+                "SASA (AA reference, CG-mapped): %s +/- %s nm2",
+                ns.results.sasa_aa_mapped,
+                ns.results.sasa_aa_mapped_std,
+            )
+            logger.info(
+                "SASA (CG model): %s +/- %s nm2",
+                ns.results.sasa_cg,
+                ns.results.sasa_cg_std,
+            )
+        except Exception as exc:
+            ns.results.sasa_cg = ns.results.sasa_cg_std = None
+            logger.warning(
+                "Optional SASA diagnostic failed and will not affect fitness: %s",
+                exc,
+            )
+        logger.info("")
 
     if not manual_mode and not ns.scoring.atom_only:
         return fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, all_dist_pairwise, all_emd_dist_geoms

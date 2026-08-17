@@ -16,7 +16,9 @@ def mock_sim_setup():
         "swarmcg_flag": "flag",
         "step_name": "minimization",
         "nb_threads": 1,
+        "ntomp": 2,
         "gpu_id": "",
+        "gmx_args": (),
         "mpi_tasks": 0,
         "monitor_file": "output.log",
         "keep_alive_n_cycles": 10,
@@ -34,6 +36,35 @@ def test_simulation_step_validation(mock_sim_setup):
     del mock_sim_setup["exec"]
     with pytest.raises(Exception): # expecting InputArgumentError which inherits from Exception
         SimulationStep(mock_sim_setup)
+
+
+def test_custom_gromacs_arguments_replace_thread_and_gpu_flags(mock_sim_setup):
+    mock_sim_setup.update(
+        {
+            "nb_threads": 8,
+            "ntomp": 4,
+            "gpu_id": "0",
+            "gmx_args": ("-pin", "on", "-nt", "3"),
+            "mpi_tasks": 2,
+        }
+    )
+    command = SimulationStep(mock_sim_setup)._run_cmd()
+
+    assert command == [
+        "mpirun", "-np", "2", "gmx", "mdrun", "-deffnm", "output",
+        "-pin", "on", "-nt", "3",
+    ]
+    assert "-ntomp" not in command
+    assert "-gpu_id" not in command
+
+
+def test_gromacs_command_preserves_paths_with_spaces(mock_sim_setup):
+    mock_sim_setup["gro"] = "/tmp/a path/input.gro"
+    mock_sim_setup["mdp"] = "/tmp/a path/run.mdp"
+    command = SimulationStep(mock_sim_setup)._prepare_cmd()
+
+    assert "/tmp/a path/input.gro" in command
+    assert "/tmp/a path/run.mdp" in command
 
 @patch("subprocess.Popen")
 @patch("os.path.isfile", return_value=True)

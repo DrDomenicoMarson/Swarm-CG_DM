@@ -24,6 +24,7 @@ def get_evaluate_args():
     # optional_args.add_argument("-nb_threads", dest="nb_threads", help="number of threads to use", type=int, default=1, metavar="1") # TODO: does NOT work properly -- modif MDAnalysis code with OpenMP num_threads(n) in the pragma
     for arg in ["bonds_scaling", "bonds_scaling_str", "min_bonds_length", "b2a_score_fact"]:
         optional_args.add_argument(f"-{arg}", **getattr(defaults, arg).args)
+    optional_args.add_argument("-sasa", "--sasa", **defaults.sasa.args)
 
     graphical_args = args_parser.add_argument_group(bullet + "FIGURE DISPLAY")
     for arg in ["mismatch_ordering", "bw_constraints", "bw_bonds", "bw_angles", "bw_dihedrals",

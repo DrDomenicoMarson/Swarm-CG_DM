@@ -17,12 +17,14 @@ matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend sui
 
 logger = get_logger(__name__)
 
-def run(config_obj: SwarmConfig):
-    """
-    Main execution logic for model evaluation.
-    
+def run(config_obj: SwarmConfig) -> None:
+    """Evaluate an AA-mapped model alone or compare it with a CG trajectory.
+
     Args:
-        config_obj (SwarmConfig): The configuration object containing all runtime parameters.
+        config_obj: Validated runtime configuration.
+
+    Raises:
+        FileNotFoundError: If a required AA, mapping, or ITP input is missing.
     """
     # Create context
     ns = OptimizationContext(config=config_obj)
@@ -39,56 +41,61 @@ def run(config_obj: SwarmConfig):
 
     # TODO: make it possible to feed a delta/offset for Rg in case the model has bonds scaling ?
 
-    # get basenames for simulation files
-    ns.cg_itp_basename = os.path.basename(ns.cg_itp_filename)
+    ns.files.cg_itp_basename = os.path.basename(config_obj.cg_model.cg_itp_filename)
+    ns.files.cg_tpr_filename = config_obj.cg_model.cg_tpr_filename
+    ns.files.cg_traj_filename = config_obj.cg_model.cg_traj_filename
+    ns.files.plot_filename = _normalized_plot_filename(config_obj.output.plot_filename)
+    ns.scoring.molname_in = None
+    ns.scoring.mda_backend = "serial"
 
-    # Initialize context variables
-    ns.molname_in = None
-    ns.gyr_aa_mapped, ns.gyr_aa_mapped_std = None, None
-    ns.sasa_aa_mapped, ns.sasa_aa_mapped_std = None, None
-
-    # scg.set_MDA_backend(ns)
-    ns.mda_backend = "serial"  # actually serial is faster because MDA is not properly parallelized atm
-
-    # TODO: this eventually will need to be taked out of this function when we can avoid adding new attributed to ns
-    # ns.mapping_type = ns.mapping_type.upper() # Handled by Config usually, or we ensure it
-    
-    # Ideally should use config object directly, but input_parameter_validation is legacy
-    # Validate files existence
-    try:
-        config_obj.validate_files_exist()
-    except FileNotFoundError as e:
-        logger.error("%s", e)
-        sys.exit(1)
+    config_obj.validate_files_exist()
 
     # Create Evaluator
     from swarmcg.scoring.evaluator import SwarmEvaluator
     ns.evaluator = SwarmEvaluator(config_obj)
 
     # display parameters for function compare_models
-    if not os.path.isfile(ns.cg_tpr_filename) or not os.path.isfile(ns.cg_traj_filename):
+    cg_topology_exists = os.path.isfile(ns.files.cg_tpr_filename)
+    cg_trajectory_exists = os.path.isfile(ns.files.cg_traj_filename)
+    if not cg_topology_exists or not cg_trajectory_exists:
         # switch to atomistic mapping inspection exclusively (= do NOT plot the CG distributions)
         logger.warning("Could not find file(s) for either CG topology or trajectory")
         logger.info("  Going for inspection of AA-mapped distributions exclusively")
         logger.info("")
-        ns.atom_only = True
+        ns.scoring.atom_only = True
     else:
-        ns.atom_only = False
+        ns.scoring.atom_only = False
 
-    try:
-        if not ns.plot_filename.split(".")[-1] in ["eps", "pdf", "pgf", "png", "ps", "raw", "rgba", "svg", "svgz"]:
-            ns.plot_filename = ns.plot_filename + ".png"
-    except IndexError as e:
-        ns.plot_filename = ns.plot_filename + ".png"
+    calculate_sasa = config_obj.output.calculate_sasa
+    if calculate_sasa and ns.scoring.atom_only:
+        logger.warning("SASA requires a CG topology and trajectory; skipping SASA in AA-only mode.")
+        calculate_sasa = False
 
     # Initialize Evaluator (loads AA reference, mapping, maps AA->CG)
     ns.evaluator.initialize(ns)
 
     # Run comparison
-    compare_models(ns, manual_mode=True, calc_sasa=False)
+    compare_models(ns, manual_mode=True, calc_sasa=calculate_sasa)
+
+
+def _normalized_plot_filename(filename: str) -> str:
+    """Return an absolute plot filename with a supported extension.
+
+    Args:
+        filename: User-supplied plot path.
+
+    Returns:
+        Absolute plot path. ``.png`` is appended when the supplied extension
+        is absent or unsupported.
+    """
+    supported = {".eps", ".pdf", ".pgf", ".png", ".ps", ".raw", ".rgba", ".svg", ".svgz"}
+    root, extension = os.path.splitext(filename or "distributions.png")
+    normalized = filename if extension.lower() in supported else f"{filename or root or 'distributions'}.png"
+    return os.path.abspath(normalized)
 
 
 def main():
+    """Parse ``scg_evaluate`` arguments and run model assessment."""
     module_name = "evaluate"
     setup_logging(module_name=module_name, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
     logger = get_logger(__name__)

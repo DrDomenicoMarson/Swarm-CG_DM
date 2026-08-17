@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarm-cg"
+dynamic = ["version"]
+description = "Automatic parametrization of bonded terms in coarse-grained molecular models"
+readme = "README.md"
+requires-python = ">=3.13"
+license = {file = "LICENSE.txt"}
+authors = [
+  {name = "Charly Empereur-mot", email = "charly.empereur@gmail.com"},
+]
+keywords = ["gromacs", "coarse-grain", "molecular model", "optimization", "force field"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy>=2.1",
+  "scipy>=1.14",
+  "pyemd>=1.0.0",
+  "matplotlib>=3.9",
+  "fst-pso>=1.4.12",
+  "MDAnalysis>=2.8",
+  "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/GMPavanLab/Swarm-CG"
+Issues = "https://github.com/GMPavanLab/Swarm-CG/issues"
+
+[project.scripts]
+scg_optimize = "swarmcg.optimize_model:main"
+scg_evaluate = "swarmcg.evaluate_model:main"
+scg_monitor = "swarmcg.analyze_optimization:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "swarmcg.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["swarmcg", "swarmcg.*"]
+
+[tool.setuptools.package-data]
+swarmcg = ["data/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

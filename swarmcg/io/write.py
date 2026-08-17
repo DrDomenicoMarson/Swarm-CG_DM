@@ -1,7 +1,20 @@
-def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond", "angle", "dihedral", "exclusion"]):
-    """Print coarse-grain ITP. Here we have a switch for print_sections because we might want
-    to optimize constraints/bonds/angles/dihedrals separately, so we can leave some out with
-    the switch and they will be optimized later"""
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters
+from swarmcg.shared.periodic import normalize_periodic_degrees
+
+
+def write_cg_itp_file(
+    itp_obj,
+    out_path_itp,
+    print_sections=("constraint", "bond", "angle", "dihedral", "exclusion"),
+):
+    """Write a canonical coarse-grained GROMACS ITP file.
+
+    Args:
+        itp_obj: Parsed topology object.
+        out_path_itp: Destination path.
+        print_sections: Geometry sections to include. Sections omitted during
+            staged optimization are restored in later cycles.
+    """
     with open(out_path_itp, "w") as fp:
 
         fp.write("[ moleculetype ]\n")
@@ -94,8 +107,12 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
 
                     func = itp_obj["dihedral"][j]["func"]
                     if func in (3, 11):
-                        params = itp_obj["dihedral"][j]["params"]
-                        params_str = " ".join(f"{param:9.2f}" for param in params)
+                        raw_params = itp_obj["dihedral"][j]["params"]
+                        if func == 3:
+                            params = RBParameters.from_gromacs(raw_params).to_gromacs()
+                        else:
+                            params = CBTParameters.from_gromacs(raw_params).to_gromacs()
+                        params_str = " ".join(f"{param:13.8g}" for param in params)
                         fp.write(
                             "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7} {1}     ; {2}\n".format(
                                 func,
@@ -108,6 +125,7 @@ def write_cg_itp_file(itp_obj, out_path_itp, print_sections=["constraint", "bond
                         if multiplicity == None:
                             multiplicity = ""
 
+                        grp_val = normalize_periodic_degrees(grp_val)
                         fp.write(
                             "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7}    {1:9.2f} {2:7.2f}       {4}     ; {3}\n".format(
                                 func, grp_val, grp_fct, dihedral_type,
