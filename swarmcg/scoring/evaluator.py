@@ -1,8 +1,6 @@
 
-import os
-import shutil
 import numpy as np
-from typing import Optional, Tuple, Any
+from typing import Optional
 
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
@@ -14,6 +12,11 @@ from swarmcg import utils
 from swarmcg.scoring.distances import unwrap_degrees_around
 from swarmcg.shared import exceptions
 from swarmcg.shared.logging_utils import get_logger
+from swarmcg.shared.periodic import (
+    circular_moment_degrees,
+    normalize_periodic_degrees,
+)
+from swarmcg.simulations.boltzmann import BoltzmannTarget, complete_sample_range
 from swarmcg.simulations.polynomial import (
     CBTParameters,
     RBParameters,
@@ -32,21 +35,27 @@ class SwarmEvaluator:
     def __init__(self, config_obj: SwarmConfig):
         self.config = config_obj
         self.mapping: Optional[Mapping] = None
-        self.ns: Optional[OptimizationContext] = None # Keeping context for now as compare_models needs it
+        self.ns: Optional[OptimizationContext] = None
         
-    def initialize(self, context: OptimizationContext) -> None:
+    def initialize(
+        self,
+        context: OptimizationContext,
+        *,
+        validate_starting_configuration: bool = False,
+    ) -> None:
         """Load, validate, map, and attach reference state to a context.
 
         Args:
             context: Runtime context populated in place.
+            validate_starting_configuration: Validate the optimizer starting
+                GRO before reading or processing the AA trajectory.
 
         Raises:
             MissformattedFile: If mapping and topology bead counts differ or
                 topology structure is inconsistent.
             FileNotFoundError: If a required input cannot be read.
         """
-        self.ns = context # Store context to share state with legacy functions if needed
-        # But ideally we populate context from here
+        self.ns = context
         
         # 1. Bins
         scores.create_bins_and_dist_matrices(self.ns)
@@ -56,7 +65,7 @@ class SwarmEvaluator:
         self.mapping.read_ndx_atoms2beads()
         self.mapping.get_atoms_weights_in_beads()
         
-        # Expose to context (legacy support)
+        # Persist mapping data needed by trajectory construction and scaling.
         self.ns.scoring.all_beads = self.mapping.all_beads
         self.ns.scoring.atom_w = self.mapping.atom_w
         
@@ -65,6 +74,11 @@ class SwarmEvaluator:
         if hasattr(self.ns.cg_itp, "validate"):
             self.ns.cg_itp.validate()
         io.validate_cg_itp(self.ns.cg_itp, all_beads=self.mapping.all_beads)
+
+        if validate_starting_configuration:
+            io.validate_restricted_bending_start(
+                self.config.cg_model.gro_input_filename, self.ns.cg_itp
+            )
         
         # 4. Scaling
         utils.process_scaling_str(self.ns)
@@ -101,7 +115,10 @@ class SwarmEvaluator:
         Raises:
             RuntimeError: If :meth:`initialize` has not completed.
             ScientificValidationError: If a restricted-bending reference or
-                polynomial input lies outside its scientifically valid domain.
+                polynomial input lies outside its scientifically valid domain,
+                or a mode-1 torsion lacks the circular moment required by its
+                functional form. Periodic functions 1 and 4 use the moment at
+                their multiplicity; function 2 uses the first moment.
         """
         # Checks
         if not self.ns or not self.ns.cg_itp:
@@ -144,15 +161,12 @@ class SwarmEvaluator:
             grp["avg"] = avg
             grp["hist"] = hist
             
-            # BI initialization stats
-            xmin, xmax = min(np.inf, self.ns.scoring.bins_bonds[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.scoring.bins_bonds[np.max(np.nonzero(hist)) + 1])
-            xmin, xmax = xmin - self.config.optimization.bw_bonds, xmax + self.config.optimization.bw_bonds
-            
-            # Helper for hist in BI range
-            h, _ = np.histogram(values, range=(xmin, xmax), bins=self.config.optimization.bi_nb_bins)
-            h = h / h.sum()
-            
-            self.ns.scoring.data_BI.setdefault("bond", []).append([h, np.std(values), np.mean(values), (xmin, xmax)])
+            target = BoltzmannTarget.from_samples(
+                values,
+                bins=self.config.optimization.bi_nb_bins,
+                value_range=complete_sample_range(values),
+            )
+            self.ns.scoring.data_BI.setdefault("bond", []).append(target)
             self.ns.scoring.domains_val.setdefault("bond", []).append([round(np.min(values), 3), round(np.max(values), 3)])
             
         # Angles
@@ -161,7 +175,8 @@ class SwarmEvaluator:
                  self.ns.scoring.aa2cg_universe,
                  grp["beads"],
                  self.ns.scoring.bins_angles,
-                 self.config.optimization.bw_angles
+                 self.config.optimization.bw_angles,
+                 group_label=f"angle group {i + 1}",
              )
              if grp["func"] == 10:
                 unsafe_fraction = float(np.mean((val_deg < 10.0) | (val_deg > 170.0)))
@@ -182,13 +197,12 @@ class SwarmEvaluator:
              grp["avg"] = avg
              grp["hist"] = hist
              
-             xmin, xmax = min(np.inf, self.ns.scoring.bins_angles[np.min(np.nonzero(hist))]), max(-np.inf, self.ns.scoring.bins_angles[np.max(np.nonzero(hist)) + 1])
-             xmin, xmax = xmin + self.config.optimization.bw_angles / 2, xmax - self.config.optimization.bw_angles / 2
-             
-             h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=self.config.optimization.bi_nb_bins)
-             h = h / h.sum()
-             
-             self.ns.scoring.data_BI.setdefault("angle", []).append([h, np.std(val_rad), (xmin, xmax)])
+             target = BoltzmannTarget.from_samples(
+                 val_rad,
+                 bins=self.config.optimization.bi_nb_bins,
+                 value_range=complete_sample_range(val_rad),
+             )
+             self.ns.scoring.data_BI.setdefault("angle", []).append(target)
              domain_min, domain_max = float(np.min(val_deg)), float(np.max(val_deg))
              if grp["func"] == 10:
                 domain_min = max(10.0, domain_min)
@@ -207,37 +221,74 @@ class SwarmEvaluator:
                 self.ns.scoring.aa2cg_universe,
                 grp["beads"],
                 self.ns.scoring.bins_dihedrals,
-                self.config.optimization.bw_dihedrals
+                self.config.optimization.bw_dihedrals,
+                group_label=f"dihedral group {i + 1}",
             )
-            # exec_mode 1 logic handled later/in optimize
-            if self.config.optimization.exec_mode == 1 and grp["func"] not in (3, 11):
-                grp["value"] = avg 
-            grp["avg"] = avg 
+            polynomial = grp["func"] in (3, 11)
+            periodic = grp["func"] in (1, 4)
+            phase_center = None
+            if self.config.optimization.exec_mode == 1 and periodic:
+                moment = circular_moment_degrees(val_deg, grp["mult"])
+                grp["phase_moment_resultant"] = moment.resultant_length
+                if moment.direction_degrees is None:
+                    raise exceptions.ScientificValidationError(
+                        f"Dihedral group {i + 1} uses periodic function {grp['func']} "
+                        f"with multiplicity {grp['mult']}, but its order-{grp['mult']} "
+                        "reference circular moment has no defined direction. Improve "
+                        "reference sampling or use execution mode 2 with a fixed ITP phase."
+                    )
+                phase_center = normalize_periodic_degrees(
+                    moment.direction_degrees + 180.0
+                )
+                grp["value"] = phase_center
+            elif (
+                self.config.optimization.exec_mode == 1
+                and not polynomial
+                and not np.isfinite(avg)
+            ):
+                raise exceptions.ScientificValidationError(
+                    f"Dihedral group {i + 1} uses phase-based function {grp['func']}, "
+                    "but its reference first circular moment has no defined direction. "
+                    "Improve reference sampling or use execution mode 2 with a fixed ITP phase."
+                )
+            elif self.config.optimization.exec_mode == 1 and not polynomial:
+                grp["value"] = avg
             grp["avg"] = avg
             grp["hist"] = hist
-            
-            xmin, xmax = -180, 180
-            h, _ = np.histogram(val_rad, range=(np.deg2rad(xmin), np.deg2rad(xmax)), bins=2 * self.config.optimization.bi_nb_bins)
-            h = h / h.sum()
 
-            unwrapped_deg = unwrap_degrees_around(val_deg, avg)
-            unwrapped_rad = np.deg2rad(unwrapped_deg)
-            self.ns.scoring.data_BI.setdefault("dihedral", []).append(
-                [h, np.std(unwrapped_rad), np.deg2rad(avg), (xmin, xmax)]
+            target = BoltzmannTarget.from_samples(
+                val_rad,
+                bins=2 * self.config.optimization.bi_nb_bins,
+                value_range=(-np.pi, np.pi),
             )
-            self.ns.scoring.domains_val.setdefault("dihedral", []).append(
-                [round(np.min(unwrapped_deg), 2), round(np.max(unwrapped_deg), 2)]
-            )
+            self.ns.scoring.data_BI.setdefault("dihedral", []).append(target)
 
-            if grp["func"] == 11:
+            if self.config.optimization.exec_mode == 1 and periodic:
+                domain = [phase_center - 180.0, phase_center + 180.0]
+            elif self.config.optimization.exec_mode == 1 and not polynomial:
+                unwrapped_deg = unwrap_degrees_around(val_deg, avg)
+                domain = [
+                    round(float(np.min(unwrapped_deg)), 2),
+                    round(float(np.max(unwrapped_deg)), 2),
+                ]
+            else:
+                # Polynomial functions have no phase domain, while execution
+                # mode 2 fixes the phase from the input topology.
+                domain = None
+            self.ns.scoring.domains_val.setdefault("dihedral", []).append(domain)
+
+            if grp["func"] in (3, 11):
                 total_variation = mirrored_total_variation(hist)
-                grp["cbt_symmetry_tv"] = total_variation
+                grp["polynomial_symmetry_tv"] = total_variation
                 if total_variation > 0.10:
+                    form_name = "RB" if grp["func"] == 3 else "CBT"
                     logger.warning(
-                        "CBT dihedral group %s has mirrored total-variation distance %.3f; "
-                        "function 11 cannot reproduce an asymmetric torsional marginal.",
+                        "%s dihedral group %s has mirrored total-variation distance %.3f; "
+                        "function %s cannot reproduce an asymmetric torsional marginal.",
+                        form_name,
                         i + 1,
                         total_variation,
+                        grp["func"],
                     )
 
             if grp["func"] in (3, 11):
@@ -267,43 +318,25 @@ class SwarmEvaluator:
                         f"the explicit {option} bound of {bound:.3f} kJ/mol."
                     )
 
-    def evaluate_model(self, working_dir, manual_mode=False) -> Tuple[float, float, float, float, Any, Any]:
-        """Run model scoring for simulation outputs in a working directory.
+    def evaluate_model(self, manual_mode: bool = False) -> tuple | None:
+        """Run model scoring for the trajectories configured in the context.
 
         Args:
-            working_dir: Directory containing the configured CG trajectory
-                outputs. Retained for API clarity while paths live in context.
             manual_mode: Use evaluation-mode distribution loading and display.
 
         Returns:
             Fitness total, three class contributions, pairwise-score text, and
-            per-geometry EMD values.
+            per-geometry EMD values, or ``None`` for manual display mode.
 
         Raises:
             RuntimeError: If :meth:`initialize` has not completed.
+            Exception: Any scoring or trajectory error from
+                :func:`compare_models` is propagated to the caller.
         """
         if not self.ns:
              raise RuntimeError("Evaluator not initialized.")
-             
-        # Temporarily update context to point to current results
-        # Assuming filenames are standard or provided in config
-        # optimize_model loop might be setting these
-        
-        # Actually compare_models uses ns attributes:
-        # ns.cg_tpr_filename, ns.cg_traj_filename
-        
-        # We need to ensure these are set correctly in `ns` before calling compare_models
-        # For optimization, these are usually "md.tpr" and "md.xtc" in the eval step dir.
-        
-        current_dir = os.getcwd() # Caller should have chdir'd or we handle it?
-        # compare_models looks for files.
-        try:
-            # We assume we are in the directory or files are relative to CWD
-            return compare_models(
-                self.ns,
-                manual_mode=manual_mode,
-                calc_sasa=self.config.output.calculate_sasa,
-            )
-        except Exception as e:
-            # Handle scoring failures
-            raise e
+        return compare_models(
+            self.ns,
+            manual_mode=manual_mode,
+            calc_sasa=self.config.output.calculate_sasa,
+        )

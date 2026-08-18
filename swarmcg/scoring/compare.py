@@ -2,19 +2,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
-import warnings
-
-# Silence pyemd pkg_resources deprecation warning on import.
-with warnings.catch_warnings():
-    warnings.filterwarnings(
-        "ignore",
-        message=r"pkg_resources is deprecated as an API\..*",
-        category=UserWarning,
-    )
-    from pyemd import emd
 
 import swarmcg.scoring as scores
-from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg import config
 from swarmcg.shared import exceptions, styling
@@ -25,42 +14,65 @@ matplotlib.use("AGG")
 
 logger = get_logger(__name__)
 
-def _format_values_range(values, unit="nm"):
-    if values is None:
-        return "n/a"
-    values_arr = np.asarray(values, dtype=float)
-    values_arr = values_arr[np.isfinite(values_arr)]
-    if values_arr.size == 0:
-        return "no finite values"
-    return f"min {values_arr.min():.3f}, max {values_arr.max():.3f} {unit}"
 
+def _populate_plot_support(distribution, edges, include_cg, *, periodic=False):
+    """Populate inclusive AA/CG plotting slices from histogram support.
 
-def _empty_bond_constraint_message(
-    geom_label,
-    grp_idx,
-    bonded_max_range,
-    bins,
-    aa_values=None,
-    cg_values=None,
-):
-    bins_arr = np.asarray(bins, dtype=float)
-    if bins_arr.size:
-        bins_min = bins_arr[0]
-        bins_max = bins_arr[-1]
-    else:
-        bins_min = float("nan")
-        bins_max = float("nan")
-    aa_range = _format_values_range(aa_values)
-    cg_range = _format_values_range(cg_values)
-    return (
-        f"Empty {geom_label} distribution for group {grp_idx + 1}.\n"
-        f"Observed {geom_label} lengths (AA): {aa_range}; (CG): {cg_range}.\n"
-        f"Histogram range: [{bins_min:.3f}, {bins_max:.3f}] nm.\n"
-        f"Most probably because you have bonds or constraints that exceed "
-        f"{bonded_max_range} nm.\n"
-        "Increase bins range for bonds and constraints and retry!\n"
-        "See argument -bonds_max_range."
+    Args:
+        distribution: Mutable per-group plotting record.
+        edges: Histogram edges shared by AA and CG masses.
+        include_cg: Whether a CG histogram is available.
+        periodic: Preserve the complete ordered grid when occupied support
+            touches the periodic seam.
+    """
+    centers = (np.asarray(edges, dtype=float)[:-1] + np.asarray(edges, dtype=float)[1:]) / 2.0
+    histograms = [distribution["AA"]["hist"]]
+    if include_cg:
+        histograms.append(distribution["CG"]["hist"])
+    selected_centers, selected_histograms = scores.support_neighborhood(
+        centers, *histograms, periodic=periodic
     )
+    distribution["AA"]["x"] = selected_centers.tolist()
+    distribution["AA"]["y"] = selected_histograms[0].tolist()
+    if include_cg:
+        distribution["CG"]["x"] = selected_centers.tolist()
+        distribution["CG"]["y"] = selected_histograms[1].tolist()
+
+
+def _annotate_missing_mass(axis, observation):
+    """Annotate a plot when a CG histogram has incomplete sample coverage.
+
+    Args:
+        axis: Matplotlib axis receiving the annotation.
+        observation: Classified CG histogram masses and missing-data causes.
+    """
+    missing = max(0.0, 1.0 - observation.coverage)
+    if missing > 1e-12:
+        axis.text(
+            0.98,
+            0.94,
+            f"CG missing {100.0 * missing:.1f}%\n"
+            f"nonfinite={observation.nonfinite_count}, "
+            f"below={observation.underflow_count}, "
+            f"above={observation.overflow_count}",
+            transform=axis.transAxes,
+            ha="right",
+            va="top",
+            fontsize="small",
+            color=config.cg_color,
+        )
+
+
+def _format_circular_mean(value):
+    """Format an optional circular mean for plots and log messages.
+
+    Args:
+        value: Circular mean in degrees, potentially ``NaN``.
+
+    Returns:
+        One-decimal degree text or ``"unavailable"``.
+    """
+    return f"{float(value):.1f}°" if np.isfinite(value) else "unavailable"
 
 def compare_models(context: OptimizationContext, manual_mode: bool = True, ignore_dihedrals: bool = False, 
                   calc_sasa: bool = False, record_best_indep_params: bool = False):
@@ -81,10 +93,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         AA-only inspection modes return ``None`` after writing the plot.
 
     Raises:
-        EmptyDistributionError: If a bond/constraint histogram has no support
-            on the configured grid.
+        ScientificValidationError: If a reference distribution contains a
+            non-finite or out-of-range sample.
     """
-    ns = context # Alias for backward compatibility during refactoring
+    ns = context  # Concise local name used throughout the plotting routine.
+    config_obj = ns.config
     
     # graphical parameters
     plt.rcParams["grid.color"] = "k"  # plt grid appearance settings
@@ -119,8 +132,6 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # proceed with CG data
     if not ns.scoring.atom_only:
-        config_obj = ns.config if ns.config else SwarmConfig.from_namespace(ns) # Fallback for safety
-
         logger.info("Reading CG trajectory")
         ns.scoring.cg_universe = mda.Universe(ns.files.cg_tpr_filename, ns.files.cg_traj_filename, in_memory=True, refresh_offsets=True,
                                       guess_bonds=False)
@@ -196,7 +207,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
                 grp_type="constraints group",
                 grp_nb=grp_constraint,
-                config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns),
+                config=config_obj,
                 bins=ns.scoring.bins_constraints,
                 bandwidth=ns.config.optimization.bw_constraints,
             )
@@ -206,58 +217,38 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             constraints[grp_constraint]["AA"]["avg"] = ns.cg_itp["constraint"][grp_constraint]["avg"]
             constraints[grp_constraint]["AA"]["hist"] = ns.cg_itp["constraint"][grp_constraint]["hist"]
 
-        for i in range(1, len(constraints[grp_constraint]["AA"]["hist"]) - 1):
-            if constraints[grp_constraint]["AA"]["hist"][i - 1] > 0 or constraints[grp_constraint]["AA"]["hist"][
-                i] > 0 or constraints[grp_constraint]["AA"]["hist"][i + 1] > 0:
-                constraints[grp_constraint]["AA"]["x"].append(np.mean(ns.scoring.bins_constraints[i:i + 2]))
-                constraints[grp_constraint]["AA"]["y"].append(constraints[grp_constraint]["AA"]["hist"][i])
-
         if not ns.scoring.atom_only:
-            constraint_values_cg = None
-            try:
-                constraint_avg, constraint_hist, constraint_values_cg = scores.get_CG_bonds_distrib(
-                    ns.scoring.cg_universe,
-                    beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
-                    grp_type="constraint",
-                    bins=ns.scoring.bins_constraints,
-                    bandwidth=ns.config.optimization.bw_constraints,
+            constraint_avg, constraint_hist, constraint_values_cg = scores.get_CG_bonds_distrib(
+                ns.scoring.cg_universe,
+                beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                grp_type=f"constraint group {grp_constraint + 1}",
+                bins=ns.scoring.bins_constraints,
+                bandwidth=ns.config.optimization.bw_constraints,
+            )
+            constraints[grp_constraint]["CG"]["avg"] = constraint_avg
+            constraints[grp_constraint]["CG"]["hist"] = constraint_hist
+            constraints[grp_constraint]["CG"]["observation"] = (
+                scores.observe_histogram(
+                    constraint_values_cg, ns.scoring.bins_constraints
                 )
-                constraints[grp_constraint]["CG"]["avg"] = constraint_avg
-                constraints[grp_constraint]["CG"]["hist"] = constraint_hist
-
-                for i in range(1, len(constraint_hist) - 1):
-                    if constraint_hist[i - 1] > 0 or constraint_hist[i] > 0 or constraint_hist[
-                        i + 1] > 0: 
-                        constraints[grp_constraint]["CG"]["x"].append(np.mean(ns.scoring.bins_constraints[i:i + 2]))
-                        constraints[grp_constraint]["CG"]["y"].append(constraint_hist[i])
-
-                if not constraints[grp_constraint]["AA"]["x"] or not constraints[grp_constraint]["CG"]["x"]:
-                    msg = _empty_bond_constraint_message(
-                        "constraint",
-                        grp_constraint,
-                        ns.config.optimization.bonded_max_range,
-                        ns.scoring.bins_constraints,
-                        aa_values=constraint_values_aa,
-                        cg_values=constraint_values_cg,
-                    )
-                    raise exceptions.EmptyDistributionError(msg)
-
-                domain_min = min(constraints[grp_constraint]["AA"]["x"][0], constraints[grp_constraint]["CG"]["x"][0])
-                domain_max = max(constraints[grp_constraint]["AA"]["x"][-1], constraints[grp_constraint]["CG"]["x"][-1])
-                avg_diff_grp_constraints.append(
-                    emd(constraints[grp_constraint]["AA"]["hist"], constraints[grp_constraint]["CG"]["hist"],
-                        ns.scoring.bins_constraints_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
-            except IndexError:
-                msg = _empty_bond_constraint_message(
-                    "constraint",
-                    grp_constraint,
-                    ns.config.optimization.bonded_max_range,
-                    ns.scoring.bins_constraints,
-                    aa_values=constraint_values_aa,
-                    cg_values=constraint_values_cg,
+            )
+            _populate_plot_support(
+                constraints[grp_constraint], ns.scoring.bins_constraints, True
+            )
+            domain_min = constraints[grp_constraint]["AA"]["x"][0]
+            domain_max = constraints[grp_constraint]["AA"]["x"][-1]
+            avg_diff_grp_constraints.append(
+                scores.earth_movers_distance(
+                    constraints[grp_constraint]["AA"]["hist"],
+                    constraints[grp_constraint]["CG"]["hist"],
+                    ns.scoring.constraints_grid,
                 )
-                raise exceptions.EmptyDistributionError(msg)
+                * ns.config.optimization.bonds2angles_scoring_factor
+            )
         else:
+            _populate_plot_support(
+                constraints[grp_constraint], ns.scoring.bins_constraints, False
+            )
             avg_diff_grp_constraints.append(constraints[grp_constraint]["AA"]["avg"])
 
         if ns.scoring.row_x_scaling:
@@ -294,7 +285,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
                 grp_type="bonds group",
                 grp_nb=grp_bond,
-                config=config_obj if 'config_obj' in locals() else SwarmConfig.from_namespace(ns),
+                config=config_obj,
                 bins=ns.scoring.bins_bonds,
                 bandwidth=ns.config.optimization.bw_bonds,
             )
@@ -304,56 +295,32 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             bonds[grp_bond]["AA"]["avg"] = ns.cg_itp["bond"][grp_bond]["avg"]
             bonds[grp_bond]["AA"]["hist"] = ns.cg_itp["bond"][grp_bond]["hist"]
 
-        for i in range(1, len(bonds[grp_bond]["AA"]["hist"]) - 1):
-            if bonds[grp_bond]["AA"]["hist"][i - 1] > 0 or bonds[grp_bond]["AA"]["hist"][i] > 0 or \
-                    bonds[grp_bond]["AA"]["hist"][i + 1] > 0:
-                bonds[grp_bond]["AA"]["x"].append(np.mean(ns.scoring.bins_bonds[i:i + 2]))
-                bonds[grp_bond]["AA"]["y"].append(bonds[grp_bond]["AA"]["hist"][i])
-
         if not ns.scoring.atom_only:
-            bond_values_cg = None
-            try:
-                bond_avg, bond_hist, bond_values_cg = scores.get_CG_bonds_distrib(
-                    ns.scoring.cg_universe,
-                    beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
-                    grp_type="bond",
-                    bins=ns.scoring.bins_bonds,
-                    bandwidth=ns.config.optimization.bw_bonds,
+            bond_avg, bond_hist, bond_values_cg = scores.get_CG_bonds_distrib(
+                ns.scoring.cg_universe,
+                beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
+                grp_type=f"bond group {grp_bond + 1}",
+                bins=ns.scoring.bins_bonds,
+                bandwidth=ns.config.optimization.bw_bonds,
+            )
+            bonds[grp_bond]["CG"]["avg"] = bond_avg
+            bonds[grp_bond]["CG"]["hist"] = bond_hist
+            bonds[grp_bond]["CG"]["observation"] = scores.observe_histogram(
+                bond_values_cg, ns.scoring.bins_bonds
+            )
+            _populate_plot_support(bonds[grp_bond], ns.scoring.bins_bonds, True)
+            domain_min = bonds[grp_bond]["AA"]["x"][0]
+            domain_max = bonds[grp_bond]["AA"]["x"][-1]
+            avg_diff_grp_bonds.append(
+                scores.earth_movers_distance(
+                    bonds[grp_bond]["AA"]["hist"],
+                    bonds[grp_bond]["CG"]["hist"],
+                    ns.scoring.bonds_grid,
                 )
-                bonds[grp_bond]["CG"]["avg"] = bond_avg
-                bonds[grp_bond]["CG"]["hist"] = bond_hist
-
-                for i in range(1, len(bond_hist) - 1):
-                    if bond_hist[i - 1] > 0 or bond_hist[i] > 0 or bond_hist[i + 1] > 0:
-                        bonds[grp_bond]["CG"]["x"].append(np.mean(ns.scoring.bins_bonds[i:i + 2]))
-                        bonds[grp_bond]["CG"]["y"].append(bond_hist[i])
-
-                if not bonds[grp_bond]["AA"]["x"] or not bonds[grp_bond]["CG"]["x"]:
-                    msg = _empty_bond_constraint_message(
-                        "bond",
-                        grp_bond,
-                        ns.config.optimization.bonded_max_range,
-                        ns.scoring.bins_bonds,
-                        aa_values=bond_values_aa,
-                        cg_values=bond_values_cg,
-                    )
-                    raise exceptions.EmptyDistributionError(msg)
-
-                domain_min = min(bonds[grp_bond]["AA"]["x"][0], bonds[grp_bond]["CG"]["x"][0])
-                domain_max = max(bonds[grp_bond]["AA"]["x"][-1], bonds[grp_bond]["CG"]["x"][-1])
-                avg_diff_grp_bonds.append(emd(bonds[grp_bond]["AA"]["hist"], bonds[grp_bond]["CG"]["hist"],
-                                              ns.scoring.bins_bonds_dist_matrix) * ns.config.optimization.bonds2angles_scoring_factor)
-            except IndexError:
-                msg = _empty_bond_constraint_message(
-                    "bond",
-                    grp_bond,
-                    ns.config.optimization.bonded_max_range,
-                    ns.scoring.bins_bonds,
-                    aa_values=bond_values_aa,
-                    cg_values=bond_values_cg,
-                )
-                raise exceptions.EmptyDistributionError(msg)
+                * ns.config.optimization.bonds2angles_scoring_factor
+            )
         else:
+            _populate_plot_support(bonds[grp_bond], ns.scoring.bins_bonds, False)
             avg_diff_grp_bonds.append(bonds[grp_bond]["AA"]["avg"])
 
         if ns.scoring.row_x_scaling:
@@ -383,34 +350,44 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.config.optimization.bw_angles)
+            angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(
+                ns.scoring.aa2cg_universe,
+                beads_ids=ns.cg_itp["angle"][grp_angle]["beads"],
+                bins=ns.scoring.bins_angles,
+                bandwidth=ns.config.optimization.bw_angles,
+                group_label=f"angle group {grp_angle + 1}",
+            )
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
         else:  # use atomistic reference that was loaded by the optimization routines
             angles[grp_angle]["AA"]["avg"] = ns.cg_itp["angle"][grp_angle]["avg"]
             angles[grp_angle]["AA"]["hist"] = ns.cg_itp["angle"][grp_angle]["hist"]
 
-        for i in range(1, len(angles[grp_angle]["AA"]["hist"]) - 1):
-            if angles[grp_angle]["AA"]["hist"][i - 1] > 0 or angles[grp_angle]["AA"]["hist"][i] > 0 or \
-                    angles[grp_angle]["AA"]["hist"][i + 1] > 0:
-                angles[grp_angle]["AA"]["x"].append(np.mean(ns.scoring.bins_angles[i:i + 2]))
-                angles[grp_angle]["AA"]["y"].append(angles[grp_angle]["AA"]["hist"][i])
-
         if not ns.scoring.atom_only:
-            angle_avg, angle_hist, _, _ = scores.get_CG_angles_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["angle"][grp_angle]["beads"], bins=ns.scoring.bins_angles, bandwidth=ns.config.optimization.bw_angles)
+            angle_avg, angle_hist, angle_values_cg, _ = scores.get_CG_angles_distrib(
+                ns.scoring.cg_universe,
+                beads_ids=ns.cg_itp["angle"][grp_angle]["beads"],
+                bins=ns.scoring.bins_angles,
+                bandwidth=ns.config.optimization.bw_angles,
+                group_label=f"angle group {grp_angle + 1}",
+            )
             angles[grp_angle]["CG"]["avg"] = angle_avg
             angles[grp_angle]["CG"]["hist"] = angle_hist
-
-            for i in range(1, len(angle_hist) - 1):
-                if angle_hist[i - 1] > 0 or angle_hist[i] > 0 or angle_hist[i + 1] > 0:
-                    angles[grp_angle]["CG"]["x"].append(np.mean(ns.scoring.bins_angles[i:i + 2]))
-                    angles[grp_angle]["CG"]["y"].append(angle_hist[i])
-
-            domain_min = min(angles[grp_angle]["AA"]["x"][0], angles[grp_angle]["CG"]["x"][0])
-            domain_max = max(angles[grp_angle]["AA"]["x"][-1], angles[grp_angle]["CG"]["x"][-1])
+            angles[grp_angle]["CG"]["observation"] = scores.observe_histogram(
+                angle_values_cg, ns.scoring.bins_angles
+            )
+            _populate_plot_support(angles[grp_angle], ns.scoring.bins_angles, True)
+            domain_min = angles[grp_angle]["AA"]["x"][0]
+            domain_max = angles[grp_angle]["AA"]["x"][-1]
             avg_diff_grp_angles.append(
-                emd(angles[grp_angle]["AA"]["hist"], angles[grp_angle]["CG"]["hist"], ns.scoring.bins_angles_dist_matrix))
+                scores.earth_movers_distance(
+                    angles[grp_angle]["AA"]["hist"],
+                    angles[grp_angle]["CG"]["hist"],
+                    ns.scoring.angles_grid,
+                )
+            )
         else:
+            _populate_plot_support(angles[grp_angle], ns.scoring.bins_angles, False)
             avg_diff_grp_angles.append(angles[grp_angle]["AA"]["avg"])
 
         if ns.scoring.row_x_scaling:
@@ -441,35 +418,56 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(ns.scoring.aa2cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.config.optimization.bw_dihedrals)
+            dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(
+                ns.scoring.aa2cg_universe,
+                beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"],
+                bins=ns.scoring.bins_dihedrals,
+                bandwidth=ns.config.optimization.bw_dihedrals,
+                group_label=f"dihedral group {grp_dihedral + 1}",
+            )
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
         else:  # use atomistic reference that was loaded by the optimization routines
             dihedrals[grp_dihedral]["AA"]["avg"] = ns.cg_itp["dihedral"][grp_dihedral]["avg"]
             dihedrals[grp_dihedral]["AA"]["hist"] = ns.cg_itp["dihedral"][grp_dihedral]["hist"]
 
-        for i in range(1, len(dihedrals[grp_dihedral]["AA"]["hist"]) - 1):
-            if dihedrals[grp_dihedral]["AA"]["hist"][i - 1] > 0 or dihedrals[grp_dihedral]["AA"]["hist"][i] > 0 or \
-                    dihedrals[grp_dihedral]["AA"]["hist"][i + 1] > 0:
-                dihedrals[grp_dihedral]["AA"]["x"].append(np.mean(ns.scoring.bins_dihedrals[i:i + 2]))
-                dihedrals[grp_dihedral]["AA"]["y"].append(dihedrals[grp_dihedral]["AA"]["hist"][i])
-
         if not ns.scoring.atom_only:
-            dihedral_avg, dihedral_hist, _, _ = scores.get_CG_dihedrals_distrib(ns.scoring.cg_universe, beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"], bins=ns.scoring.bins_dihedrals, bandwidth=ns.config.optimization.bw_dihedrals)
+            dihedral_avg, dihedral_hist, dihedral_values_cg, _ = scores.get_CG_dihedrals_distrib(
+                ns.scoring.cg_universe,
+                beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"],
+                bins=ns.scoring.bins_dihedrals,
+                bandwidth=ns.config.optimization.bw_dihedrals,
+                group_label=f"dihedral group {grp_dihedral + 1}",
+            )
             dihedrals[grp_dihedral]["CG"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["CG"]["hist"] = dihedral_hist
-
-            for i in range(1, len(dihedral_hist) - 1):
-                if dihedral_hist[i - 1] > 0 or dihedral_hist[i] > 0 or dihedral_hist[i + 1] > 0:
-                    dihedrals[grp_dihedral]["CG"]["x"].append(np.mean(ns.scoring.bins_dihedrals[i:i + 2]))
-                    dihedrals[grp_dihedral]["CG"]["y"].append(dihedral_hist[i])
-
-            domain_min = min(dihedrals[grp_dihedral]["AA"]["x"][0], dihedrals[grp_dihedral]["CG"]["x"][0])
-            domain_max = max(dihedrals[grp_dihedral]["AA"]["x"][-1], dihedrals[grp_dihedral]["CG"]["x"][-1])
+            dihedrals[grp_dihedral]["CG"]["observation"] = (
+                scores.observe_histogram(
+                    dihedral_values_cg, ns.scoring.bins_dihedrals
+                )
+            )
+            _populate_plot_support(
+                dihedrals[grp_dihedral],
+                ns.scoring.bins_dihedrals,
+                True,
+                periodic=True,
+            )
+            domain_min = dihedrals[grp_dihedral]["AA"]["x"][0]
+            domain_max = dihedrals[grp_dihedral]["AA"]["x"][-1]
             avg_diff_grp_dihedrals.append(
-                emd(dihedrals[grp_dihedral]["AA"]["hist"], dihedrals[grp_dihedral]["CG"]["hist"],
-                    ns.scoring.bins_dihedrals_dist_matrix))
+                scores.earth_movers_distance(
+                    dihedrals[grp_dihedral]["AA"]["hist"],
+                    dihedrals[grp_dihedral]["CG"]["hist"],
+                    ns.scoring.dihedrals_grid,
+                )
+            )
         else:
+            _populate_plot_support(
+                dihedrals[grp_dihedral],
+                ns.scoring.bins_dihedrals,
+                False,
+                periodic=True,
+            )
             avg_diff_grp_dihedrals.append(dihedrals[grp_dihedral]["AA"]["avg"])
 
         if ns.scoring.row_x_scaling:
@@ -573,7 +571,12 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                         ax[nrow][i].fill_between(constraints[grp_constraint]["CG"]["x"],
                                                  constraints[grp_constraint]["CG"]["y"], color=config.cg_color,
                                                  alpha=config.fill_alpha)
-                    ax[nrow][i].plot(constraints[grp_constraint]["CG"]["avg"], 0, color=config.cg_color, marker="D")
+                    _annotate_missing_mass(
+                        ax[nrow][i],
+                        constraints[grp_constraint]["CG"]["observation"],
+                    )
+                    if np.isfinite(constraints[grp_constraint]["CG"]["avg"]):
+                        ax[nrow][i].plot(constraints[grp_constraint]["CG"]["avg"], 0, color=config.cg_color, marker="D")
                     logger.info(
                         "Constraint %s -- AA Avg: %s nm -- CG Avg: %s",
                         grp_constraint + 1,
@@ -634,7 +637,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                          color=config.cg_color, alpha=config.line_alpha)
                         ax[nrow][i].fill_between(bonds[grp_bond]["CG"]["x"], bonds[grp_bond]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
-                    ax[nrow][i].plot(bonds[grp_bond]["CG"]["avg"], 0, color=config.cg_color, marker="D")
+                    _annotate_missing_mass(
+                        ax[nrow][i], bonds[grp_bond]["CG"]["observation"]
+                    )
+                    if np.isfinite(bonds[grp_bond]["CG"]["avg"]):
+                        ax[nrow][i].plot(bonds[grp_bond]["CG"]["avg"], 0, color=config.cg_color, marker="D")
                     logger.info(
                         "Bond %s -- AA Avg: %s nm -- CG Avg: %s nm",
                         grp_bond + 1,
@@ -694,7 +701,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                          color=config.cg_color, alpha=config.line_alpha)
                         ax[nrow][i].fill_between(angles[grp_angle]["CG"]["x"], angles[grp_angle]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
-                    ax[nrow][i].plot(angles[grp_angle]["CG"]["avg"], 0, color=config.cg_color, marker="D")
+                    _annotate_missing_mass(
+                        ax[nrow][i], angles[grp_angle]["CG"]["observation"]
+                    )
+                    if np.isfinite(angles[grp_angle]["CG"]["avg"]):
+                        ax[nrow][i].plot(angles[grp_angle]["CG"]["avg"], 0, color=config.cg_color, marker="D")
                     logger.info(
                         "Angle %s -- AA Avg: %s° -- CG Avg: %s°",
                         grp_angle + 1,
@@ -740,7 +751,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                      label="AA-mapped", color=config.atom_color, alpha=config.line_alpha)
                     ax[nrow][i].fill_between(dihedrals[grp_dihedral]["AA"]["x"], dihedrals[grp_dihedral]["AA"]["y"],
                                              color=config.atom_color, alpha=config.fill_alpha)
-                ax[nrow][i].plot(dihedrals[grp_dihedral]["AA"]["avg"], 0, color=config.atom_color, marker="D")
+                if np.isfinite(dihedrals[grp_dihedral]["AA"]["avg"]):
+                    ax[nrow][i].plot(
+                        dihedrals[grp_dihedral]["AA"]["avg"],
+                        0,
+                        color=config.atom_color,
+                        marker="D",
+                    )
 
                 if not ns.scoring.atom_only:
                     ax[nrow][i].set_title(
@@ -755,20 +772,32 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                          label="CG", color=config.cg_color, alpha=config.line_alpha)
                         ax[nrow][i].fill_between(dihedrals[grp_dihedral]["CG"]["x"], dihedrals[grp_dihedral]["CG"]["y"],
                                                  color=config.cg_color, alpha=config.fill_alpha)
-                    ax[nrow][i].plot(dihedrals[grp_dihedral]["CG"]["avg"], 0, color=config.cg_color, marker="D")
+                    _annotate_missing_mass(
+                        ax[nrow][i],
+                        dihedrals[grp_dihedral]["CG"]["observation"],
+                    )
+                    if np.isfinite(dihedrals[grp_dihedral]["CG"]["avg"]):
+                        ax[nrow][i].plot(
+                            dihedrals[grp_dihedral]["CG"]["avg"],
+                            0,
+                            color=config.cg_color,
+                            marker="D",
+                        )
                     logger.info(
-                        "Dihedral %s -- AA Avg: %s° -- CG Avg: %s°",
+                        "Dihedral %s -- AA Avg: %s -- CG Avg: %s",
                         grp_dihedral + 1,
-                        round(dihedrals[grp_dihedral]["AA"]["avg"], 1),
-                        round(dihedrals[grp_dihedral]["CG"]["avg"], 1),
+                        _format_circular_mean(dihedrals[grp_dihedral]["AA"]["avg"]),
+                        _format_circular_mean(dihedrals[grp_dihedral]["CG"]["avg"]),
                     )
                 else:
                     ax[nrow][i].set_title(
-                        f"Dihedral grp {grp_dihedral + 1} - Avg {round(avg_diff_grp_dihedrals[grp_dihedral], 1)}°")
+                        f"Dihedral grp {grp_dihedral + 1} - Avg "
+                        f"{_format_circular_mean(avg_diff_grp_dihedrals[grp_dihedral])}"
+                    )
                     logger.info(
                         "Dihedral %s -- AA Avg: %s",
                         grp_dihedral + 1,
-                        round(dihedrals[grp_dihedral]["AA"]["avg"], 1),
+                        _format_circular_mean(dihedrals[grp_dihedral]["AA"]["avg"]),
                     )
                 ax[nrow][i].grid(zorder=0.5)
                 if ns.scoring.row_x_scaling:
@@ -806,15 +835,18 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 ax[nrow][i].set_ylim(bottom=dihedrals_min_y, top=dihedrals_max_y)
 
     # calculate global fitness score and contributions from each geom type
-    all_dist_pairwise = ""  # for global optimization plotting
-    all_emd_dist_geoms = {"constraints": [], "bonds": [], "angles": [], "dihedrals": []}
+    all_emd_dist_geoms = {
+        "constraints": [np.nan] * ns.cg_itp["nb_constraints"],
+        "bonds": [np.nan] * ns.cg_itp["nb_bonds"],
+        "angles": [np.nan] * ns.cg_itp["nb_angles"],
+        "dihedrals": [np.nan] * ns.cg_itp["nb_dihedrals"],
+    }
 
     if not ns.scoring.atom_only:
         for i in range(ns.cg_itp["nb_constraints"]):
             group_index = diff_ordered_grp_constraints[i]
             dist_pairwise = avg_diff_grp_constraints[group_index]
-            all_dist_pairwise += str(dist_pairwise) + " "
-            all_emd_dist_geoms["constraints"].append(dist_pairwise)
+            all_emd_dist_geoms["constraints"][group_index] = dist_pairwise
 
             # keep track of independent best parameters
             if record_best_indep_params:
@@ -826,8 +858,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(ns.cg_itp["nb_bonds"]):
             group_index = diff_ordered_grp_bonds[i]
             dist_pairwise = avg_diff_grp_bonds[group_index]
-            all_dist_pairwise += str(dist_pairwise) + " "
-            all_emd_dist_geoms["bonds"].append(dist_pairwise)
+            all_emd_dist_geoms["bonds"][group_index] = dist_pairwise
 
             # keep track of independent best parameters
             if record_best_indep_params:
@@ -840,8 +871,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(ns.cg_itp["nb_angles"]):
             group_index = diff_ordered_grp_angles[i]
             dist_pairwise = avg_diff_grp_angles[group_index]
-            all_dist_pairwise += str(dist_pairwise) + " "
-            all_emd_dist_geoms["angles"].append(dist_pairwise)
+            all_emd_dist_geoms["angles"][group_index] = dist_pairwise
 
             # keep track of independent best parameters
             if record_best_indep_params:
@@ -855,8 +885,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         for i in range(ns.cg_itp["nb_dihedrals"]):
             group_index = diff_ordered_grp_dihedrals[i]
             dist_pairwise = avg_diff_grp_dihedrals[group_index]
-            all_dist_pairwise += str(dist_pairwise) + " "
-            all_emd_dist_geoms["dihedrals"].append(dist_pairwise)
+            all_emd_dist_geoms["dihedrals"][group_index] = dist_pairwise
 
             # keep track of independent best parameters
             if record_best_indep_params and not ignore_dihedrals:
@@ -882,7 +911,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             all_emd_dist_geoms["dihedrals"],
         )
 
-        all_dist_pairwise += "\n"
+        all_dist_pairwise = " ".join(
+            str(value)
+            for geometry in ("constraints", "bonds", "angles", "dihedrals")
+            for value in all_emd_dist_geoms[geometry]
+        ) + " \n"
         logger.info("")
         logger.info(
             "Using bonds to angles/dihedrals (C) scoring constant: %s",

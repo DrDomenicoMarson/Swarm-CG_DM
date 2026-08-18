@@ -1,5 +1,5 @@
 # general stuff
-github_url = "http://github.com/GMPavanLab/SwarmCG"
+github_url = "https://github.com/DrDomenicoMarson/Swarm-CG_DM"
 gmx_path = "gmx"
 
 # BI and FST-PSO OPTI, defaults
@@ -47,22 +47,20 @@ fct_guess_min_flat_diff_angles = 100  # flat minimum force constant variation th
 fct_guess_min_flat_diff_dihedrals_without_mult = 5  # flat minimum force constant variation that fct_guess_fact shall yield, used to find low and high boundaries for random generation of particles" force constants
 fct_guess_min_flat_diff_dihedrals_with_mult = 1  # flat minimum force constant variation that fct_guess_fact shall yield, used to find low and high boundaries for random generation of particles" force constants
 
-# gromacs functions that are properly treated at the moment
-# if we find a function that is not handled, program will exit with an appropriate error message
-# TODO: handle dihedral function 9 correctly so that different potentials can be stacked for the same beads
-#       this is the primary purpose of function 9 !!
+# GROMACS functions handled by the optimizer. Unsupported functions fail during
+# ITP validation instead of entering a partially implemented code path.
 handled_functions = {
     "constraint": [1],  # tested and verified: 1
     "bond": [1],  # tested and verified: 1
     "angle": [1, 2, 10],  # tested and verified: 1, 2; added: 10 (ReB)
     "dihedral": [1, 2, 3, 4, 11],
-    # tested and verified: 1, 2, 4 -- added: 3 (Ryckaert-Bellemans), 11 (CBT) -- ongoing: 9 (need to merge the 1+ dihedrals groups on plots)
+    # tested and verified: 1, 2, 4; added: 3 (Ryckaert-Bellemans), 11 (CBT)
     "virtual_sites2": [1],  # tested and verified: 1 -- ongoing: 2 (need GMX 2020)
     "virtual_sites3": [1, 2, 3, 4],  # tested and verified: 1, 2, 3, 4
     "virtual_sites4": [2],  # tested and verified: 2 -- irrelevant: 1
     "virtual_sitesn": [1, 2, 3]  # tested and verified: 1, 2, 3
 }
-dihedral_func_with_mult = [1, 4, 9]  # these functions use 3 parameters, the last one being multiplicity
+dihedral_func_with_mult = [1, 4]  # periodic functions with an integer multiplicity
 
 # plots display parameters
 use_hists = False  # hists are not implemented in a way that they will be displayed with left and right bold borders atm

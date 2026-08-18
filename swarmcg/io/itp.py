@@ -1,12 +1,10 @@
 from collections import UserDict
+import math
+
 from swarmcg.shared import exceptions
 
 class CGITP(UserDict):
-    """
-    Object representing the content of a CG ITP file.
-    Behaves like a dictionary for backward compatibility but allows for
-    structured access and validation.
-    """
+    """Mutable mapping representation of a parsed coarse-grained ITP file."""
     def __init__(self, data=None):
         super().__init__(data)
         if not self.data:
@@ -37,6 +35,26 @@ class CGITP(UserDict):
         Raises:
             MissformattedFile: If topology state is internally inconsistent.
         """
+        def require_finite(value, label, *, allow_none=False):
+            """Validate nested topology floating-point values."""
+            if value is None and allow_none:
+                return
+            values = value if isinstance(value, (list, tuple)) else [value]
+            for item in values:
+                if item is None and allow_none:
+                    continue
+                if isinstance(item, (list, tuple)):
+                    require_finite(item, label, allow_none=allow_none)
+                else:
+                    try:
+                        finite = math.isfinite(float(item))
+                    except (TypeError, ValueError):
+                        finite = False
+                    if not finite:
+                        raise exceptions.MissformattedFile(
+                            f"CG ITP {label} must contain only finite numeric values."
+                        )
+
         required = {
             "moleculetype", "atoms", "constraint", "bond", "angle", "dihedral",
             "real_beads_ids", "vs_beads_ids", "nb_constraints", "nb_bonds",
@@ -62,6 +80,12 @@ class CGITP(UserDict):
                 "Real and virtual bead identifiers must form a disjoint partition of all CG atoms."
             )
 
+        for atom_index, atom in enumerate(self.data["atoms"], start=1):
+            require_finite(atom.get("charge"), f"atom {atom_index} charge")
+            require_finite(
+                atom.get("mass"), f"atom {atom_index} mass", allow_none=True
+            )
+
         geometry_specs = {
             "constraint": ("nb_constraints", 2),
             "bond": ("nb_bonds", 2),
@@ -80,11 +104,71 @@ class CGITP(UserDict):
                         raise exceptions.MissformattedFile(
                             f"Invalid bead identifiers in {geometry} group {group_index}."
                         )
+                require_finite(
+                    group.get("value"),
+                    f"{geometry} group {group_index} equilibrium value",
+                    allow_none=geometry == "dihedral" and group.get("func") in (3, 11),
+                )
+                if "value_user" in group:
+                    require_finite(
+                        group.get("value_user"),
+                        f"{geometry} group {group_index} user equilibrium value",
+                        allow_none=geometry == "dihedral" and group.get("func") in (3, 11),
+                    )
+                if geometry in {"bond", "angle", "dihedral"}:
+                    require_finite(
+                        group.get("fct"),
+                        f"{geometry} group {group_index} force constant",
+                        allow_none=geometry == "dihedral" and group.get("func") in (3, 11),
+                    )
+                    if "fct_user" in group:
+                        require_finite(
+                            group.get("fct_user"),
+                            f"{geometry} group {group_index} user force constant",
+                            allow_none=geometry == "dihedral" and group.get("func") in (3, 11),
+                        )
+                if geometry == "dihedral" and group.get("func") not in (3, 11):
+                    require_finite(
+                        group.get("params"),
+                        f"dihedral group {group_index} parameters",
+                    )
+                    if "params_user" in group:
+                        require_finite(
+                            group.get("params_user"),
+                            f"dihedral group {group_index} user parameters",
+                        )
+                    if group.get("func") in (1, 4):
+                        multiplicity = group.get("mult")
+                        if (
+                            isinstance(multiplicity, bool)
+                            or not isinstance(multiplicity, int)
+                            or multiplicity <= 0
+                        ):
+                            raise exceptions.MissformattedFile(
+                                f"Periodic dihedral group {group_index} requires a positive integer multiplicity."
+                            )
                 if geometry == "dihedral" and group.get("func") in (3, 11):
                     if len(group.get("params", [])) != 6:
                         raise exceptions.MissformattedFile(
                             f"Dihedral function {group.get('func')} in group {group_index} requires six parameters."
                         )
+                    require_finite(
+                        group.get("params"),
+                        f"dihedral group {group_index} polynomial parameters",
+                    )
+                    if "params_user" in group:
+                        require_finite(
+                            group.get("params_user"),
+                            f"dihedral group {group_index} user polynomial parameters",
+                        )
+
+        for section in ("virtual_sites2", "virtual_sites3", "virtual_sites4", "virtual_sitesn"):
+            for bead_id, site in self.data.get(section, {}).items():
+                require_finite(
+                    site.get("vs_params"),
+                    f"{section} bead {bead_id + 1} parameters",
+                    allow_none=True,
+                )
 
     @property
     def atoms(self):

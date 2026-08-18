@@ -108,7 +108,9 @@ class SwarmOptimizer:
         self.ns.status.nb_eval = 0
         self.ns.status.start_opti_ts = datetime.now().timestamp()
         
-        self.ns.evaluator.initialize(self.ns)
+        self.ns.evaluator.initialize(
+            self.ns, validate_starting_configuration=True
+        )
         self.ns.evaluator.compute_reference_distributions()
         
         logger.info("")

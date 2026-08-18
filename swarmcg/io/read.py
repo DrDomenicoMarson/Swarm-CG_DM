@@ -1,12 +1,42 @@
+import math
 import re
 import MDAnalysis as mda
 from swarmcg.config_types import ReferenceModelConfig, SwarmConfig
 from swarmcg import config
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import get_logger
+from swarmcg.shared.periodic import PeriodicDihedralParameters
 from swarmcg.simulations.polynomial import CBTParameters, RBParameters
 
 logger = get_logger(__name__)
+
+
+def _finite_float(token, *, section: str, line: int, field: str) -> float:
+    """Parse one finite ITP floating-point field with source diagnostics.
+
+    Args:
+        token: Text token to parse.
+        section: ITP section name.
+        line: One-based source line number.
+        field: Human-readable field name.
+
+    Returns:
+        Parsed finite float.
+
+    Raises:
+        MissformattedFile: If the token is not a finite floating-point value.
+    """
+    try:
+        value = float(token)
+    except (TypeError, ValueError) as exc:
+        raise exceptions.MissformattedFile(
+            f"Invalid {field} in [{section}] at ITP line {line}: {token!r}."
+        ) from exc
+    if not math.isfinite(value):
+        raise exceptions.MissformattedFile(
+            f"Non-finite {field} in [{section}] at ITP line {line}: {token!r}."
+        )
+    return value
 
 @catch_warnings(ImportWarning, SyntaxWarning)
 def read_aa_traj(config: ReferenceModelConfig):
@@ -232,7 +262,9 @@ def read_cg_itp_file(config: SwarmConfig):
                     elif len(sp_itp_line) == 8:
                         bead_id, bead_type, resnr, residue, atom, cgnr, charge, mass = sp_itp_line[
                                                                                        :8]
-                        mass = float(mass)
+                        mass = _finite_float(
+                            mass, section="atoms", line=i + 1, field="mass"
+                        )
                     else:
                         msg = (
                             "The atom description from the input itp file: \n\n {} \n\n"
@@ -252,7 +284,9 @@ def read_cg_itp_file(config: SwarmConfig):
                     cg_itp["atoms"].append(
                         {"bead_id": int(bead_id) - 1, "bead_type": bead_type, "resnr": int(resnr),
                          "residue": residue, "atom": atom, "cgnr": int(cgnr),
-                         "charge": float(charge), "mass": mass, "vs_type": None})
+                         "charge": _finite_float(
+                             charge, section="atoms", line=i + 1, field="charge"
+                         ), "mass": mass, "vs_type": None})
                     # here there is still MASS and VS_TYPE that are subject to later modification
 
                     if not len(cg_itp["atoms"]) == int(bead_id):
@@ -291,8 +325,14 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     func = verify_handled_functions("constraint", sp_itp_line[2], i + 1)
                     cg_itp["constraint"][nb_constraints]["func"].append(func)
-                    cg_itp["constraint"][nb_constraints]["value"].append(
-                        float(sp_itp_line[3]))
+                    value = _finite_float(
+                        sp_itp_line[3],
+                        section="constraints",
+                        line=i + 1,
+                        field="length",
+                    )
+                    cg_itp["constraint"][nb_constraints]["value"].append(value)
+                    cg_itp["constraint"][nb_constraints]["value_user"].append(value)
 
                 elif section_read["bond"]:
 
@@ -323,13 +363,21 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     func = verify_handled_functions("bond", sp_itp_line[2], i + 1)
                     cg_itp["bond"][nb_bonds]["func"].append(func)
-                    cg_itp["bond"][nb_bonds]["value"].append(float(sp_itp_line[3]))
-                    cg_itp["bond"][nb_bonds]["value_user"].append(float(sp_itp_line[3]))
-                    cg_itp["bond"][nb_bonds]["fct"].append(float(sp_itp_line[4]))
-                    cg_itp["bond"][nb_bonds]["fct_user"].append(float(sp_itp_line[4]))
+                    value = _finite_float(
+                        sp_itp_line[3], section="bonds", line=i + 1, field="length"
+                    )
+                    force_constant = _finite_float(
+                        sp_itp_line[4],
+                        section="bonds",
+                        line=i + 1,
+                        field="force constant",
+                    )
+                    cg_itp["bond"][nb_bonds]["value"].append(value)
+                    cg_itp["bond"][nb_bonds]["value_user"].append(value)
+                    cg_itp["bond"][nb_bonds]["fct"].append(force_constant)
+                    cg_itp["bond"][nb_bonds]["fct_user"].append(force_constant)
 
-                    if config.cg_model.user_input and not 0 <= float(
-                            sp_itp_line[4]) <= config.optimization.default_max_fct_bonds_opti:
+                    if config.cg_model.user_input and not 0 <= force_constant <= config.optimization.default_max_fct_bonds_opti:
                         raise exceptions.MissformattedFile(
                             msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_bonds_opti,
                                                  "-max_fct_bonds_f1"))
@@ -363,30 +411,36 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     func = verify_handled_functions("angle", sp_itp_line[3], i + 1)
                     cg_itp["angle"][nb_angles]["func"].append(func)
-                    cg_itp["angle"][nb_angles]["value"].append(float(sp_itp_line[4]))
-                    cg_itp["angle"][nb_angles]["value_user"].append(float(sp_itp_line[4]))
-                    cg_itp["angle"][nb_angles]["fct"].append(float(sp_itp_line[5]))
-                    cg_itp["angle"][nb_angles]["fct_user"].append(float(sp_itp_line[5]))
+                    value = _finite_float(
+                        sp_itp_line[4], section="angles", line=i + 1, field="equilibrium angle"
+                    )
+                    force_constant = _finite_float(
+                        sp_itp_line[5],
+                        section="angles",
+                        line=i + 1,
+                        field="force constant",
+                    )
+                    cg_itp["angle"][nb_angles]["value"].append(value)
+                    cg_itp["angle"][nb_angles]["value_user"].append(value)
+                    cg_itp["angle"][nb_angles]["fct"].append(force_constant)
+                    cg_itp["angle"][nb_angles]["fct_user"].append(force_constant)
 
-                    if func == 10 and not 10.0 <= float(sp_itp_line[4]) <= 170.0:
+                    if func == 10 and not 10.0 <= value <= 170.0:
                         raise exceptions.MissformattedFile(
                             "Restricted-bending angle function 10 requires an equilibrium "
                             f"angle in [10, 170] degrees (ITP line {i + 1})."
                         )
 
                     if config.cg_model.user_input:
-                        if func == 1 and not 0 <= float(
-                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f1:
+                        if func == 1 and not 0 <= force_constant <= config.optimization.default_max_fct_angles_opti_f1:
                             raise exceptions.MissformattedFile(
                                 msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f1,
                                                      "-max_fct_angles_f1"))
-                        elif func == 2 and not 0 <= float(
-                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f2:
+                        elif func == 2 and not 0 <= force_constant <= config.optimization.default_max_fct_angles_opti_f2:
                             raise exceptions.MissformattedFile(
                                 msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f2,
                                                      "-max_fct_angles_f2"))
-                        elif func == 10 and not 0 <= float(
-                                sp_itp_line[5]) <= config.optimization.default_max_fct_angles_opti_f10:
+                        elif func == 10 and not 0 <= force_constant <= config.optimization.default_max_fct_angles_opti_f10:
                             raise exceptions.MissformattedFile(
                                 msg_force_boundaries(i + 1, 0, config.optimization.default_max_fct_angles_opti_f10,
                                                      "-max_fct_angles_f10"))
@@ -422,20 +476,22 @@ def read_cg_itp_file(config: SwarmConfig):
                     func = verify_handled_functions("dihedral", sp_itp_line[4], i + 1)
                     cg_itp["dihedral"][nb_dihedrals]["func"].append(func)
                     if func in (3, 11):
-                        try:
-                            params = [float(param) for param in sp_itp_line[5:11]]
-                        except (IndexError, ValueError):
+                        raw_params = sp_itp_line[5:11]
+                        if len(raw_params) != 6:
                             msg = (
                                 "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
                                 "Function 3/11 expects 6 parameters after the function id."
                             )
                             raise exceptions.MissformattedFile(msg)
-                        if len(params) != 6:
-                            msg = (
-                                "Incorrect reading of the CG ITP file within [dihedrals] section.\n"
-                                "Function 3/11 expects 6 parameters after the function id."
+                        params = [
+                            _finite_float(
+                                param,
+                                section="dihedrals",
+                                line=i + 1,
+                                field=f"polynomial parameter {index + 1}",
                             )
-                            raise exceptions.MissformattedFile(msg)
+                            for index, param in enumerate(raw_params)
+                        ]
                         if func == 3:
                             params = list(RBParameters.from_gromacs(params).to_gromacs())
                         else:
@@ -443,31 +499,37 @@ def read_cg_itp_file(config: SwarmConfig):
                         cg_itp["dihedral"][nb_dihedrals]["params"].append(params)
                         cg_itp["dihedral"][nb_dihedrals]["params_user"].append(list(params))
                     else:
-                        cg_itp["dihedral"][nb_dihedrals]["value"].append(float(
-                            sp_itp_line[5]))  # issue happens here for functions that are not handled
-                        cg_itp["dihedral"][nb_dihedrals]["value_user"].append(
-                            float(sp_itp_line[5]))
-                        cg_itp["dihedral"][nb_dihedrals]["fct"].append(float(sp_itp_line[6]))
-                        cg_itp["dihedral"][nb_dihedrals]["fct_user"].append(float(sp_itp_line[6]))
+                        value = _finite_float(
+                            sp_itp_line[5],
+                            section="dihedrals",
+                            line=i + 1,
+                            field="phase/equilibrium angle",
+                        )
+                        force_constant = _finite_float(
+                            sp_itp_line[6],
+                            section="dihedrals",
+                            line=i + 1,
+                            field="force constant",
+                        )
+                        cg_itp["dihedral"][nb_dihedrals]["value"].append(value)
+                        cg_itp["dihedral"][nb_dihedrals]["value_user"].append(value)
+                        cg_itp["dihedral"][nb_dihedrals]["fct"].append(force_constant)
+                        cg_itp["dihedral"][nb_dihedrals]["fct_user"].append(force_constant)
                         cg_itp["dihedral"][nb_dihedrals]["params"].append(
-                            [float(sp_itp_line[5]), float(sp_itp_line[6])]
+                            [value, force_constant]
                         )
                         cg_itp["dihedral"][nb_dihedrals]["params_user"].append(
-                            [float(sp_itp_line[5]), float(sp_itp_line[6])]
+                            [value, force_constant]
                         )
 
                     if config.cg_model.user_input:
                         from swarmcg import config as global_config
-                        if func in global_config.dihedral_func_with_mult and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult <= float(
-                                sp_itp_line[
-                                    6]) <= config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult:
+                        if func in global_config.dihedral_func_with_mult and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult <= force_constant <= config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult:
                             raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
                                                                                     -config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
                                                                                     config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
                                                                                     "-max_fct_dihedrals_f149"))
-                        elif func == 2 and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult <= float(
-                                sp_itp_line[
-                                    6]) <= config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult:
+                        elif func == 2 and not -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult <= force_constant <= config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult:
                             raise exceptions.MissformattedFile(msg_force_boundaries(i + 1,
                                                                                     -config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
                                                                                     config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
@@ -497,11 +559,18 @@ def read_cg_itp_file(config: SwarmConfig):
                     from swarmcg import config as global_config
                     if func in global_config.dihedral_func_with_mult:
                         try:
-                            cg_itp["dihedral"][nb_dihedrals]["mult"].append(
-                                int(sp_itp_line[7]))
+                            multiplicity = int(sp_itp_line[7])
                         except (IndexError, ValueError):  # incorrect read of multiplicity
                             msg = f"Incorrect read of multiplicity in dihedral with potential function {func} at ITP line {i + 1}."
                             raise exceptions.MissformattedFile(msg)
+                        if multiplicity <= 0:
+                            raise exceptions.MissformattedFile(
+                                f"Periodic dihedral function {func} at ITP line {i + 1} "
+                                "requires a strictly positive integer multiplicity."
+                            )
+                        cg_itp["dihedral"][nb_dihedrals]["mult"].append(
+                            multiplicity
+                        )
                     else:  # no multiplicity parameter is expected
                         cg_itp["dihedral"][nb_dihedrals]["mult"].append(None)
 
@@ -514,7 +583,12 @@ def read_cg_itp_file(config: SwarmConfig):
                         3]  # will be casted to int in the verification below (for factorizing checks)
                     func = vs_error_control(cg_itp, bead_id, vs_type, func, i + 1,
                                             vs_def_beads_ids)  # i is the line number
-                    vs_params = float(sp_itp_line[4])
+                    vs_params = _finite_float(
+                        sp_itp_line[4],
+                        section="virtual_sites2",
+                        line=i + 1,
+                        field="virtual-site parameter",
+                    )
                     cg_itp["atoms"][bead_id]["vs_type"] = vs_type
                     cg_itp["virtual_sites2"][bead_id] = {"bead_id": bead_id, "func": func,
                                                          "vs_def_beads_ids": vs_def_beads_ids,
@@ -530,9 +604,18 @@ def read_cg_itp_file(config: SwarmConfig):
                     func = vs_error_control(cg_itp, bead_id, vs_type, func, i + 1,
                                             vs_def_beads_ids)  # i is the line number
                     if func in [1, 2, 3]:
-                        vs_params = [float(param) for param in sp_itp_line[5:7]]
+                        raw_params = sp_itp_line[5:7]
                     elif func == 4:
-                        vs_params = [float(param) for param in sp_itp_line[5:8]]
+                        raw_params = sp_itp_line[5:8]
+                    vs_params = [
+                        _finite_float(
+                            param,
+                            section="virtual_sites3",
+                            line=i + 1,
+                            field=f"virtual-site parameter {index + 1}",
+                        )
+                        for index, param in enumerate(raw_params)
+                    ]
                     cg_itp["atoms"][bead_id]["vs_type"] = vs_type
                     cg_itp["virtual_sites3"][bead_id] = {"bead_id": bead_id, "func": func,
                                                          "vs_def_beads_ids": vs_def_beads_ids,
@@ -547,7 +630,15 @@ def read_cg_itp_file(config: SwarmConfig):
                         5]  # will be casted to int in the verification below (for factorizing checks)
                     func = vs_error_control(cg_itp, bead_id, vs_type, func, i + 1,
                                             vs_def_beads_ids)  # i is the line number
-                    vs_params = [float(param) for param in sp_itp_line[6:9]]
+                    vs_params = [
+                        _finite_float(
+                            param,
+                            section="virtual_sites4",
+                            line=i + 1,
+                            field=f"virtual-site parameter {index + 1}",
+                        )
+                        for index, param in enumerate(sp_itp_line[6:9])
+                    ]
                     cg_itp["atoms"][bead_id]["vs_type"] = vs_type
                     cg_itp["virtual_sites4"][bead_id] = {"bead_id": bead_id, "func": func,
                                                          "vs_def_beads_ids": vs_def_beads_ids,
@@ -565,8 +656,15 @@ def read_cg_itp_file(config: SwarmConfig):
                     if func == 3:
                         vs_def_beads_ids = [int(sp_itp_line[2:][i]) - 1 for i in
                                             range(0, len(sp_itp_line[2:]), 2)]
-                        vs_params = [float(sp_itp_line[2:][i]) for i in
-                                     range(1, len(sp_itp_line[2:]), 2)]
+                        vs_params = [
+                            _finite_float(
+                                sp_itp_line[2:][param_index],
+                                section="virtual_sitesn",
+                                line=i + 1,
+                                field=f"virtual-site parameter {(param_index + 1) // 2}",
+                            )
+                            for param_index in range(1, len(sp_itp_line[2:]), 2)
+                        ]
                     else:
                         vs_def_beads_ids = [int(bid) - 1 for bid in sp_itp_line[2:]]
                         vs_params = None
@@ -581,9 +679,8 @@ def read_cg_itp_file(config: SwarmConfig):
 
                     cg_itp["exclusion"].append([int(bead_id) - 1 for bead_id in sp_itp_line])
 
-    # error handling, verify that funct, value and fct are all identical within the group, as they should be, and reduce arrays to single elements
-    # TODO: make these messages more clear and CORRECT for the dihedral function handling -- also explain this is the current Opti.CG implementation, function 9 might come in next version
-    # TODO: check what kind of error or processing is done when a correct line is duplicated within a group ?? probably it goes on in a bad way
+    # Verify that function and parameter values are identical within each
+    # explicitly delimited group, then reduce the temporary arrays to scalars.
 
     def msg(geom, grp_geom):
         str_msg = (
@@ -652,6 +749,30 @@ def read_cg_itp_file(config: SwarmConfig):
                     cg_itp[geom][grp_geom][var] = var_set.pop()
                 else:
                     raise exceptions.MissformattedFile(msg(geom, grp_geom))
+
+            if func in (1, 4):
+                canonical = PeriodicDihedralParameters.from_gromacs(
+                    cg_itp[geom][grp_geom]["value"],
+                    cg_itp[geom][grp_geom]["fct"],
+                    cg_itp[geom][grp_geom]["mult"],
+                )
+                user_canonical = PeriodicDihedralParameters.from_gromacs(
+                    cg_itp[geom][grp_geom]["value_user"],
+                    cg_itp[geom][grp_geom]["fct_user"],
+                    cg_itp[geom][grp_geom]["mult"],
+                )
+                cg_itp[geom][grp_geom]["value"] = canonical.phase_degrees
+                cg_itp[geom][grp_geom]["fct"] = canonical.force_constant
+                cg_itp[geom][grp_geom]["params"] = [
+                    canonical.phase_degrees,
+                    canonical.force_constant,
+                ]
+                cg_itp[geom][grp_geom]["value_user"] = user_canonical.phase_degrees
+                cg_itp[geom][grp_geom]["fct_user"] = user_canonical.force_constant
+                cg_itp[geom][grp_geom]["params_user"] = [
+                    user_canonical.phase_degrees,
+                    user_canonical.force_constant,
+                ]
 
     nb_constraints += 1
     nb_bonds += 1

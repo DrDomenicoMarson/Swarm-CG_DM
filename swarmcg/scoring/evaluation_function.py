@@ -28,8 +28,8 @@ def eval_function(parameters_set, ns: OptimizationContext):
 
     Raises:
         OSError: If mandatory evaluation workspace files cannot be staged or
-            recorded. Simulation and empty-distribution failures are converted
-            into the finite failure objective.
+            recorded. Simulation and per-particle model-evaluation failures
+            are converted into the finite failure objective.
     """
     original_dir = os.getcwd()
     exec_dir = os.path.abspath(ns.files.exec_folder)
@@ -127,11 +127,11 @@ def eval_function(parameters_set, ns: OptimizationContext):
                     ignore_dihedrals=ignore_dihedrals,
                     calc_sasa=ns.config.output.calculate_sasa,
                     record_best_indep_params=True)
-            except exceptions.EmptyDistributionError as exc:
+            except Exception as exc:
                 scoring_failed = True
                 print_stdout_forced(
                     styling.header_warning
-                    + "Empty bond/constraint distribution; assigning worst score and continuing.\n"
+                    + "Model scoring failed; assigning worst score and continuing.\n"
                     + str(exc)
                 )
                 record_failure("crashed")
@@ -174,7 +174,6 @@ def eval_function(parameters_set, ns: OptimizationContext):
                 if global_score < ns.pso.best_fitness[0]:
                     new_best_fit = True
                     ns.pso.best_fitness = global_score, ns.status.nb_eval
-                    ns.pso.all_emd_dist_geoms = all_emd_dist_geoms
 
         else:
             if sim_failed:

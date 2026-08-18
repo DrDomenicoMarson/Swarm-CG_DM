@@ -232,7 +232,7 @@ max_fct_dihedrals_f149 = BaseField(
     dest="default_abs_range_fct_dihedrals_opti_func_with_mult",
     type=float,
     default=config.default_abs_range_fct_dihedrals_opti_func_with_mult,
-    help="Max. force ct. for dihedrals functions 1, 4, 9 (abs. kJ.mol⁻¹)",
+    help="Upper bound for canonical nonnegative force constants of dihedral\nfunctions 1 and 4 (kJ.mol⁻¹)",
 )
 max_fct_dihedrals_f2 = BaseField(
     dest="default_abs_range_fct_dihedrals_opti_func_without_mult",

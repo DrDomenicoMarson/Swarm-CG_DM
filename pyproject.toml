@@ -31,8 +31,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/GMPavanLab/Swarm-CG"
-Issues = "https://github.com/GMPavanLab/Swarm-CG/issues"
+Homepage = "https://github.com/DrDomenicoMarson/Swarm-CG_DM"
+Issues = "https://github.com/DrDomenicoMarson/Swarm-CG_DM/issues"
 
 [project.scripts]
 scg_optimize = "swarmcg.optimize_model:main"

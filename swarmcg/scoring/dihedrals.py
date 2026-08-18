@@ -1,10 +1,14 @@
 import MDAnalysis as mda
 import numpy as np
 
-from swarmcg.scoring.distances import circular_mean_degrees
+from swarmcg.shared.periodic import circular_statistics_degrees
+from swarmcg.scoring.distances import observe_histogram, require_complete_reference
+from swarmcg.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
-def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
+def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None, group_label="dihedral group"):
     """Calculate an AA-mapped circular dihedral distribution.
 
     Args:
@@ -12,9 +16,14 @@ def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
         beads_ids: Quadruplets of zero-based bead indices.
         bins: Optional histogram edges in degrees.
         bandwidth: Retained for API compatibility; normalization uses counts.
+        group_label: Human-readable group label for validation diagnostics.
 
     Returns:
         Circular mean, probability masses, degree values, and radian values.
+        The mean is ``NaN`` when the first circular moment is undefined.
+
+    Raises:
+        ValueError: If the trajectory contains no finite dihedral angle.
     """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
@@ -42,17 +51,25 @@ def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
         len(beads_ids) * ts.frame:len(beads_ids) * (ts.frame + 1)] = frame_values
 
     dihedral_values_deg = np.rad2deg(dihedral_values_rad)
-    dihedral_avg = round(circular_mean_degrees(dihedral_values_deg), 3)
-    
     dihedral_hist = None
     if bins is not None and bandwidth is not None:
-        counts = np.histogram(dihedral_values_deg, bins, density=False)[0]
-        dihedral_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
+        observation = observe_histogram(dihedral_values_deg, bins)
+        require_complete_reference(
+            observation, dihedral_values_deg, group_label, "degrees"
+        )
+        dihedral_hist = observation.probabilities
+
+    circular_statistics = circular_statistics_degrees(dihedral_values_deg)
+    dihedral_avg = (
+        round(circular_statistics.mean_degrees, 3)
+        if circular_statistics.mean_degrees is not None
+        else float("nan")
+    )
 
     return dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad
 
 
-def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
+def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None, group_label="dihedral group"):
     """Calculate a CG circular dihedral distribution.
 
     Args:
@@ -60,9 +77,14 @@ def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
         beads_ids: Quadruplets of zero-based bead indices.
         bins: Optional histogram edges in degrees.
         bandwidth: Retained for API compatibility; normalization uses counts.
+        group_label: Human-readable group label for coverage diagnostics.
 
     Returns:
         Circular mean, probability masses, degree values, and radian values.
+        The mean is ``NaN`` when the first circular moment is undefined.
+
+    Raises:
+        ValueError: If the trajectory contains no finite dihedral angle.
     """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
@@ -92,11 +114,26 @@ def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None):
     dihedral_values_deg = np.rad2deg(dihedral_values_rad)
 
     # get group average and histogram non-null values for comparison and display
-    dihedral_avg = round(circular_mean_degrees(dihedral_values_deg), 3)
-    
     dihedral_hist = None
     if bins is not None and bandwidth is not None:
-        counts = np.histogram(dihedral_values_deg, bins, density=False)[0]
-        dihedral_hist = counts.astype(float) / counts.sum() if counts.sum() else np.zeros_like(counts, dtype=float)
+        observation = observe_histogram(dihedral_values_deg, bins)
+        dihedral_hist = observation.probabilities
+        if observation.missing_count:
+            logger.warning(
+                "CG %s distribution has missing mass charged at maximum EMD cost: %s",
+                group_label,
+                observation.coverage_message(),
+            )
+
+    try:
+        circular_statistics = circular_statistics_degrees(dihedral_values_deg)
+    except ValueError:
+        dihedral_avg = float("nan")
+    else:
+        dihedral_avg = (
+            round(circular_statistics.mean_degrees, 3)
+            if circular_statistics.mean_degrees is not None
+            else float("nan")
+        )
 
     return dihedral_avg, dihedral_hist, dihedral_values_deg, dihedral_values_rad

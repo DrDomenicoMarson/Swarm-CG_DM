@@ -146,3 +146,57 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
             score = eval_function([], ctx)
 
     assert score == 1.0
+
+
+def test_model_scoring_failure_receives_finite_failure_objective():
+    """Keep an individual scoring crash from terminating the whole swarm."""
+    from swarmcg.scoring.evaluation_function import eval_function
+
+    config = SwarmConfig()
+    ctx = OptimizationContext(config=config)
+    ctx.cg_itp = _make_min_itp()
+    ctx.out_itp = _make_min_itp()
+    ctx.opti_cycle = {
+        "nb_cycle": 1,
+        "geoms": ["bond"],
+        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
+    }
+    ctx.pso.opti_geoms_all = {"bond"}
+    ctx.pso.best_fitness = (float("inf"), None)
+    ctx.pso.worst_fit_score = 999.0
+    ctx.status.start_opti_ts = 0.0
+    ctx.files.cg_itp_basename = "cg_model.itp"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ctx.files.exec_folder = tmpdir
+        os.makedirs(os.path.join(tmpdir, ".internal"))
+        input_dir = os.path.join(tmpdir, config_module.input_sim_files_dirname)
+        os.makedirs(input_dir)
+        with open(os.path.join(input_dir, "dummy.txt"), "w") as handle:
+            handle.write("dummy")
+        os.makedirs(os.path.join(tmpdir, config_module.all_evals_files_dirname))
+
+        def simulation_side_effect(working_dir, **kwargs):
+            with open(os.path.join(working_dir, "md.gro"), "w") as handle:
+                handle.write("created")
+
+        with (
+            patch(
+                "swarmcg.scoring.evaluation_function.sim.SimulationManager.run_simulation",
+                side_effect=simulation_side_effect,
+            ),
+            patch(
+                "swarmcg.scoring.evaluation_function.compare_models",
+                side_effect=RuntimeError("synthetic scoring failure"),
+            ),
+        ):
+            score = eval_function([], ctx)
+
+        pairwise = os.path.join(
+            tmpdir, config_module.opti_pairwise_distances_file
+        )
+        assert open(pairwise).read().strip() == "0"
+
+    assert score == 999.0
+    assert ctx.status.failed_eval_count == 1
+    assert ctx.status.crashed_eval_count == 1

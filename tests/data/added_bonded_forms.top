@@ -1,0 +1,15 @@
+[ defaults ]
+; nbfunc  comb-rule  gen-pairs  fudgeLJ  fudgeQQ
+1         1          no         1.0      1.0
+
+[ atomtypes ]
+; name  mass  charge  ptype  sigma  epsilon
+P1      72.0  0.0     A      0.47   0.10
+
+#include "added_bonded_forms.itp"
+
+[ system ]
+Nonzero restricted-bending, RB, and CBT test
+
+[ molecules ]
+MOL  1

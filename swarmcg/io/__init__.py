@@ -1,5 +1,6 @@
 from .read import read_aa_traj, read_cg_itp_file, validate_cg_itp
 from .write import write_cg_itp_file
+from .validation import validate_restricted_bending_start
 from .job_args import get_optimize_args, get_analyze_args, get_evaluate_args
 
 

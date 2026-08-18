@@ -4,7 +4,9 @@ import pytest
 
 from swarmcg.shared import exceptions
 from swarmcg.io.read import read_itp, read_cg_itp_file, validate_cg_itp
+from swarmcg.io.write import write_cg_itp_file
 from swarmcg.config_types import SwarmConfig
+from swarmcg.io.itp import CGITP
 
 required_itp_fields = ["real_beads_ids", "vs_beads_ids", "nb_bonds", "nb_angles",
                        "nb_dihedrals", "nb_constraints",
@@ -105,3 +107,123 @@ MOL 1
 
     assert parsed["dihedral"][0]["params"] == [-15.0, 1.0, 2.0, 3.0, 4.0, 5.0]
     assert parsed["dihedral"][1]["params"] == [10.0, 0.2, -0.4, 0.6, -0.8, 1.0]
+
+
+def _minimal_itp(section):
+    """Return a four-atom ITP with one caller-supplied section."""
+    return f"""[ moleculetype ]
+MOL 1
+
+[ atoms ]
+1 P1 1 MOL B1 1 0 72
+2 P1 1 MOL B2 2 0 72
+3 P1 1 MOL B3 3 0 72
+4 P1 1 MOL B4 4 0 72
+
+{section}
+"""
+
+
+@pytest.mark.parametrize(
+    "section,match",
+    [
+        ("[ constraints ]\n1 2 1 nan", "Non-finite length"),
+        ("[ bonds ]\n1 2 1 nan 100", "Non-finite length"),
+        ("[ bonds ]\n1 2 1 0.3 inf", "Non-finite force constant"),
+        ("[ angles ]\n1 2 3 1 nan 100", "Non-finite equilibrium angle"),
+        ("[ angles ]\n1 2 3 1 120 -inf", "Non-finite force constant"),
+        ("[ dihedrals ]\n1 2 3 4 1 nan 2 1", "Non-finite phase"),
+        ("[ dihedrals ]\n1 2 3 4 1 30 inf 1", "Non-finite force constant"),
+        ("[ dihedrals ]\n1 2 3 4 3 0 1 2 nan 4 5", "Non-finite polynomial"),
+        ("[ virtual_sites2 ]\n1 2 3 1 inf", "Non-finite virtual-site"),
+        ("[ virtual_sites3 ]\n1 2 3 4 1 nan 0", "Non-finite virtual-site"),
+        ("[ virtual_sites4 ]\n1 2 3 4 5 2 nan 0 0", "Non-finite virtual-site"),
+        ("[ virtual_sitesn ]\n1 3 2 nan 3 0.5", "Non-finite virtual-site"),
+    ],
+)
+def test_itp_reader_rejects_nonfinite_numeric_fields(
+    tmp_path, ns_opt, section, match
+):
+    topology = tmp_path / "nonfinite.itp"
+    source = _minimal_itp(section)
+    if section.startswith("[ virtual_sites"):
+        source = source.replace("1 P1 1 MOL B1", "1 vP 1 MOL B1", 1)
+    if section.startswith("[ virtual_sites4"):
+        source = source.replace(
+            "4 P1 1 MOL B4 4 0 72",
+            "4 P1 1 MOL B4 4 0 72\n5 P1 1 MOL B5 5 0 72",
+        )
+    topology.write_text(source)
+    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+
+    with pytest.raises(exceptions.MissformattedFile, match=match):
+        read_cg_itp_file(cfg)
+
+
+@pytest.mark.parametrize(
+    "atom_record,match",
+    [
+        ("1 P1 1 MOL B1 1 nan 72", "Non-finite charge"),
+        ("1 P1 1 MOL B1 1 0 inf", "Non-finite mass"),
+    ],
+)
+def test_itp_reader_rejects_nonfinite_atom_fields(
+    tmp_path, ns_opt, atom_record, match
+):
+    topology = tmp_path / "nonfinite_atom.itp"
+    topology.write_text(_minimal_itp("").replace(
+        "1 P1 1 MOL B1 1 0 72", atom_record
+    ))
+    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+
+    with pytest.raises(exceptions.MissformattedFile, match=match):
+        read_cg_itp_file(cfg)
+
+
+def test_cgitp_validate_defensively_rejects_nonfinite_state(ns_opt):
+    cfg = SwarmConfig.from_namespace(
+        ns_opt(cg_itp_filename="tests/data/cg_model.itp")
+    )
+    topology = read_cg_itp_file(cfg)
+    assert isinstance(topology, CGITP)
+    topology["angle"][0]["fct"] = float("nan")
+
+    with pytest.raises(exceptions.MissformattedFile, match="finite numeric"):
+        topology.validate()
+
+
+@pytest.mark.parametrize("multiplicity", [0, -1])
+def test_periodic_dihedral_requires_positive_multiplicity(
+    tmp_path, ns_opt, multiplicity
+):
+    topology = tmp_path / "bad_mult.itp"
+    topology.write_text(
+        _minimal_itp(f"[ dihedrals ]\n1 2 3 4 1 30 2 {multiplicity}")
+    )
+    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+
+    with pytest.raises(exceptions.MissformattedFile, match="positive integer"):
+        read_cg_itp_file(cfg)
+
+
+def test_periodic_negative_force_is_read_and_written_canonically(
+    tmp_path, ns_opt
+):
+    topology = tmp_path / "periodic.itp"
+    topology.write_text(
+        _minimal_itp("[ dihedrals ]\n1 2 3 4 1 35 -3 2")
+    )
+    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+
+    parsed = read_cg_itp_file(cfg)
+
+    assert parsed["dihedral"][0]["value"] == -145.0
+    assert parsed["dihedral"][0]["fct"] == 3.0
+    output = tmp_path / "canonical.itp"
+    write_cg_itp_file(parsed, output)
+    reparsed_cfg = SwarmConfig.from_namespace(
+        ns_opt(cg_itp_filename=str(output))
+    )
+    reparsed = read_cg_itp_file(reparsed_cfg)
+    assert reparsed["dihedral"][0]["value"] == -145.0
+    assert reparsed["dihedral"][0]["fct"] == 3.0

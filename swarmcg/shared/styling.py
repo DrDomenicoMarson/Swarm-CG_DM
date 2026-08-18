@@ -10,6 +10,15 @@ header_gmx_error = sep + "\n  GMX ERROR MSG\n" + sep + "\n\n"
 
 # String "S m a r t  .  C G" Ivrit style Fitted/Full
 def header_package(module_line):
+    """Return the full package banner for a command-line module.
+
+    Args:
+        module_line: Preformatted module-description line below the logo.
+
+    Returns:
+        Complete multiline banner with the configured issue URL.
+    """
+    issue_url = f"{config.github_url}/issues"
     return f"""
             
         
@@ -24,7 +33,7 @@ def header_package(module_line):
 |                 Swarm-CG is distributed under the terms of the MIT License.                 |
 |                                                                                             |
 |                    Feedback, questions and bug reports are welcome at:                      |
-|                        {config.github_url}/issues                          |
+|{issue_url:^93}|
 |                                                                                             |
 |                 If you found Swarm-CG useful in your research, please cite:                 |
 |            Swarm-CG: Automatic parametrization of bonded terms in MARTINI-based             |

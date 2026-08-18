@@ -20,9 +20,23 @@ class RBParameters:
     coefficients
         Independent coefficients ``C1`` through ``C5`` in kJ/mol. ``C0`` is
         deliberately excluded because it only changes the energy origin.
+
+    Raises
+    ------
+    ValueError
+        If the coefficient vector does not contain five finite values.
     """
 
     coefficients: tuple[float, float, float, float, float]
+
+    def __post_init__(self) -> None:
+        """Validate and freeze exactly five finite independent coefficients."""
+        values = np.asarray(self.coefficients, dtype=float)
+        if values.shape != (5,) or not np.all(np.isfinite(values)):
+            raise ValueError("RB parameters require exactly five finite coefficients")
+        object.__setattr__(
+            self, "coefficients", tuple(float(value) for value in values)
+        )
 
     @classmethod
     def from_gromacs(cls, values: Sequence[float]) -> "RBParameters":
@@ -69,9 +83,28 @@ class CBTParameters:
     ----------
     effective_coefficients
         Products ``B_i = k_phi * a_i`` in kJ/mol for ``i = 0, ..., 4``.
+
+    Raises
+    ------
+    ValueError
+        If the effective-coefficient vector does not contain five finite
+        values.
     """
 
     effective_coefficients: tuple[float, float, float, float, float]
+
+    def __post_init__(self) -> None:
+        """Validate and freeze exactly five finite effective coefficients."""
+        values = np.asarray(self.effective_coefficients, dtype=float)
+        if values.shape != (5,) or not np.all(np.isfinite(values)):
+            raise ValueError(
+                "CBT parameters require exactly five finite effective coefficients"
+            )
+        object.__setattr__(
+            self,
+            "effective_coefficients",
+            tuple(float(value) for value in values),
+        )
 
     @classmethod
     def from_gromacs(cls, values: Sequence[float]) -> "CBTParameters":
@@ -212,9 +245,6 @@ def fit_rb_coefficients(
     if not np.isfinite(bound) or bound <= 0:
         raise ValueError("RB coefficient bound must be a finite positive value")
     mask = np.isfinite(angles) & np.isfinite(probs) & (probs > 0)
-    if np.count_nonzero(mask) < 5:
-        raise ValueError("RB fitting requires at least five nonzero target bins")
-
     x = np.cos(angles[mask] - np.pi)
     # The PMF has an arbitrary additive origin. Fit a free intercept alongside
     # C1..C5, then discard it and apply the deterministic C0 convention only
@@ -222,8 +252,17 @@ def fit_rb_coefficients(
     design = np.column_stack(
         [np.ones_like(x), *[x**power for power in range(1, 6)]]
     )
-    pmf = -config.kB * temperature * np.log(probs[mask])
-    pmf -= np.min(pmf)
+    occupied_bins = int(np.count_nonzero(mask))
+    rank = int(np.linalg.matrix_rank(design))
+    if rank < 6:
+        raise ValueError(
+            "RB fitting is underdetermined: "
+            f"{occupied_bins} occupied bins give design rank {rank}, expected 6."
+        )
+    occupied_probabilities = probs[mask]
+    pmf = -config.kB * temperature * np.log(
+        occupied_probabilities / np.max(occupied_probabilities)
+    )
     lower = np.array([-np.inf, *([-bound] * 5)])
     upper = np.array([np.inf, *([bound] * 5)])
     result = lsq_linear(design, pmf, bounds=(lower, upper))

@@ -3,6 +3,7 @@ from typing import Any, Dict, Set, Tuple, Optional
 
 import numpy as np
 from swarmcg.config_types import SwarmConfig
+from swarmcg.simulations.boltzmann import BoltzmannTarget
 
 
 @dataclass
@@ -48,11 +49,6 @@ class ScoringState:
     angles_grid: Any = None
     dihedrals_grid: Any = None
 
-    bins_constraints_dist_matrix: Any = None
-    bins_bonds_dist_matrix: Any = None
-    bins_angles_dist_matrix: Any = None
-    bins_dihedrals_dist_matrix: Any = None
-
     # Plotting/Scoring configuration
     mismatch_order: bool = False
     row_x_scaling: bool = True
@@ -74,7 +70,7 @@ class ScoringState:
     
     # Results of BI initialization
     performed_init_BI: Dict = field(default_factory=lambda: {"bond": False, "angle": False, "dihedral": False})
-    data_BI: Dict = field(default_factory=dict) # Reference distributions
+    data_BI: Dict[str, list[BoltzmannTarget]] = field(default_factory=dict)
     domains_val: Dict = field(default_factory=dict) # Search domains
 
 

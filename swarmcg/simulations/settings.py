@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def _defatul_particle_setter(search_space_size):
+def _default_particle_setter(search_space_size):
     """Return the dimension-aware production swarm size.
 
     Args:
@@ -76,7 +76,7 @@ def _optimal(ns):
     }
     opti_cycles = [["constraint", "bond", "angle"], ["angle", "dihedral"], ["constraint", "bond", "angle", "dihedral"]]
     sim_cycles = [0, 1, 2]  # simulations types
-    return sim_types, opti_cycles, sim_cycles, _defatul_particle_setter
+    return sim_types, opti_cycles, sim_cycles, _default_particle_setter
 
 
 def _fast(ns):
@@ -91,7 +91,7 @@ def _fast(ns):
     }
     opti_cycles = [["constraint", "bond", "angle"], ["dihedral"], ["constraint", "bond", "angle", "dihedral"]]
     sim_cycles = [0, 1, 2]  # simulations types
-    return sim_types, opti_cycles, sim_cycles, _defatul_particle_setter
+    return sim_types, opti_cycles, sim_cycles, _default_particle_setter
 
 
 def _test(ns):

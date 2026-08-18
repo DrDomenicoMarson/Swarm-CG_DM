@@ -1,4 +1,5 @@
 
+import math
 import os
 from typing import Any, Optional
 
@@ -77,6 +78,24 @@ class ReferenceModelConfig(BaseModel):
     mapping_type: str = "COM"
     aa_rg_offset: float = 0.0
 
+    @field_validator("aa_rg_offset")
+    @classmethod
+    def check_finite_rg_offset(cls, value: float) -> float:
+        """Require a finite atomistic radius-of-gyration offset.
+
+        Args:
+            value: Requested offset in nanometers.
+
+        Returns:
+            Validated finite offset.
+
+        Raises:
+            ValueError: If the offset is ``NaN`` or infinite.
+        """
+        if not math.isfinite(value):
+            raise ValueError("aa_rg_offset must be finite.")
+        return value
+
     @field_validator('mapping_type')
     @classmethod
     def check_mapping_type(cls, v: str) -> str:
@@ -125,8 +144,8 @@ class SimulationConfig(BaseModel):
         Raises:
             ValueError: If *value* is not positive.
         """
-        if value <= 0:
-            raise ValueError(f"{info.field_name} must be greater than zero.")
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{info.field_name} must be finite and greater than zero.")
         return value
 
 class OptimizationConfig(BaseModel):
@@ -140,7 +159,13 @@ class OptimizationConfig(BaseModel):
     default_max_fct_angles_opti_f1: float = 1700.0
     default_max_fct_angles_opti_f2: float = 1700.0
     default_max_fct_angles_opti_f10: float = 1700.0
-    default_abs_range_fct_dihedrals_opti_func_with_mult: float = 15.0
+    default_abs_range_fct_dihedrals_opti_func_with_mult: float = Field(
+        default=15.0,
+        description=(
+            "Upper bound for canonical nonnegative periodic-dihedral force "
+            "constants in kJ/mol."
+        ),
+    )
     default_abs_range_fct_dihedrals_opti_func_without_mult: float = 1500.0
     max_abs_rb_coefficient: Optional[float] = Field(
         default=None,
@@ -231,8 +256,10 @@ class OptimizationConfig(BaseModel):
         Raises:
             ValueError: If *v* is not positive.
         """
-        if v <= 0:
-            raise ValueError(f"Please provide a value > 0 for argument corresponding to {info.field_name}.")
+        if not math.isfinite(v) or v <= 0:
+            raise ValueError(
+                f"Please provide a finite value > 0 for argument corresponding to {info.field_name}."
+            )
         return v
 
     @field_validator("max_abs_rb_coefficient", "max_abs_cbt_effective_coefficient")
@@ -250,36 +277,92 @@ class OptimizationConfig(BaseModel):
         Raises:
             ValueError: If a supplied bound is not positive.
         """
-        if value is not None and value <= 0:
-            raise ValueError(f"{info.field_name} must be greater than zero when provided.")
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise ValueError(
+                f"{info.field_name} must be finite and greater than zero when provided."
+            )
+        return value
+
+    @field_validator(
+        "bond_dist_guess_variation",
+        "angle_value_guess_variation",
+        "dihedral_value_guess_variation",
+        "fct_guess_min_flat_diff_bonds",
+        "fct_guess_min_flat_diff_angles",
+        "fct_guess_min_flat_diff_dihedrals_without_mult",
+        "fct_guess_min_flat_diff_dihedrals_with_mult",
+    )
+    @classmethod
+    def check_positive_initialization_scale(cls, value: float, info: Any) -> float:
+        """Require finite positive particle-initialization scales.
+
+        Args:
+            value: Exploration width or minimum force-constant displacement.
+            info: Pydantic validation metadata.
+
+        Returns:
+            Validated positive finite value.
+
+        Raises:
+            ValueError: If the value is non-finite or non-positive.
+        """
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{info.field_name} must be finite and greater than zero.")
+        return value
+
+    @field_validator("bonds_scaling")
+    @classmethod
+    def check_positive_bond_scaling(cls, value: float) -> float:
+        """Require a finite positive global bond-scaling factor.
+
+        Args:
+            value: Requested multiplicative scaling factor.
+
+        Returns:
+            Validated positive finite factor.
+
+        Raises:
+            ValueError: If the factor is non-finite or non-positive.
+        """
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("bonds_scaling must be finite and greater than zero.")
+        return value
+
+    @field_validator("min_bonds_length")
+    @classmethod
+    def check_nonnegative_minimum_bond_length(cls, value: float) -> float:
+        """Require a finite nonnegative minimum rescaled bond length.
+
+        Args:
+            value: Requested minimum length in nanometers; zero disables it.
+
+        Returns:
+            Validated finite length.
+
+        Raises:
+            ValueError: If the length is non-finite or negative.
+        """
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("min_bonds_length must be finite and nonnegative.")
         return value
     
     @model_validator(mode='after')
-    def check_bonds_scaling_conflicts(self):
-        # We need to know default values to check if they were modified, or rely on logic that inputs were mutually exclusive.
-        # Since we are converting from namespace where defaults are populated if missing, detecting "user provided" vs "default" is hard here
-        # unless we assume defaults.
-        # However, the logic in validation.py checked against 'config' object defaults?
-        # Actually validation.py checked: ns.bonds_scaling != config.bonds_scaling
-        # Here we only have the model. A robust way is ensuring only one is non-default?
-        # For now, let's keep it simple or skip this complex cross-validation if we trust argparse mutual exclusion.
-        # But argparse mutual exclusion wasn't strictly enforced in legacy code, validation.py did it.
-        # Pydantic validation happens *after* population.
-        
-        # If we want to strictly follow validation.py:
-        # "Only one of arguments -bonds_scaling, -bonds_scaling_str and -min_bonds_length can be provided."
-        # This implies checking if more than one is "set".
-        # But here they have values.
-        # We can implement a simplified check:
-        # If bonds_scaling != 1.0, others should be default.
-        # If bonds_scaling_str != "", others should be default.
-        # If min_bonds_length != 0.0, others should be default.
-        
-        set_count = 0
-        if self.bonds_scaling != 1.0: set_count += 1
-        if self.bonds_scaling_str != "": set_count += 1
-        if self.min_bonds_length != 0.0: set_count += 1
-        
+    def check_bonds_scaling_conflicts(self) -> "OptimizationConfig":
+        """Require exactly one active bond-rescaling policy at most.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If multiple scaling policies are active.
+        """
+        set_count = sum(
+            (
+                self.bonds_scaling != 1.0,
+                self.bonds_scaling_str != "",
+                self.min_bonds_length != 0.0,
+            )
+        )
         if set_count > 1:
             raise ValueError(
                 "Only one of arguments -bonds_scaling, -bonds_scaling_str and -min_bonds_length "
@@ -337,8 +420,8 @@ class OutputConfig(BaseModel):
         Raises:
             ValueError: If *value* is not positive.
         """
-        if value <= 0:
-            raise ValueError("plot_scale must be greater than zero.")
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("plot_scale must be finite and greater than zero.")
         return value
 
 class SwarmConfig(BaseModel):

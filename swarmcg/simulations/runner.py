@@ -12,19 +12,18 @@ from swarmcg.simulations.simulation_steps import select_class
 from swarmcg.config_types import SwarmConfig
 
 
-def exec_gmx(gmx_cmd, *, stdin_text=None, cwd=None):
+def exec_gmx(gmx_cmd: Sequence[str], *, stdin_text=None, cwd=None):
     """Execute a GROMACS command without a shell and return its exit code.
 
     Args:
-        gmx_cmd: Argument sequence. A legacy string is accepted and parsed with
-            :func:`shlex.split`, but shell operators are never interpreted.
+        gmx_cmd: Argument sequence. Shell command strings are not accepted.
         stdin_text: Optional text supplied to the command's standard input.
         cwd: Optional working directory.
 
     Returns:
         Process exit code.
     """
-    cmd = shlex.split(gmx_cmd) if isinstance(gmx_cmd, str) else list(gmx_cmd)
+    cmd = list(gmx_cmd)
     completed = subprocess.run(
         cmd,
         input=stdin_text,
@@ -112,10 +111,10 @@ class SimulationStep:
             str(setup["maxwarn"]),
         ]
 
-    def _run_cmd(self, aux_command="", mpi=True):
+    def _run_cmd(self, aux_command: Sequence[str] = (), mpi=True):
         cmd = [self.sim_setup["exec"], "mdrun", "-deffnm", self.sim_setup["md_output"]]
         if aux_command:
-            cmd.extend(shlex.split(aux_command) if isinstance(aux_command, str) else aux_command)
+            cmd.extend(aux_command)
 
         custom_args = self.sim_setup.get("gmx_args", ())
         if custom_args:
@@ -233,13 +232,13 @@ class SimulationStep:
 
         return gmx_process.returncode
 
-    def run(self, exec_path, aux_command=""):
+    def run(self, exec_path, aux_command: Sequence[str] = ()):
         """Write the MDP, preprocess it, and execute the simulation stage.
 
         Args:
             exec_path: Working directory for inputs and outputs.
-            aux_command: Additional argument string or sequence appended to
-                ``mdrun`` before configured resource arguments.
+            aux_command: Additional argument sequence appended to ``mdrun``
+                before configured resource arguments.
 
         Returns:
             GROMACS ``mdrun`` exit code (zero on success).

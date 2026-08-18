@@ -1,18 +1,19 @@
-import collections
 import numpy as np
-from scipy.optimize import curve_fit
 
 from swarmcg import config
-from swarmcg.shared import math_utils, exceptions
 from swarmcg.config_types import SwarmConfig
 from swarmcg.shared.logging_utils import get_logger
 from swarmcg.shared.math_utils import draw_float
-from swarmcg.shared.periodic import normalize_periodic_degrees, unwrap_degrees_around
-from swarmcg.simulations.polynomial import CBTParameters, RBParameters, fit_rb_coefficients
-from swarmcg.simulations.potentials import (
-    gmx_bonds_func_1, gmx_angles_func_1, gmx_angles_func_2, gmx_angles_func_10,
-    gmx_dihedrals_func_1, gmx_dihedrals_func_2, gmx_dihedrals_func_3, gmx_dihedrals_func_11
+from swarmcg.shared.periodic import (
+    PeriodicDihedralParameters,
+    normalize_periodic_degrees,
+    unwrap_degrees_around,
 )
+from swarmcg.simulations.boltzmann import (
+    BoltzmannTarget,
+    fit_bounded_force_constant,
+)
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters, fit_rb_coefficients
 
 logger = get_logger(__name__)
 
@@ -89,6 +90,18 @@ def update_cg_itp_obj(itp_obj, opti_cycle, parameters_set, exec_mode):
             else:
                 itp_obj["dihedral"][i]["fct"] = round(parameters_set[idx], 2)
                 idx += 1
+            if func in (1, 4):
+                canonical = PeriodicDihedralParameters.from_gromacs(
+                    itp_obj["dihedral"][i]["value"],
+                    itp_obj["dihedral"][i]["fct"],
+                    itp_obj["dihedral"][i]["mult"],
+                )
+                itp_obj["dihedral"][i]["value"] = round(
+                    canonical.phase_degrees, 2
+                )
+                itp_obj["dihedral"][i]["fct"] = round(
+                    canonical.force_constant, 2
+                )
             itp_obj["dihedral"][i]["params"] = [
                 itp_obj["dihedral"][i]["value"],
                 itp_obj["dihedral"][i]["fct"],
@@ -153,243 +166,205 @@ def get_search_space_boundaries(cg_itp, opti_cycle, domains_val, exec_mode, conf
                 max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
             else:
                 max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
-            search_space_boundaries.append([-max_abs, max_abs])
+            search_space_boundaries.append(
+                [0.0, max_abs] if func in (1, 4) else [-max_abs, max_abs]
+            )
 
     return search_space_boundaries
 
-def perform_BI(itp_obj, opti_cycle, data_BI, performed_init_BI, temp, config_obj: SwarmConfig, verbose=False, exec_mode=1):
-    """Initialize active force terms from reference distributions.
+def perform_BI(
+    itp_obj,
+    opti_cycle,
+    data_BI,
+    performed_init_BI,
+    temp,
+    config_obj: SwarmConfig,
+    verbose=False,
+    exec_mode=1,
+):
+    """Initialize active force terms from normalized reference probabilities.
 
-    Harmonic terms use the legacy direct-Boltzmann-inversion fits. RB terms use
-    bounded linear least squares against the target PMF. CBT terms retain their
-    canonicalized input seed because their angle-coupled coefficients are not
-    identifiable from a one-dimensional torsional marginal.
+    Ordinary bonded functions fit one bounded force constant plus an arbitrary
+    PMF intercept while holding their current equilibrium value fixed. RB fits
+    its five force-relevant coefficients only when the polynomial design is
+    identifiable. CBT retains its canonical input seed because its angle-
+    coupled coefficients cannot be initialized from a torsional marginal.
 
     Args:
         itp_obj: Working topology modified in place.
         opti_cycle: Active optimization-cycle description.
-        data_BI: Reference histogram and moment data by geometry class.
+        data_BI: ``BoltzmannTarget`` instances by geometry class and group.
         performed_init_BI: Mutable flags preventing repeated initialization.
         temp: Simulation temperature in kelvin.
         config_obj: Validated application configuration.
-        verbose: Whether to report fitted parameters.
-        exec_mode: Optimization execution mode.
+        verbose: Whether to report successful fitted parameters.
+        exec_mode: ``1`` for reference-derived equilibria or ``2`` for fixed
+            input equilibria.
+
+    Returns:
+        ``None``. Active topology groups are updated in place. Failed
+        underdetermined fits retain their existing parameters and emit a
+        warning.
     """
     opt_config = config_obj.optimization
-    
-    # Constants/Config access - using global config as it contains physical constants
-    kB = config.kB # Leaving physical constant global
-    
-    # Check bonds
+
+    def fit_group_force(group, target, basis, lower, upper, label, index):
+        """Fit one group force constant, retaining its seed on failure."""
+        try:
+            fitted = fit_bounded_force_constant(
+                target,
+                basis,
+                temp,
+                lower_bound=lower,
+                upper_bound=upper,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "%s group %s normalized-PMF initialization failed; retaining "
+                "input force constant %s: %s",
+                label,
+                index + 1,
+                group["fct"],
+                exc,
+            )
+            return
+        group["fct"] = fitted.force_constant
+        if verbose:
+            logger.info(
+                "  %s group %s estimated force constant: %s",
+                label,
+                index + 1,
+                round(group["fct"], 3),
+            )
+
     if not performed_init_BI["bond"] and opti_cycle["nb_geoms"]["bond"] > 0:
         if verbose:
             logger.info("")
-            logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate bonds force constants")
-
-        for grp_bond in range(opti_cycle["nb_geoms"]["bond"]):
-            hists_geoms_bi, std_grp_bond, avg_grp_bond, bi_xrange = data_BI["bond"][grp_bond]
-            
-            # Simple BI processing (no smoothing loop for brevity, or full copy?)
-            # Copying full logic
-            hist_geoms_modif = hists_geoms_bi ** 2 * (max(hists_geoms_bi) / max(hists_geoms_bi ** 2))
-            
-            nb_passes = 3
-            alpha = 0.55
-            for _ in range(nb_passes):
-                hist_geoms_modif = math_utils.ewma(hist_geoms_modif, alpha, int(opt_config.bi_nb_bins / 10))
-
-            y = -kB * temp * np.log(hist_geoms_modif + 1)
-            x = np.linspace(bi_xrange[0], bi_xrange[1], opt_config.bi_nb_bins, endpoint=True)
-            k = kB * temp / std_grp_bond / std_grp_bond * 100 / 2
-
-            params_guess = [k, avg_grp_bond * 10, min(y)]
-
-            # Derivative calculation
-            y_forward_shift = collections.deque(y)
-            y_forward_shift.rotate(3)
-            deriv = abs(y - y_forward_shift)
-            deriv = collections.deque(deriv)
-            deriv.rotate(-3)
-
-            for _ in range(5):
-                deriv = math_utils.sma(deriv, int(opt_config.bi_nb_bins / 5))
-
-            deriv *= np.sqrt(y / min(y))
-            with np.errstate(divide='ignore'):
-                 deriv = 1 / deriv
-            sigma = np.where(y < max(y), deriv, np.inf)
-
-            try:
-                popt, pcov = curve_fit(gmx_bonds_func_1, x * 10, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                itp_obj["bond"][grp_bond]["fct"] = popt[0] * 100
-                
-                # Enforce limits
-                max_fct = opt_config.default_max_fct_bonds_opti
-                if not 0 <= itp_obj["bond"][grp_bond]["fct"] <= max_fct:
-                    itp_obj["bond"][grp_bond]["fct"] = max_fct / 2
-                
-                if verbose:
-                    logger.info(
-                        "  Bond group %s estimated force constant: %s",
-                        grp_bond + 1,
-                        round(itp_obj["bond"][grp_bond]["fct"], 2),
-                    )
-            except Exception as e:
-                # Fallback or error logging
-                if verbose:
-                    logger.warning("  Bond group %s BI failed: %s", grp_bond + 1, e)
-
+            logger.info("Initializing bond force constants from normalized marginal PMFs")
+        for index in range(opti_cycle["nb_geoms"]["bond"]):
+            group = itp_obj["bond"][index]
+            target: BoltzmannTarget = data_BI["bond"][index]
+            basis = 0.5 * (target.centers - float(group["value"])) ** 2
+            fit_group_force(
+                group,
+                target,
+                basis,
+                0.0,
+                opt_config.default_max_fct_bonds_opti,
+                "Bond",
+                index,
+            )
         performed_init_BI["bond"] = True
 
-    # Check angles
     if not performed_init_BI["angle"] and opti_cycle["nb_geoms"]["angle"] > 0:
         if verbose:
             logger.info("")
-            logger.info("Performing Direct Boltzmann Inversion (DBI) to estimate angles force constants")
-            
-        for grp_angle in range(opti_cycle["nb_geoms"]["angle"]):
-            hists_geoms_bi, std_rad_grp_angle, bi_xrange = data_BI["angle"][grp_angle]
-            y = -kB * temp * np.log(hists_geoms_bi + 1)
-            x = np.linspace(np.deg2rad(bi_xrange[0]), np.deg2rad(bi_xrange[1]), opt_config.bi_nb_bins, endpoint=True)
-            k = kB * temp / std_rad_grp_angle / std_rad_grp_angle * 100 / 2
-            
-            sigma = np.where(y < max(y), 0.1, np.inf)
-            func = itp_obj["angle"][grp_angle]["func"] # Using itp_obj which is cg_itp effectively here?
-
-            if func == 1:
-                params_guess = [k, std_rad_grp_angle, min(y)]
-                try:
-                    popt, pcov = curve_fit(gmx_angles_func_1, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                    itp_obj["angle"][grp_angle]["fct"] = abs(popt[0])
-                except:
-                    pass
-            elif func == 2:
-                params_guess = [max(y) - min(y), std_rad_grp_angle, min(y)]
-                try:
-                    popt, pcov = curve_fit(gmx_angles_func_2, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                    if popt[0] < 0:
-                        popt[0] = 30 # fallback
-                    itp_obj["angle"][grp_angle]["fct"] = popt[0]
-                except:
-                    itp_obj["angle"][grp_angle]["fct"] = 30
-            elif func == 10:
-                params_guess = [max(y) - min(y), std_rad_grp_angle, min(y)]
-                try:
-                    popt, pcov = curve_fit(gmx_angles_func_10, x, y, p0=params_guess, sigma=sigma, maxfev=99999, absolute_sigma=False)
-                    if popt[0] < 0:
-                        popt[0] = 30 # fallback
-                    itp_obj["angle"][grp_angle]["fct"] = popt[0]
-                except:
-                    itp_obj["angle"][grp_angle]["fct"] = 30
-
-            if verbose:
-                logger.info(
-                    "  Angle group %s estimated force constant: %s",
-                    grp_angle + 1,
-                    round(itp_obj["angle"][grp_angle]["fct"], 2),
+            logger.info("Initializing angle force constants from normalized marginal PMFs")
+        for index in range(opti_cycle["nb_geoms"]["angle"]):
+            group = itp_obj["angle"][index]
+            target = data_BI["angle"][index]
+            equilibrium = np.deg2rad(float(group["value"]))
+            if group["func"] == 1:
+                basis = 0.5 * (target.centers - equilibrium) ** 2
+                upper = opt_config.default_max_fct_angles_opti_f1
+            elif group["func"] == 2:
+                basis = 0.5 * (
+                    np.cos(target.centers) - np.cos(equilibrium)
+                ) ** 2
+                upper = opt_config.default_max_fct_angles_opti_f2
+            elif group["func"] == 10:
+                sin_sq = np.sin(target.centers) ** 2
+                basis = (
+                    0.5
+                    * (np.cos(target.centers) - np.cos(equilibrium)) ** 2
+                    / sin_sq
                 )
-
+                upper = opt_config.default_max_fct_angles_opti_f10
+            else:
+                continue
+            fit_group_force(
+                group,
+                target,
+                basis,
+                0.0,
+                upper,
+                "Angle",
+                index,
+            )
         performed_init_BI["angle"] = True
 
-    # Check dihedrals
-    if not performed_init_BI["dihedral"] and opti_cycle["nb_geoms"]["dihedral"] > 0:
+    if (
+        not performed_init_BI["dihedral"]
+        and opti_cycle["nb_geoms"]["dihedral"] > 0
+    ):
         if verbose:
             logger.info("")
-            logger.info("Initializing dihedral force parameters from reference distributions")
-
-        for grp_dihedral in range(opti_cycle["nb_geoms"]["dihedral"]):
-            hists_geoms_bi, std_rad_grp_dihedral, avg_rad_grp_dihedral, bi_xrange = data_BI["dihedral"][grp_dihedral]
-            y = -kB * temp * np.log(hists_geoms_bi + 1)
-            x = np.linspace(
-                np.deg2rad(bi_xrange[0]),
-                np.deg2rad(bi_xrange[1]),
-                2 * opt_config.bi_nb_bins,
-                endpoint=True,
-            )
-            k = kB * temp / std_rad_grp_dihedral / std_rad_grp_dihedral
-            sigma = np.where(y < max(y), 0.1, np.inf)
-
-            # Again, assuming func is present in itp_obj for now, or we'd need cg_itp passed explicitly
-            func = itp_obj["dihedral"][grp_dihedral]["func"]
-
-            if exec_mode == 2:
-                value_user = itp_obj["dihedral"][grp_dihedral].get("value_user")
-                avg_rad = np.deg2rad(value_user) if value_user is not None else 0
+            logger.info("Initializing dihedral parameters from normalized marginal PMFs")
+        for index in range(opti_cycle["nb_geoms"]["dihedral"]):
+            group = itp_obj["dihedral"][index]
+            target = data_BI["dihedral"][index]
+            func = group["func"]
 
             if func in config.dihedral_func_with_mult:
-                multiplicity = itp_obj["dihedral"][grp_dihedral]["mult"]
-                params_guess = [max(y) - min(y), avg_rad_grp_dihedral, min(y)]
-                try:
-                    popt, pcov = curve_fit(
-                        gmx_dihedrals_func_1(mult=multiplicity),
-                        x,
-                        y,
-                        p0=params_guess,
-                        sigma=sigma,
-                        maxfev=99999,
-                        absolute_sigma=False,
-                    )
-                    itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
-                except:
-                    pass
+                phase = np.deg2rad(float(group["value"]))
+                basis = 1.0 + np.cos(group["mult"] * target.centers - phase)
+                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_with_mult
+                fit_group_force(
+                    group,
+                    target,
+                    basis,
+                    0.0,
+                    max_abs,
+                    "Dihedral",
+                    index,
+                )
             elif func == 2:
-                params_guess = [k, avg_rad_grp_dihedral, min(y)]
-                try:
-                    popt, pcov = curve_fit(
-                        gmx_dihedrals_func_2,
-                        x,
-                        y,
-                        p0=params_guess,
-                        sigma=sigma,
-                        maxfev=99999,
-                        absolute_sigma=False,
-                    )
-                    itp_obj["dihedral"][grp_dihedral]["fct"] = popt[0]
-                except:
-                    pass
+                equilibrium = np.deg2rad(float(group["value"]))
+                offset = (target.centers - equilibrium + np.pi) % (2 * np.pi) - np.pi
+                basis = 0.5 * offset**2
+                max_abs = opt_config.default_abs_range_fct_dihedrals_opti_func_without_mult
+                fit_group_force(
+                    group,
+                    target,
+                    basis,
+                    -max_abs,
+                    max_abs,
+                    "Dihedral",
+                    index,
+                )
             elif func == 3:
-                centers = np.linspace(
-                    np.deg2rad(bi_xrange[0]),
-                    np.deg2rad(bi_xrange[1]),
-                    len(hists_geoms_bi),
-                    endpoint=False,
-                )
-                centers += np.deg2rad(bi_xrange[1] - bi_xrange[0]) / (2 * len(hists_geoms_bi))
-                fitted = fit_rb_coefficients(
-                    centers,
-                    hists_geoms_bi,
-                    temp,
-                    itp_obj["dihedral"][grp_dihedral]["coefficient_bound"],
-                )
-                itp_obj["dihedral"][grp_dihedral]["params"] = list(fitted.to_gromacs())
+                try:
+                    fitted = fit_rb_coefficients(
+                        target.centers,
+                        target.probabilities,
+                        temp,
+                        group["coefficient_bound"],
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "RB dihedral group %s normalized-PMF initialization is "
+                        "not identifiable; retaining canonical input coefficients "
+                        "and using broad first-activation exploration: %s",
+                        index + 1,
+                        exc,
+                    )
+                else:
+                    group["params"] = list(fitted.to_gromacs())
             elif func == 11 and verbose:
                 logger.info(
                     "  CBT group %s retains its canonical input seed; its angular "
-                    "coupling is not identifiable by one-dimensional DBI.",
-                    grp_dihedral + 1,
+                    "coupling is not identifiable from a torsional marginal.",
+                    index + 1,
                 )
 
             if func not in (3, 11):
-                itp_obj["dihedral"][grp_dihedral]["params"] = [
-                    itp_obj["dihedral"][grp_dihedral]["value"],
-                    itp_obj["dihedral"][grp_dihedral]["fct"],
-                ]
-
-            if verbose:
-                if func in (3, 11):
-                    coeffs = itp_obj["dihedral"][grp_dihedral]["params"]
-                    logger.info(
-                        "  Dihedral group %s coefficients: %s",
-                        grp_dihedral + 1,
-                        [round(coeff, 2) for coeff in coeffs],
-                    )
-                else:
-                    logger.info(
-                        "  Dihedral group %s estimated force constant: %s",
-                        grp_dihedral + 1,
-                        round(itp_obj["dihedral"][grp_dihedral]["fct"], 2),
-                    )
-
+                group["params"] = [group["value"], group["fct"]]
+            elif verbose:
+                logger.info(
+                    "  Dihedral group %s coefficients: %s",
+                    index + 1,
+                    [round(coeff, 3) for coeff in group["params"]],
+                )
         performed_init_BI["dihedral"] = True
 
 def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_val,
@@ -398,6 +373,12 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                            val_guess_fact=None, fct_guess_fact=None,
                            verbose=False):
     """Build deterministic and exploratory particle initial positions.
+
+    On a polynomial group's first active cycle, one fitted/canonical seed is
+    retained and every other RB/CBT coefficient is drawn independently over
+    the complete coefficient bound. Once a finite group optimum exists,
+    subsequent cycles use clipped local perturbations around the staged
+    optimum. Equivalent deterministic seeds are not duplicated.
 
     Args:
         nb_particles: Number of particles to initialize.
@@ -448,12 +429,34 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
 
     def has_valid_best(geometry, index):
         """Return whether a per-geometry best score is available."""
-        return np.isfinite(all_best_emd_dist_geoms[geometry][index])
+        try:
+            return bool(np.isfinite(all_best_emd_dist_geoms[geometry][index]))
+        except (KeyError, TypeError):
+            return False
+
+    def append_unique_guess(candidate):
+        """Append a seed unless an equivalent particle is already present."""
+        candidate_array = np.asarray(candidate, dtype=float)
+        if not any(
+            candidate_array.shape == np.asarray(existing).shape
+            and np.allclose(candidate_array, existing, rtol=0.0, atol=1e-12)
+            for existing in initial_guess_list
+        ):
+            initial_guess_list.append(list(candidate))
 
     def unwrapped_phase(index, value):
-        """Express a serialized phase in the reference mean's local branch."""
-        center = cg_itp["dihedral"][index]["avg"]
+        """Express a serialized phase in its search domain's local branch."""
+        domain = domains_val["dihedral"][index]
+        center = (
+            (domain[0] + domain[1]) / 2.0
+            if domain is not None
+            else float(value)
+        )
         return float(unwrap_degrees_around(np.array([value]), center)[0])
+
+    def force_bounds(func, maximum):
+        """Return canonical force bounds for an ordinary dihedral form."""
+        return (0.0, maximum) if func in (1, 4) else (-maximum, maximum)
 
 
     # 1. Exact current ITP (or BI in exec_mode 1)
@@ -500,14 +503,13 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
             max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
         else:
             max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
-        input_guess.append(min(max(out_itp["dihedral"][i]["fct"], -max_abs), max_abs))
+        lower, upper = force_bounds(func, max_abs)
+        input_guess.append(min(max(out_itp["dihedral"][i]["fct"], lower), upper))
 
-    initial_guess_list.append(input_guess)
-    num_particle_random_start = 1
+    append_unique_guess(input_guess)
 
     # 2. Particle from best EMD or user input
     if opti_cycle["nb_cycle"] > 1:
-        num_particle_random_start += 1
         input_guess = []
 
         # Constraints
@@ -582,12 +584,12 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
             else:
                 max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
-            input_guess.append(min(max(fct_val, -max_abs), max_abs))
+            lower, upper = force_bounds(func, max_abs)
+            input_guess.append(min(max(fct_val, lower), upper))
 
-        initial_guess_list.append(input_guess)
+        append_unique_guess(input_guess)
 
     elif user_input:
-        num_particle_random_start += 1
         input_guess = []
 
         # constraints
@@ -634,12 +636,15 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 max_abs = default_abs_range_fct_dihedrals_opti_func_without_mult
             else:
                 max_abs = default_abs_range_fct_dihedrals_opti_func_with_mult
-            input_guess.append(min(max(out_itp["dihedral"][i]["fct_user"], -max_abs), max_abs))
+            lower, upper = force_bounds(func, max_abs)
+            input_guess.append(
+                min(max(out_itp["dihedral"][i]["fct_user"], lower), upper)
+            )
 
-        initial_guess_list.append(input_guess)
+        append_unique_guess(input_guess)
 
     # 3. Variations for remaining particles
-    for i in range(num_particle_random_start, nb_particles):
+    for i in range(len(initial_guess_list), nb_particles):
         init_guess = []
 
         # constraints
@@ -698,6 +703,15 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
             func = cg_itp["dihedral"][j]["func"]
             if func in (3, 11):
                 max_abs = cg_itp["dihedral"][j]["coefficient_bound"]
+                if not has_valid_best("dihedrals", j):
+                    # A polynomial group has no equilibrium phase and CBT has
+                    # no identifiable one-dimensional DBI seed. Its first
+                    # active cycle therefore starts with one canonical/fitted
+                    # particle and full-bound exploration for all others.
+                    init_guess.extend(
+                        draw_float(-max_abs, max_abs, 3) for _ in range(5)
+                    )
+                    continue
                 for coeff in polynomial_coefficients(out_itp["dihedral"][j]):
                     if coeff > 0:
                         draw_low = coeff * (1 - fct_guess_fact * emd_err_fact)
@@ -727,7 +741,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
                 draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_without_mult), -default_abs_range_fct_dihedrals_opti_func_without_mult if default_abs_range_fct_dihedrals_opti_func_without_mult > 0 else 0) # Fallback bound
                 draw_high = min(max(draw_high, out_itp["dihedral"][j]["fct"] + fct_guess_min_flat_diff_dihedrals_without_mult), default_abs_range_fct_dihedrals_opti_func_without_mult)
             else:
-                draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_with_mult), -default_abs_range_fct_dihedrals_opti_func_with_mult)
+                draw_low = max(min(draw_low, out_itp["dihedral"][j]["fct"] - fct_guess_min_flat_diff_dihedrals_with_mult), 0.0)
                 draw_high = min(max(draw_high, out_itp["dihedral"][j]["fct"] + fct_guess_min_flat_diff_dihedrals_with_mult), default_abs_range_fct_dihedrals_opti_func_with_mult)
             init_guess.append(draw_float(draw_low, draw_high, 3))
 

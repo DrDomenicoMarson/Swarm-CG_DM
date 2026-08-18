@@ -9,7 +9,7 @@ from matplotlib.ticker import MaxNLocator
 import swarmcg.shared.styling
 import swarmcg.io as io
 from swarmcg import config
-from swarmcg.config_types import SwarmConfig
+from swarmcg.config_types import OutputConfig, SwarmConfig
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import get_logger, setup_logging
 
@@ -30,6 +30,21 @@ def _finite_max(values, default=1.0):
     finite = finite[np.isfinite(finite)]
     return float(np.max(finite)) if finite.size else float(default)
 
+
+def _validated_plot_scale(value):
+    """Return a finite positive monitor plot scale.
+
+    Args:
+        value: Raw scale parsed from the monitor command line.
+
+    Returns:
+        Validated finite positive scale.
+
+    Raises:
+        ValidationError: If *value* is zero, negative, ``NaN``, or infinite.
+    """
+    return OutputConfig(plot_scale=value).plot_scale
+
 @catch_warnings(DeprecationWarning)  # filter matplotlib warnings
 @catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
 @catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
@@ -41,9 +56,13 @@ def run(ns):
             output plot path, and plot scale.
 
     Raises:
+        ValidationError: If the requested plot scale is not finite and
+            positive.
         IncompleteOptimisationFile: If recap files contain no complete rows.
         OptimisationResultsError: If no selectable evaluation is available.
     """
+    ns.plot_scale = _validated_plot_scale(ns.plot_scale)
+
     # TODO: print some text to tell user if opti run finished or not -- then we can only look at the results files, not the running processes on the machine
 
     display_sim_crashes = True

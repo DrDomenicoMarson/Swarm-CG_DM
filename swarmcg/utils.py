@@ -1,4 +1,5 @@
 import contextlib
+import math
 import sys
 
 import MDAnalysis as mda
@@ -31,13 +32,19 @@ def set_MDA_backend(ns):
 
 
 def process_scaling_str(ns):
-    """Process specific bonds scaling string, if provided.
+    """Parse optional per-group bond and constraint target lengths.
 
-    ns requires:
-        bonds_scaling_str
+    Args:
+        ns: Optimization context containing the scaling string and parsed CG
+            topology. Its ``scoring.bonds_scaling_specific`` field is updated.
 
-    ns creates:
-        bonds_scaling_specific
+    Returns:
+        ``None``.
+
+    Raises:
+        InvalidArgument: If the specification is malformed, duplicated,
+            references a missing group, or contains a non-positive/non-finite
+            target length.
     """
     ns.scoring.bonds_scaling_specific = None
     # We compare against default in config to see if user provided something different
@@ -65,10 +72,11 @@ def process_scaling_str(ns):
                         info = "A constraint group id exceeds the number of constraints groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
                     if not "C" + geom_id in ns.scoring.bonds_scaling_specific:
-                        if float(sp_str[i + 1]) < 0:
-                            info = "You cannot provide negative values for average distribution length."
+                        target_length = float(sp_str[i + 1])
+                        if not math.isfinite(target_length) or target_length <= 0:
+                            info = "Average distribution lengths must be finite and positive."
                             raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
-                        ns.scoring.bonds_scaling_specific["C" + geom_id] = float(sp_str[i + 1])
+                        ns.scoring.bonds_scaling_specific["C" + geom_id] = target_length
                     else:
                         info = f"A constraint group id is provided multiple times (id: {geom_id})"
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
@@ -77,10 +85,11 @@ def process_scaling_str(ns):
                         info = "A bond group id exceeds the number of bonds groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
                     if not "B" + geom_id in ns.scoring.bonds_scaling_specific:
-                        if float(sp_str[i + 1]) < 0:
-                            info = "You cannot provide negative values for average distribution length."
+                        target_length = float(sp_str[i + 1])
+                        if not math.isfinite(target_length) or target_length <= 0:
+                            info = "Average distribution lengths must be finite and positive."
                             raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
-                        ns.scoring.bonds_scaling_specific["B" + geom_id] = float(sp_str[i + 1])
+                        ns.scoring.bonds_scaling_specific["B" + geom_id] = target_length
                     else:
                         info = f"A bond group id is provided multiple times (id: {geom_id})"
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)

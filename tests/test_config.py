@@ -2,7 +2,20 @@ import pytest
 from argparse import Namespace
 from pydantic import ValidationError
 
-from swarmcg.config_types import GromacsConfig, OptimizationConfig, SimulationConfig, SwarmConfig
+from swarmcg.config_types import (
+    GromacsConfig,
+    OptimizationConfig,
+    OutputConfig,
+    ReferenceModelConfig,
+    SimulationConfig,
+    SwarmConfig,
+)
+from swarmcg.context import OptimizationContext
+from swarmcg.analyze_optimization import _validated_plot_scale
+from swarmcg.io.job_args.analyze_config import get_analyze_args
+from swarmcg.io.job_args.optimize_config import get_optimize_args
+from swarmcg.shared import exceptions
+from swarmcg.utils import process_scaling_str
 
 def test_swarm_config_defaults():
     config = SwarmConfig()
@@ -53,8 +66,60 @@ def test_config_immutability_partial():
         lambda: SimulationConfig(sim_duration_short=-1),
         lambda: OptimizationConfig(bw_dihedrals=0),
         lambda: OptimizationConfig(max_abs_rb_coefficient=0),
+        lambda: SimulationConfig(temp=float("nan")),
+        lambda: SimulationConfig(sim_duration_long=float("inf")),
+        lambda: OptimizationConfig(bw_angles=float("nan")),
+        lambda: OptimizationConfig(max_abs_cbt_effective_coefficient=float("inf")),
+        lambda: OptimizationConfig(bond_dist_guess_variation=float("nan")),
+        lambda: OptimizationConfig(bonds2angles_scoring_factor=float("inf")),
+        lambda: OptimizationConfig(bonded_max_range=float("nan")),
+        lambda: OptimizationConfig(bonds_scaling=float("inf")),
+        lambda: OptimizationConfig(min_bonds_length=float("nan")),
+        lambda: ReferenceModelConfig(aa_rg_offset=float("inf")),
+        lambda: OutputConfig(plot_scale=float("inf")),
     ],
 )
 def test_scientific_numeric_validation(factory):
     with pytest.raises(ValidationError):
         factory()
+
+
+@pytest.mark.parametrize(
+    "option,value,field",
+    [
+        ("-temp", "nan", "temp"),
+        ("-cg_time_short", "inf", "sim_duration_short"),
+        ("-bw_bonds", "nan", "bw_bonds"),
+        ("-b2a_score_fact", "inf", "bonds2angles_scoring_factor"),
+        ("-max_rb_coeff", "-inf", "max_abs_rb_coefficient"),
+        ("-bonds_max_range", "inf", "bonded_max_range"),
+        ("-aa_rg_offset", "nan", "aa_rg_offset"),
+    ],
+)
+def test_cli_rejects_nonfinite_scientific_values(option, value, field):
+    arguments = [f"{option}={value}"] if value.startswith("-") else [option, value]
+    namespace = get_optimize_args().parse_args(arguments)
+
+    with pytest.raises(ValidationError, match=field):
+        SwarmConfig.from_namespace(namespace)
+
+
+@pytest.mark.parametrize("value", ["0", "nan", "inf", "-inf"])
+def test_group_specific_scaling_rejects_invalid_lengths(value):
+    config = SwarmConfig(
+        optimization=OptimizationConfig(bonds_scaling_str=f"B1 {value}")
+    )
+    context = OptimizationContext(config=config)
+    context.cg_itp = {"nb_constraints": 0, "nb_bonds": 1}
+
+    with pytest.raises(exceptions.InvalidArgument, match="finite and positive"):
+        process_scaling_str(context)
+
+
+@pytest.mark.parametrize("value", ["0", "nan", "inf", "-inf"])
+def test_monitor_cli_rejects_invalid_plot_scale(value):
+    arguments = [f"-plot_scale={value}"] if value.startswith("-") else ["-plot_scale", value]
+    namespace = get_analyze_args().parse_args(arguments)
+
+    with pytest.raises(ValidationError, match="plot_scale"):
+        _validated_plot_scale(namespace.plot_scale)

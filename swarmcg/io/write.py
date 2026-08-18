@@ -1,5 +1,8 @@
 from swarmcg.simulations.polynomial import CBTParameters, RBParameters
-from swarmcg.shared.periodic import normalize_periodic_degrees
+from swarmcg.shared.periodic import (
+    PeriodicDihedralParameters,
+    normalize_periodic_degrees,
+)
 
 
 def write_cg_itp_file(
@@ -124,8 +127,15 @@ def write_cg_itp_file(
                         multiplicity = itp_obj["dihedral"][j]["mult"]
                         if multiplicity == None:
                             multiplicity = ""
-
-                        grp_val = normalize_periodic_degrees(grp_val)
+                        if func in (1, 4):
+                            canonical = PeriodicDihedralParameters.from_gromacs(
+                                grp_val, grp_fct, multiplicity
+                            )
+                            grp_val = canonical.phase_degrees
+                            grp_fct = canonical.force_constant
+                            multiplicity = canonical.multiplicity
+                        else:
+                            grp_val = normalize_periodic_degrees(grp_val)
                         fp.write(
                             "{beads[0]:>5} {beads[1]:>5} {beads[2]:>5} {beads[3]:>5} {0:>7}    {1:9.2f} {2:7.2f}       {4}     ; {3}\n".format(
                                 func, grp_val, grp_fct, dihedral_type,
