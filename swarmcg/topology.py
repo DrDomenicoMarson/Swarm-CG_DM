@@ -136,6 +136,21 @@ class ConstraintGroup:
     average: float | None = field(default=None, compare=False)
     histogram: Any = field(default=None, repr=False, compare=False)
 
+    @property
+    def equilibrium(self) -> float:
+        """Return the active constrained distance."""
+        return self.parameters.length
+
+    @equilibrium.setter
+    def equilibrium(self, value: float) -> None:
+        """Replace the active constrained distance."""
+        self.parameters = ConstraintParameters(value)
+
+    @property
+    def input_equilibrium(self) -> float:
+        """Return the constrained distance supplied by the user."""
+        return self.input_parameters.length
+
 
 @dataclass
 class BondGroup:
@@ -157,6 +172,36 @@ class BondGroup:
     average: float | None = field(default=None, compare=False)
     histogram: Any = field(default=None, repr=False, compare=False)
 
+    @property
+    def equilibrium(self) -> float:
+        """Return the active equilibrium distance."""
+        return self.parameters.equilibrium
+
+    @equilibrium.setter
+    def equilibrium(self, value: float) -> None:
+        """Replace the active equilibrium distance."""
+        self.parameters = HarmonicParameters(value, self.parameters.force_constant)
+
+    @property
+    def force_constant(self) -> float:
+        """Return the active force constant."""
+        return self.parameters.force_constant
+
+    @force_constant.setter
+    def force_constant(self, value: float) -> None:
+        """Replace the active force constant."""
+        self.parameters = HarmonicParameters(self.parameters.equilibrium, value)
+
+    @property
+    def input_equilibrium(self) -> float:
+        """Return the user-supplied equilibrium distance."""
+        return self.input_parameters.equilibrium
+
+    @property
+    def input_force_constant(self) -> float:
+        """Return the user-supplied force constant."""
+        return self.input_parameters.force_constant
+
 
 @dataclass
 class AngleGroup:
@@ -177,6 +222,36 @@ class AngleGroup:
     input_parameters: HarmonicParameters
     average: float | None = field(default=None, compare=False)
     histogram: Any = field(default=None, repr=False, compare=False)
+
+    @property
+    def equilibrium(self) -> float:
+        """Return the active equilibrium angle."""
+        return self.parameters.equilibrium
+
+    @equilibrium.setter
+    def equilibrium(self, value: float) -> None:
+        """Replace the active equilibrium angle."""
+        self.parameters = HarmonicParameters(value, self.parameters.force_constant)
+
+    @property
+    def force_constant(self) -> float:
+        """Return the active force constant."""
+        return self.parameters.force_constant
+
+    @force_constant.setter
+    def force_constant(self, value: float) -> None:
+        """Replace the active force constant."""
+        self.parameters = HarmonicParameters(self.parameters.equilibrium, value)
+
+    @property
+    def input_equilibrium(self) -> float:
+        """Return the user-supplied equilibrium angle."""
+        return self.input_parameters.equilibrium
+
+    @property
+    def input_force_constant(self) -> float:
+        """Return the user-supplied force constant."""
+        return self.input_parameters.force_constant
 
 
 @dataclass
@@ -201,6 +276,110 @@ class DihedralGroup:
     phase_moment_resultant: float | None = field(default=None, compare=False)
     polynomial_symmetry_tv: float | None = field(default=None, compare=False)
     coefficient_bound: float | None = field(default=None, compare=False)
+
+    @property
+    def equilibrium(self) -> float | None:
+        """Return the active phase/equilibrium angle, if the form has one."""
+        if isinstance(self.parameters, PeriodicDihedralParameters):
+            return self.parameters.phase_degrees
+        if isinstance(self.parameters, HarmonicParameters):
+            return self.parameters.equilibrium
+        return None
+
+    @equilibrium.setter
+    def equilibrium(self, value: float) -> None:
+        """Replace the active phase/equilibrium angle."""
+        if isinstance(self.parameters, PeriodicDihedralParameters):
+            self.parameters = PeriodicDihedralParameters(
+                value,
+                self.parameters.force_constant,
+                self.parameters.multiplicity,
+            )
+        elif isinstance(self.parameters, HarmonicParameters):
+            self.parameters = HarmonicParameters(value, self.parameters.force_constant)
+        else:
+            raise TypeError("Polynomial dihedrals do not have an equilibrium angle.")
+
+    @property
+    def force_constant(self) -> float | None:
+        """Return the active force constant, if the form has one."""
+        if isinstance(
+            self.parameters, (PeriodicDihedralParameters, HarmonicParameters)
+        ):
+            return self.parameters.force_constant
+        return None
+
+    @force_constant.setter
+    def force_constant(self, value: float) -> None:
+        """Replace the active force constant."""
+        if isinstance(self.parameters, PeriodicDihedralParameters):
+            self.parameters = PeriodicDihedralParameters(
+                self.parameters.phase_degrees,
+                value,
+                self.parameters.multiplicity,
+            )
+        elif isinstance(self.parameters, HarmonicParameters):
+            self.parameters = HarmonicParameters(self.parameters.equilibrium, value)
+        else:
+            raise TypeError("Polynomial dihedrals do not have a force constant.")
+
+    @property
+    def multiplicity(self) -> int | None:
+        """Return the active periodic multiplicity, if applicable."""
+        return (
+            self.parameters.multiplicity
+            if isinstance(self.parameters, PeriodicDihedralParameters)
+            else None
+        )
+
+    @property
+    def input_equilibrium(self) -> float | None:
+        """Return the user-supplied phase/equilibrium angle, if applicable."""
+        if isinstance(self.input_parameters, PeriodicDihedralParameters):
+            return self.input_parameters.phase_degrees
+        if isinstance(self.input_parameters, HarmonicParameters):
+            return self.input_parameters.equilibrium
+        return None
+
+    @property
+    def input_force_constant(self) -> float | None:
+        """Return the user-supplied force constant, if applicable."""
+        if isinstance(
+            self.input_parameters,
+            (PeriodicDihedralParameters, HarmonicParameters),
+        ):
+            return self.input_parameters.force_constant
+        return None
+
+    @property
+    def gromacs_parameters(self) -> tuple[float, ...]:
+        """Return the active canonical GROMACS parameter sequence."""
+        if isinstance(self.parameters, PeriodicDihedralParameters):
+            return (
+                self.parameters.phase_degrees,
+                self.parameters.force_constant,
+            )
+        if isinstance(self.parameters, HarmonicParameters):
+            return (
+                self.parameters.equilibrium,
+                self.parameters.force_constant,
+            )
+        return self.parameters.to_gromacs()
+
+    @property
+    def input_gromacs_parameters(self) -> tuple[float, ...]:
+        """Return the user-supplied canonical GROMACS parameter sequence."""
+        if isinstance(self.input_parameters, PeriodicDihedralParameters):
+            return (
+                self.input_parameters.phase_degrees,
+                self.input_parameters.force_constant,
+            )
+        if isinstance(self.input_parameters, HarmonicParameters):
+            return (
+                self.input_parameters.equilibrium,
+                self.input_parameters.force_constant,
+            )
+        return self.input_parameters.to_gromacs()
 
 
 @dataclass

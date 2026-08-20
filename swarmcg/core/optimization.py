@@ -115,10 +115,10 @@ class SwarmOptimizer:
 
     def _create_output_files(self):
         with open(os.path.join(self.ns.files.exec_folder, config.opti_perf_recap_file), "w") as fp:
-            fp.write(f"# nb constraints: {self.ns.cg_itp['nb_constraints']}\n")
-            fp.write(f"# nb bonds: {self.ns.cg_itp['nb_bonds']}\n")
-            fp.write(f"# nb angles: {self.ns.cg_itp['nb_angles']}\n")
-            fp.write(f"# nb dihedrals: {self.ns.cg_itp['nb_dihedrals']}\n")
+            fp.write(f"# nb constraints: {self.ns.cg_itp.constraint_count}\n")
+            fp.write(f"# nb bonds: {self.ns.cg_itp.bond_count}\n")
+            fp.write(f"# nb angles: {self.ns.cg_itp.angle_count}\n")
+            fp.write(f"# nb dihedrals: {self.ns.cg_itp.dihedral_count}\n")
             fp.write("#\n")
             fp.write(
                 "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles "
@@ -153,7 +153,7 @@ class SwarmOptimizer:
         self.ns.status.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}
 
         # Handle dihedrals case
-        if self.ns.cg_itp["nb_dihedrals"] == 0:
+        if self.ns.cg_itp.dihedral_count == 0:
             opti_cycles = self._remove_dihedrals_from_cycles(opti_cycles)
 
         self.ns.scoring.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
@@ -161,8 +161,13 @@ class SwarmOptimizer:
         self.ns.pso.best_fitness = [np.inf, None]
 
         # Initialize tracking dictionaries
-        for geom_type in ["constraints", "bonds", "angles", "dihedrals"]:
-            nb_geom = self.ns.cg_itp[f"nb_{geom_type}"]
+        group_counts = {
+            "constraints": self.ns.cg_itp.constraint_count,
+            "bonds": self.ns.cg_itp.bond_count,
+            "angles": self.ns.cg_itp.angle_count,
+            "dihedrals": self.ns.cg_itp.dihedral_count,
+        }
+        for geom_type, nb_geom in group_counts.items():
             self.ns.pso.all_best_emd_dist_geoms[geom_type] = {i: np.nan for i in range(nb_geom)}
             self.ns.pso.all_best_params_dist_geoms[geom_type] = {i: {} for i in range(nb_geom)}
 
@@ -275,13 +280,13 @@ class SwarmOptimizer:
 
     def _update_geom_counts_for_cycle(self):
         if "constraint" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["constraint"] = self.ns.cg_itp["nb_constraints"]
+            self.ns.opti_cycle["nb_geoms"]["constraint"] = self.ns.cg_itp.constraint_count
         if "bond" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["bond"] = self.ns.cg_itp["nb_bonds"]
+            self.ns.opti_cycle["nb_geoms"]["bond"] = self.ns.cg_itp.bond_count
         if "angle" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["angle"] = self.ns.cg_itp["nb_angles"]
+            self.ns.opti_cycle["nb_geoms"]["angle"] = self.ns.cg_itp.angle_count
         if "dihedral" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["dihedral"] = self.ns.cg_itp["nb_dihedrals"]
+            self.ns.opti_cycle["nb_geoms"]["dihedral"] = self.ns.cg_itp.dihedral_count
 
     def _get_geoms_display_string(self):
         geoms_display = []
@@ -306,19 +311,19 @@ class SwarmOptimizer:
         bonded_class_active = bool({"constraint", "bond"}.intersection(active))
         constraints_bonds = (
             np.sqrt(
-                self.ns.cg_itp["nb_constraints"] * constraint_max**2
-                + self.ns.cg_itp["nb_bonds"] * bond_max**2
+                self.ns.cg_itp.constraint_count * constraint_max**2
+                + self.ns.cg_itp.bond_count * bond_max**2
             )
             if bonded_class_active
             else 0.0
         )
         angles = (
-            np.sqrt(self.ns.cg_itp["nb_angles"] * angle_max**2)
+            np.sqrt(self.ns.cg_itp.angle_count * angle_max**2)
             if "angle" in active
             else 0.0
         )
         dihedrals = (
-            np.sqrt(self.ns.cg_itp["nb_dihedrals"] * dihedral_max**2)
+            np.sqrt(self.ns.cg_itp.dihedral_count * dihedral_max**2)
             if "dihedral" in active
             else 0.0
         )

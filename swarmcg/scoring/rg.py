@@ -10,8 +10,6 @@ def compute_Rg(universe, atom_selection, backend='serial', offset=0.0):
     # but here we pass the AtomGroup or indices directly?
     # The original code used specific slicing:
     # AA: ns.aa_universe.atoms[:len(ns.all_atoms)]
-    # AA_mapped: ns.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])]
-    # CG: ns.cg_universe.atoms[:len(ns.cg_itp["atoms"])]
     
     # So the caller should pass the *AtomGroup* or sliced atoms object.
     

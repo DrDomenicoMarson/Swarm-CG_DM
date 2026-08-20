@@ -86,7 +86,7 @@ def eval_function(parameters_set, ns: OptimizationContext):
             print_sections = ["constraint", "bond", "angle", "exclusion"]
         else:
             print_sections = ["constraint", "bond", "angle", "dihedral", "exclusion"]
-        io.write_cg_itp_file(ns.out_itp, out_path_itp, print_sections=print_sections)
+        io.write_cg_topology(ns.out_itp, out_path_itp, sections=print_sections)
         itp_root, _ = os.path.splitext(ns.files.cg_itp_basename)
         eval_itp_name = f"{itp_root}_eval_step_{ns.status.nb_eval}.itp"
         shutil.copy(out_path_itp, os.path.join(all_evals_dir, eval_itp_name))
@@ -241,9 +241,11 @@ def eval_function(parameters_set, ns: OptimizationContext):
             shutil.rmtree(current_eval_path)
 
         if eval_score == ns.pso.worst_fit_score:
-            geometry_count = sum(
-                len(ns.cg_itp[name])
-                for name in ("constraint", "bond", "angle", "dihedral")
+            geometry_count = (
+                ns.cg_itp.constraint_count
+                + ns.cg_itp.bond_count
+                + ns.cg_itp.angle_count
+                + ns.cg_itp.dihedral_count
             )
             all_dist_pairwise = "nan " * geometry_count + "\n"
             print_stdout_forced(
@@ -278,14 +280,14 @@ def eval_function(parameters_set, ns: OptimizationContext):
             ns.opti_cycle["nb_cycle"], ns.status.nb_eval, fit_score_total, fit_score_constraints_bonds, fit_score_angles,
             fit_score_dihedrals, eval_score, ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std, ns.results.gyr_cg, ns.results.gyr_cg_std,
             ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std, ns.results.sasa_cg, ns.results.sasa_cg_std)))) + " "
-            for i in range(len(ns.cg_itp["constraint"])):
-                recap_line += f"{ns.out_itp['constraint'][i]['value']} "
-            for i in range(len(ns.cg_itp["bond"])):
-                recap_line += f"{ns.out_itp['bond'][i]['value']} {ns.out_itp['bond'][i]['fct']} "
-            for i in range(len(ns.cg_itp["angle"])):
-                recap_line += f"{ns.out_itp['angle'][i]['value']} {ns.out_itp['angle'][i]['fct']} "
-            for i in range(len(ns.cg_itp["dihedral"])):
-                func = ns.cg_itp["dihedral"][i]["func"]
+            for group in ns.out_itp.constraints:
+                recap_line += f"{group.equilibrium} "
+            for group in ns.out_itp.bonds:
+                recap_line += f"{group.equilibrium} {group.force_constant} "
+            for group in ns.out_itp.angles:
+                recap_line += f"{group.equilibrium} {group.force_constant} "
+            for i, group in enumerate(ns.out_itp.dihedrals):
+                func = ns.cg_itp.dihedrals[i].function
                 if ns.opti_cycle["nb_geoms"]["dihedral"] == 0:
                     if func in (3, 11):
                         recap_line += "0 0 0 0 0 0 "
@@ -293,9 +295,9 @@ def eval_function(parameters_set, ns: OptimizationContext):
                         recap_line += "0 0 "
                 else:
                     if func in (3, 11):
-                        recap_line += " ".join(map(str, ns.out_itp["dihedral"][i]["params"])) + " "
+                        recap_line += " ".join(map(str, group.gromacs_parameters)) + " "
                     else:
-                        recap_line += f"{ns.out_itp['dihedral'][i]['value']} {ns.out_itp['dihedral'][i]['fct']} "
+                        recap_line += f"{group.equilibrium} {group.force_constant} "
             recap_line += f"{current_eval_time} {current_total_time}"
             fp.write(recap_line + "\n")
     finally:

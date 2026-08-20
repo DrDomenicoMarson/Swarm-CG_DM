@@ -99,7 +99,7 @@ def compute_SASA(context: OptimizationContext, traj_type: str):
         raise exceptions.ComputationError(
             "Optional SASA requires a CG TPR topology; no readable CG topology data was found."
         )
-    real_bead_ids = list(ns.cg_itp["real_beads_ids"])
+    real_bead_ids = list(ns.cg_itp.real_bead_ids)
     if not real_bead_ids:
         raise exceptions.ComputationError("Optional SASA requires at least one real CG bead.")
 

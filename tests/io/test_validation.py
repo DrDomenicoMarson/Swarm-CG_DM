@@ -6,14 +6,23 @@ import pytest
 
 from swarmcg.io.validation import validate_restricted_bending_start
 from swarmcg.shared import exceptions
+from swarmcg.topology import AngleGroup, Atom, CGTopology, HarmonicParameters
 
 
 def _reb_topology():
     """Return a minimal three-bead restricted-bending topology."""
-    return {
-        "atoms": [{"bead_id": index} for index in range(3)],
-        "angle": [{"func": 10, "beads": [[0, 1, 2]]}],
-    }
+    parameters = HarmonicParameters(100.0, 25.0)
+    return CGTopology(
+        atoms=[
+            Atom(index, "P1", 1, "MOL", f"B{index + 1}", index + 1, 0.0, 72.0)
+            for index in range(3)
+        ],
+        angles=[
+            AngleGroup(
+                "1", [(0, 1, 2)], 10, parameters, parameters
+            )
+        ],
+    )
 
 
 def _write_gro(path, angle_degrees, *, atom_count=3, nonfinite=False, pbc=False):

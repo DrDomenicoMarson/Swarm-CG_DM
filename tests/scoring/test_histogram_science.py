@@ -26,6 +26,7 @@ from swarmcg.shared.periodic import (
 from swarmcg.shared import exceptions
 from swarmcg.simulations.potentials import gmx_dihedrals_func_1
 from swarmcg.scoring.compare import _annotate_missing_mass
+from swarmcg.topology import CGTopology
 
 
 def test_histogram_grid_dimensions_and_normalization():
@@ -230,12 +231,12 @@ def test_failure_score_is_next_float_above_active_theoretical_maximum():
         )
     )
     optimizer = SwarmOptimizer(config)
-    optimizer.ns.cg_itp = {
-        "nb_constraints": 1,
-        "nb_bonds": 2,
-        "nb_angles": 1,
-        "nb_dihedrals": 1,
-    }
+    optimizer.ns.cg_itp = CGTopology(
+        constraints=[object()],
+        bonds=[object(), object()],
+        angles=[object()],
+        dihedrals=[object()],
+    )
     optimizer.ns.opti_cycle = {
         "geoms": ["constraint", "bond", "angle", "dihedral"]
     }

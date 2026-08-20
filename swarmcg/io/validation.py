@@ -5,20 +5,116 @@ from __future__ import annotations
 import MDAnalysis as mda
 import numpy as np
 
+from swarmcg.config_types import SwarmConfig
 from swarmcg.shared import exceptions
+from swarmcg.shared.periodic import PeriodicDihedralParameters
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters
+from swarmcg.topology import CGTopology
 
 
-def validate_restricted_bending_start(gro_filename: str, cg_itp) -> None:
+def validate_mapping_bead_count(topology: CGTopology, all_beads) -> None:
+    """Validate that a mapping defines every real topology bead.
+
+    Args:
+        topology: Typed coarse-grained topology.
+        all_beads: Mapping records keyed by real bead identifier.
+
+    Returns:
+        ``None``.
+
+    Raises:
+        MissformattedFile: If mapping and topology real-bead counts differ.
+    """
+    if len(all_beads) != len(topology.real_bead_ids):
+        raise exceptions.MissformattedFile(
+            "The CG beads mapping (NDX) file does not include as many CG beads "
+            "as the ITP file. Please check the NDX and ITP inputs."
+        )
+
+
+def validate_parameter_bounds(topology: CGTopology, config: SwarmConfig) -> None:
+    """Validate user-supplied parameters against configured optimization bounds.
+
+    Args:
+        topology: Typed coarse-grained topology.
+        config: Validated application configuration.
+
+    Returns:
+        ``None``. Bounds are skipped unless ``user_input`` is enabled.
+
+    Raises:
+        MissformattedFile: If an input force or polynomial coefficient lies
+            outside its configured bound.
+    """
+    if not config.cg_model.user_input:
+        return
+
+    def require(value: float, maximum: float, label: str) -> None:
+        """Require a symmetric or nonnegative force-parameter bound."""
+        lower = 0.0 if label in {"bond", "angle", "periodic dihedral"} else -maximum
+        if not lower <= value <= maximum:
+            raise exceptions.MissformattedFile(
+                f"Input {label} parameter {value} lies outside [{lower}, {maximum}]."
+            )
+
+    for group in topology.bonds:
+        require(
+            group.input_force_constant,
+            config.optimization.default_max_fct_bonds_opti,
+            "bond",
+        )
+    angle_bounds = {
+        1: config.optimization.default_max_fct_angles_opti_f1,
+        2: config.optimization.default_max_fct_angles_opti_f2,
+        10: config.optimization.default_max_fct_angles_opti_f10,
+    }
+    for group in topology.angles:
+        require(group.input_force_constant, angle_bounds[group.function], "angle")
+    for group in topology.dihedrals:
+        parameters = group.input_parameters
+        if isinstance(parameters, PeriodicDihedralParameters):
+            require(
+                parameters.force_constant,
+                config.optimization.default_abs_range_fct_dihedrals_opti_func_with_mult,
+                "periodic dihedral",
+            )
+        elif group.function == 2:
+            require(
+                parameters.force_constant,
+                config.optimization.default_abs_range_fct_dihedrals_opti_func_without_mult,
+                "dihedral",
+            )
+        elif isinstance(parameters, RBParameters):
+            maximum = config.optimization.max_abs_rb_coefficient
+            if maximum is not None and any(
+                abs(value) > maximum for value in parameters.coefficients
+            ):
+                raise exceptions.MissformattedFile(
+                    f"Input RB coefficient lies outside [-{maximum}, {maximum}]."
+                )
+        elif isinstance(parameters, CBTParameters):
+            maximum = config.optimization.max_abs_cbt_effective_coefficient
+            if maximum is not None and any(
+                abs(value) > maximum for value in parameters.effective_coefficients
+            ):
+                raise exceptions.MissformattedFile(
+                    f"Input CBT coefficient lies outside [-{maximum}, {maximum}]."
+                )
+
+
+def validate_restricted_bending_start(
+    gro_filename: str, topology: CGTopology
+) -> None:
     """Validate the modeled molecule and every starting ReB angle.
 
     The optimizer and scoring pipeline both operate on the first
-    ``len(cg_itp["atoms"])`` atoms of the CG system. This preflight applies the
+    ``len(topology.atoms)`` atoms of the CG system. This preflight applies the
     same ordering contract to the starting GRO and evaluates function-10
     angles using minimum-image vectors when a valid periodic box is present.
 
     Args:
         gro_filename: Starting GROMACS coordinate path.
-        cg_itp: Parsed coarse-grained topology.
+        topology: Typed coarse-grained topology.
 
     Raises:
         ScientificValidationError: If the GRO contains too few atoms,
@@ -27,7 +123,7 @@ def validate_restricted_bending_start(gro_filename: str, cg_itp) -> None:
         OSError: If the coordinate file cannot be opened.
     """
     universe = mda.Universe(gro_filename, guess_bonds=False)
-    modeled_atom_count = len(cg_itp["atoms"])
+    modeled_atom_count = len(topology.atoms)
     if len(universe.atoms) < modeled_atom_count:
         raise exceptions.ScientificValidationError(
             f"Starting GRO contains {len(universe.atoms)} atoms but the modeled "
@@ -52,10 +148,10 @@ def validate_restricted_bending_start(gro_filename: str, cg_itp) -> None:
         ):
             box = dimensions
 
-    for group_index, group in enumerate(cg_itp["angle"], start=1):
-        if group["func"] != 10:
+    for group_index, group in enumerate(topology.angles, start=1):
+        if group.function != 10:
             continue
-        bead_tuples = np.asarray(group["beads"], dtype=int)
+        bead_tuples = np.asarray(group.beads, dtype=int)
         angles = np.rad2deg(
             mda.lib.distances.calc_angles(
                 positions[bead_tuples[:, 0]],

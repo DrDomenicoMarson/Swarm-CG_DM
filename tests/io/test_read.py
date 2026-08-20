@@ -1,114 +1,15 @@
+"""Validation tests for the typed coarse-grained topology reader."""
 
 import pytest
 
+from swarmcg.io.topology import read_cg_topology, write_cg_topology
+from swarmcg.io.validation import validate_mapping_bead_count
 from swarmcg.shared import exceptions
-from swarmcg.io.read import read_cg_itp_file, validate_cg_itp
-from swarmcg.io.write import write_cg_itp_file
-from swarmcg.config_types import SwarmConfig
-from swarmcg.io.itp import CGITP
-
-required_itp_fields = ["real_beads_ids", "vs_beads_ids", "nb_bonds", "nb_angles",
-                       "nb_dihedrals", "nb_constraints",
-                       "moleculetype", "atoms", "constraint", "bond", "angle", "dihedral",
-                       "virtual_sites2", "virtual_sites3", "virtual_sites4", "virtual_sitesn",
-                       "exclusion"]
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters
+from swarmcg.topology import CGTopology
 
 
-def check_ipt_dict(cg_itp):
-    assert len(cg_itp["bond"]) == 23
-    assert len(cg_itp["bond"]) == cg_itp["nb_bonds"]
-    assert len(cg_itp["angle"]) == 6
-    assert len(cg_itp["angle"]) == cg_itp["nb_angles"]
-    assert len(cg_itp["dihedral"]) == 1
-    assert len(cg_itp["dihedral"]) == cg_itp["nb_dihedrals"]
-    assert len(cg_itp["constraint"]) == 0
-    assert len(cg_itp["virtual_sites2"]) == 1
-
-
-# ... (lines 9-44 skipped in view but consistent)
-
-def test_read_cg_itp_file(ns_opt):
-    # when:
-    filename = "tests/data/test.itp"
-    ns = ns_opt(cg_itp_filename=filename)
-    config = SwarmConfig.from_namespace(ns)
-
-    from swarmcg.io.itp import CGITP
-    result = read_cg_itp_file(config)
-    assert isinstance(result, CGITP)
-    assert all([field in result for field in required_itp_fields])
-    check_ipt_dict(result)
-
-    # when:
-    all_beads = []
-
-    # then:
-    with pytest.raises(exceptions.MissformattedFile):
-        _ = validate_cg_itp(result, all_beads=all_beads)
-
-    # when:
-    all_beads = list(range(26))
-
-    # then:
-    _ = validate_cg_itp(result, all_beads=all_beads)
-
-
-def test_read_cg_itp_file_basic(ns_opt):
-    # when:
-    filename = "tests/data/cg_model.itp"
-    ns = ns_opt(cg_itp_filename=filename)
-    config = SwarmConfig.from_namespace(ns)
-
-    # then:
-    result = read_cg_itp_file(config)
-    assert len(result["bond"]) == 4
-    assert len(result["bond"]) == result["nb_bonds"]
-    assert len(result["angle"]) == 5
-    assert len(result["angle"]) == result["nb_angles"]
-    assert result["nb_dihedrals"] == 0
-    assert result["nb_constraints"] == 0
-    assert all([field in result for field in required_itp_fields])
-
-
-def test_restricted_bending_rejects_unsafe_input_equilibrium(tmp_path, ns_opt):
-    source = open("tests/data/restricted_bending_safe.itp").read()
-    unsafe = tmp_path / "unsafe_reb.itp"
-    unsafe.write_text(source.replace("120.0   25.0", "180.0   25.0"))
-    config = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(unsafe)))
-
-    with pytest.raises(exceptions.MissformattedFile, match="10, 170"):
-        read_cg_itp_file(config)
-
-
-def test_standard_rb_and_cbt_records_are_read_and_canonicalized(tmp_path, ns_opt):
-    topology = tmp_path / "polynomial.itp"
-    topology.write_text(
-        """[ moleculetype ]
-MOL 1
-
-[ atoms ]
-1 P1 1 MOL B1 1 0 72
-2 P1 1 MOL B2 2 0 72
-3 P1 1 MOL B3 3 0 72
-4 P1 1 MOL B4 4 0 72
-
-[ dihedrals ]
-; dihedral type RB
-1 2 3 4 3  9 1 2 3 4 5
-
-; dihedral type CBT
-1 2 3 4 11  2 1 -2 3 -4 5
-"""
-    )
-    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
-
-    parsed = read_cg_itp_file(cfg)
-
-    assert parsed["dihedral"][0]["params"] == [-15.0, 1.0, 2.0, 3.0, 4.0, 5.0]
-    assert parsed["dihedral"][1]["params"] == [10.0, 0.2, -0.4, 0.6, -0.8, 1.0]
-
-
-def _minimal_itp(section):
+def _minimal_itp(section: str) -> str:
     """Return a four-atom ITP with one caller-supplied section."""
     return f"""[ moleculetype ]
 MOL 1
@@ -123,13 +24,76 @@ MOL 1
 """
 
 
+def test_read_cg_topology_and_validate_mapping_count():
+    """The reader returns typed counts and mapping validation uses real beads."""
+    topology = read_cg_topology("tests/data/test.itp")
+
+    assert isinstance(topology, CGTopology)
+    assert topology.bond_count == 23
+    assert topology.angle_count == 6
+    assert topology.dihedral_count == 1
+    assert topology.constraint_count == 0
+    assert len(topology.virtual_sites_of_kind(2)) == 1
+    with pytest.raises(exceptions.MissformattedFile):
+        validate_mapping_bead_count(topology, {})
+    validate_mapping_bead_count(topology, dict.fromkeys(range(26)))
+
+
+def test_read_cg_topology_basic_counts():
+    """The basic bundled topology derives its expected group counts."""
+    topology = read_cg_topology("tests/data/cg_model.itp")
+
+    assert topology.bond_count == 4
+    assert topology.angle_count == 5
+    assert topology.dihedral_count == 0
+    assert topology.constraint_count == 0
+
+
+def test_restricted_bending_rejects_unsafe_input_equilibrium(tmp_path):
+    """Function 10 rejects unsafe equilibrium angles at parse time."""
+    source = open("tests/data/restricted_bending_safe.itp").read()
+    unsafe = tmp_path / "unsafe_reb.itp"
+    unsafe.write_text(source.replace("120.0   25.0", "180.0   25.0"))
+
+    with pytest.raises(exceptions.MissformattedFile, match="10, 170"):
+        read_cg_topology(unsafe)
+
+
+def test_standard_rb_and_cbt_records_are_canonicalized(tmp_path):
+    """Polynomial records use force-relevant typed canonical parameters."""
+    path = tmp_path / "polynomial.itp"
+    path.write_text(
+        _minimal_itp(
+            """[ dihedrals ]
+; dihedral type RB
+1 2 3 4 3  9 1 2 3 4 5
+; dihedral type CBT
+1 2 3 4 11  2 1 -2 3 -4 5"""
+        )
+    )
+
+    topology = read_cg_topology(path)
+
+    assert topology.dihedrals[0].parameters == RBParameters((1, 2, 3, 4, 5))
+    assert topology.dihedrals[1].parameters == CBTParameters((2, -4, 6, -8, 10))
+    assert topology.dihedrals[0].gromacs_parameters == (-15, 1, 2, 3, 4, 5)
+    assert topology.dihedrals[1].gromacs_parameters == (
+        10,
+        0.2,
+        -0.4,
+        0.6,
+        -0.8,
+        1,
+    )
+
+
 @pytest.mark.parametrize(
     "section,match",
     [
         ("[ constraints ]\n1 2 1 nan", "Non-finite length"),
-        ("[ bonds ]\n1 2 1 nan 100", "Non-finite length"),
+        ("[ bonds ]\n1 2 1 nan 100", "Non-finite equilibrium"),
         ("[ bonds ]\n1 2 1 0.3 inf", "Non-finite force constant"),
-        ("[ angles ]\n1 2 3 1 nan 100", "Non-finite equilibrium angle"),
+        ("[ angles ]\n1 2 3 1 nan 100", "Non-finite equilibrium"),
         ("[ angles ]\n1 2 3 1 120 -inf", "Non-finite force constant"),
         ("[ dihedrals ]\n1 2 3 4 1 nan 2 1", "Non-finite phase"),
         ("[ dihedrals ]\n1 2 3 4 1 30 inf 1", "Non-finite force constant"),
@@ -140,10 +104,9 @@ MOL 1
         ("[ virtual_sitesn ]\n1 3 2 nan 3 0.5", "Non-finite virtual-site"),
     ],
 )
-def test_itp_reader_rejects_nonfinite_numeric_fields(
-    tmp_path, ns_opt, section, match
-):
-    topology = tmp_path / "nonfinite.itp"
+def test_itp_reader_rejects_nonfinite_numeric_fields(tmp_path, section, match):
+    """Every supported section rejects non-finite serialized values."""
+    path = tmp_path / "nonfinite.itp"
     source = _minimal_itp(section)
     if section.startswith("[ virtual_sites"):
         source = source.replace("1 P1 1 MOL B1", "1 vP 1 MOL B1", 1)
@@ -152,11 +115,10 @@ def test_itp_reader_rejects_nonfinite_numeric_fields(
             "4 P1 1 MOL B4 4 0 72",
             "4 P1 1 MOL B4 4 0 72\n5 P1 1 MOL B5 5 0 72",
         )
-    topology.write_text(source)
-    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+    path.write_text(source)
 
     with pytest.raises(exceptions.MissformattedFile, match=match):
-        read_cg_itp_file(cfg)
+        read_cg_topology(path)
 
 
 @pytest.mark.parametrize(
@@ -166,63 +128,41 @@ def test_itp_reader_rejects_nonfinite_numeric_fields(
         ("1 P1 1 MOL B1 1 0 inf", "Non-finite mass"),
     ],
 )
-def test_itp_reader_rejects_nonfinite_atom_fields(
-    tmp_path, ns_opt, atom_record, match
-):
-    topology = tmp_path / "nonfinite_atom.itp"
-    topology.write_text(_minimal_itp("").replace(
-        "1 P1 1 MOL B1 1 0 72", atom_record
-    ))
-    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+def test_itp_reader_rejects_nonfinite_atom_fields(tmp_path, atom_record, match):
+    """Atom charges and explicit masses must be finite."""
+    path = tmp_path / "nonfinite_atom.itp"
+    path.write_text(
+        _minimal_itp("").replace("1 P1 1 MOL B1 1 0 72", atom_record)
+    )
 
     with pytest.raises(exceptions.MissformattedFile, match=match):
-        read_cg_itp_file(cfg)
-
-
-def test_cgitp_validate_defensively_rejects_nonfinite_state(ns_opt):
-    cfg = SwarmConfig.from_namespace(
-        ns_opt(cg_itp_filename="tests/data/cg_model.itp")
-    )
-    topology = read_cg_itp_file(cfg)
-    assert isinstance(topology, CGITP)
-    topology["angle"][0]["fct"] = float("nan")
-
-    with pytest.raises(exceptions.MissformattedFile, match="finite numeric"):
-        topology.validate()
+        read_cg_topology(path)
 
 
 @pytest.mark.parametrize("multiplicity", [0, -1])
-def test_periodic_dihedral_requires_positive_multiplicity(
-    tmp_path, ns_opt, multiplicity
-):
-    topology = tmp_path / "bad_mult.itp"
-    topology.write_text(
+def test_periodic_dihedral_requires_positive_multiplicity(tmp_path, multiplicity):
+    """Periodic functions reject non-positive multiplicities."""
+    path = tmp_path / "bad_mult.itp"
+    path.write_text(
         _minimal_itp(f"[ dihedrals ]\n1 2 3 4 1 30 2 {multiplicity}")
     )
-    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
 
     with pytest.raises(exceptions.MissformattedFile, match="positive integer"):
-        read_cg_itp_file(cfg)
+        read_cg_topology(path)
 
 
-def test_periodic_negative_force_is_read_and_written_canonically(
-    tmp_path, ns_opt
-):
-    topology = tmp_path / "periodic.itp"
-    topology.write_text(
-        _minimal_itp("[ dihedrals ]\n1 2 3 4 1 35 -3 2")
-    )
-    cfg = SwarmConfig.from_namespace(ns_opt(cg_itp_filename=str(topology)))
+def test_periodic_negative_force_is_read_and_written_canonically(tmp_path):
+    """Negative periodic forces canonicalize without changing semantics."""
+    path = tmp_path / "periodic.itp"
+    path.write_text(_minimal_itp("[ dihedrals ]\n1 2 3 4 1 35 -3 2"))
 
-    parsed = read_cg_itp_file(cfg)
+    topology = read_cg_topology(path)
+    group = topology.dihedrals[0]
+    assert group.equilibrium == -145.0
+    assert group.force_constant == 3.0
 
-    assert parsed["dihedral"][0]["value"] == -145.0
-    assert parsed["dihedral"][0]["fct"] == 3.0
     output = tmp_path / "canonical.itp"
-    write_cg_itp_file(parsed, output)
-    reparsed_cfg = SwarmConfig.from_namespace(
-        ns_opt(cg_itp_filename=str(output))
-    )
-    reparsed = read_cg_itp_file(reparsed_cfg)
-    assert reparsed["dihedral"][0]["value"] == -145.0
-    assert reparsed["dihedral"][0]["fct"] == 3.0
+    write_cg_topology(topology, output)
+    reparsed = read_cg_topology(output)
+    assert reparsed.dihedrals[0].equilibrium == -145.0
+    assert reparsed.dihedrals[0].force_constant == 3.0

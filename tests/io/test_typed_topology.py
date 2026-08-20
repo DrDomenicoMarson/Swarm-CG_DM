@@ -2,7 +2,6 @@
 
 import pytest
 
-from swarmcg.io._topology_adapter import legacy_to_topology, topology_to_legacy
 from swarmcg.io.topology import read_cg_topology, write_cg_topology
 from swarmcg.shared import exceptions
 from swarmcg.shared.periodic import PeriodicDihedralParameters
@@ -160,15 +159,6 @@ def test_typed_parse_write_parse_is_semantically_equal(tmp_path, fixture):
     reparsed = read_cg_topology(output)
 
     _assert_semantically_equal(topology, reparsed)
-
-
-def test_temporary_adapter_roundtrips_typed_state():
-    """The migration adapter preserves topology semantics during Stage 2."""
-    topology = read_cg_topology("tests/data/cg_model.itp")
-
-    adapted = legacy_to_topology(topology_to_legacy(topology))
-
-    _assert_semantically_equal(topology, adapted)
 
 
 def test_central_validation_rejects_nonfinite_mutated_state():

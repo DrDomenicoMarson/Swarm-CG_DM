@@ -18,8 +18,6 @@ from swarmcg.shared.periodic import (
 )
 from swarmcg.simulations.boltzmann import BoltzmannTarget, complete_sample_range
 from swarmcg.simulations.polynomial import (
-    CBTParameters,
-    RBParameters,
     adaptive_coefficient_bound,
     mirrored_total_variation,
 )
@@ -70,10 +68,11 @@ class SwarmEvaluator:
         self.ns.scoring.atom_w = self.mapping.atom_w
         
         # 3. CG ITP
-        self.ns.cg_itp = io.read_cg_itp_file(self.config)
-        if hasattr(self.ns.cg_itp, "validate"):
-            self.ns.cg_itp.validate()
-        io.validate_cg_itp(self.ns.cg_itp, all_beads=self.mapping.all_beads)
+        self.ns.cg_itp = io.read_cg_topology(
+            self.config.cg_model.cg_itp_filename
+        )
+        io.validate_parameter_bounds(self.ns.cg_itp, self.config)
+        io.validate_mapping_bead_count(self.ns.cg_itp, self.mapping.all_beads)
 
         if validate_starting_configuration:
             io.validate_restricted_bending_start(
@@ -121,16 +120,16 @@ class SwarmEvaluator:
                 their multiplicity; function 2 uses the first moment.
         """
         # Checks
-        if not self.ns or not self.ns.cg_itp:
+        if not self.ns or self.ns.cg_itp is None:
             raise RuntimeError("Evaluator not initialized.")
             
         logger.info("Calculating reference distributions...")
         
         # Constraints
-        for i, grp in enumerate(self.ns.cg_itp["constraint"]):
+        for i, grp in enumerate(self.ns.cg_itp.constraints):
              avg, hist, values = scores.get_AA_bonds_distrib(
                  self.ns.scoring.aa2cg_universe, 
-                 grp["beads"], 
+                 grp.beads,
                  "constraint",
                  i,
                  self.config, 
@@ -139,16 +138,16 @@ class SwarmEvaluator:
                  bonds_scaling_specific=self.ns.scoring.bonds_scaling_specific
              )
              if self.config.optimization.exec_mode == 1:
-                grp["value"] = avg 
-             grp["avg"] = avg
-             grp["hist"] = hist
+                grp.equilibrium = avg
+             grp.average = avg
+             grp.histogram = hist
              self.ns.scoring.domains_val.setdefault("constraint", []).append([round(np.min(values), 3), round(np.max(values), 3)])
              
         # Bonds
-        for i, grp in enumerate(self.ns.cg_itp["bond"]):
+        for i, grp in enumerate(self.ns.cg_itp.bonds):
             avg, hist, values = scores.get_AA_bonds_distrib(
                 self.ns.scoring.aa2cg_universe,
-                grp["beads"],
+                grp.beads,
                 "bond",
                 i,
                 self.config,
@@ -157,9 +156,9 @@ class SwarmEvaluator:
                 bonds_scaling_specific=self.ns.scoring.bonds_scaling_specific
             )
             if self.config.optimization.exec_mode == 1:
-                grp["value"] = avg
-            grp["avg"] = avg
-            grp["hist"] = hist
+                grp.equilibrium = avg
+            grp.average = avg
+            grp.histogram = hist
             
             target = BoltzmannTarget.from_samples(
                 values,
@@ -170,15 +169,15 @@ class SwarmEvaluator:
             self.ns.scoring.domains_val.setdefault("bond", []).append([round(np.min(values), 3), round(np.max(values), 3)])
             
         # Angles
-        for i, grp in enumerate(self.ns.cg_itp["angle"]):
+        for i, grp in enumerate(self.ns.cg_itp.angles):
              avg, hist, val_deg, val_rad = scores.get_AA_angles_distrib(
                  self.ns.scoring.aa2cg_universe,
-                 grp["beads"],
+                 grp.beads,
                  self.ns.scoring.bins_angles,
                  self.config.optimization.bw_angles,
                  group_label=f"angle group {i + 1}",
              )
-             if grp["func"] == 10:
+             if grp.function == 10:
                 unsafe_fraction = float(np.mean((val_deg < 10.0) | (val_deg > 170.0)))
                 if unsafe_fraction > 0:
                     logger.warning(
@@ -193,9 +192,9 @@ class SwarmEvaluator:
                     )
 
              if self.config.optimization.exec_mode == 1:
-                grp["value"] = avg
-             grp["avg"] = avg
-             grp["hist"] = hist
+                grp.equilibrium = avg
+             grp.average = avg
+             grp.histogram = hist
              
              target = BoltzmannTarget.from_samples(
                  val_rad,
@@ -204,7 +203,7 @@ class SwarmEvaluator:
              )
              self.ns.scoring.data_BI.setdefault("angle", []).append(target)
              domain_min, domain_max = float(np.min(val_deg)), float(np.max(val_deg))
-             if grp["func"] == 10:
+             if grp.function == 10:
                 domain_min = max(10.0, domain_min)
                 domain_max = min(170.0, domain_max)
                 if domain_min > domain_max:
@@ -216,45 +215,45 @@ class SwarmEvaluator:
              )
 
         # Dihedrals
-        for i, grp in enumerate(self.ns.cg_itp["dihedral"]):
+        for i, grp in enumerate(self.ns.cg_itp.dihedrals):
             avg, hist, val_deg, val_rad = scores.get_AA_dihedrals_distrib(
                 self.ns.scoring.aa2cg_universe,
-                grp["beads"],
+                grp.beads,
                 self.ns.scoring.bins_dihedrals,
                 self.config.optimization.bw_dihedrals,
                 group_label=f"dihedral group {i + 1}",
             )
-            polynomial = grp["func"] in (3, 11)
-            periodic = grp["func"] in (1, 4)
+            polynomial = grp.function in (3, 11)
+            periodic = grp.function in (1, 4)
             phase_center = None
             if self.config.optimization.exec_mode == 1 and periodic:
-                moment = circular_moment_degrees(val_deg, grp["mult"])
-                grp["phase_moment_resultant"] = moment.resultant_length
+                moment = circular_moment_degrees(val_deg, grp.multiplicity)
+                grp.phase_moment_resultant = moment.resultant_length
                 if moment.direction_degrees is None:
                     raise exceptions.ScientificValidationError(
-                        f"Dihedral group {i + 1} uses periodic function {grp['func']} "
-                        f"with multiplicity {grp['mult']}, but its order-{grp['mult']} "
+                        f"Dihedral group {i + 1} uses periodic function {grp.function} "
+                        f"with multiplicity {grp.multiplicity}, but its order-{grp.multiplicity} "
                         "reference circular moment has no defined direction. Improve "
                         "reference sampling or use execution mode 2 with a fixed ITP phase."
                     )
                 phase_center = normalize_periodic_degrees(
                     moment.direction_degrees + 180.0
                 )
-                grp["value"] = phase_center
+                grp.equilibrium = phase_center
             elif (
                 self.config.optimization.exec_mode == 1
                 and not polynomial
                 and not np.isfinite(avg)
             ):
                 raise exceptions.ScientificValidationError(
-                    f"Dihedral group {i + 1} uses phase-based function {grp['func']}, "
+                    f"Dihedral group {i + 1} uses phase-based function {grp.function}, "
                     "but its reference first circular moment has no defined direction. "
                     "Improve reference sampling or use execution mode 2 with a fixed ITP phase."
                 )
             elif self.config.optimization.exec_mode == 1 and not polynomial:
-                grp["value"] = avg
-            grp["avg"] = avg
-            grp["hist"] = hist
+                grp.equilibrium = avg
+            grp.average = avg
+            grp.histogram = hist
 
             target = BoltzmannTarget.from_samples(
                 val_rad,
@@ -277,35 +276,35 @@ class SwarmEvaluator:
                 domain = None
             self.ns.scoring.domains_val.setdefault("dihedral", []).append(domain)
 
-            if grp["func"] in (3, 11):
+            if grp.function in (3, 11):
                 total_variation = mirrored_total_variation(hist)
-                grp["polynomial_symmetry_tv"] = total_variation
+                grp.polynomial_symmetry_tv = total_variation
                 if total_variation > 0.10:
-                    form_name = "RB" if grp["func"] == 3 else "CBT"
+                    form_name = "RB" if grp.function == 3 else "CBT"
                     logger.warning(
                         "%s dihedral group %s has mirrored total-variation distance %.3f; "
                         "function %s cannot reproduce an asymmetric torsional marginal.",
                         form_name,
                         i + 1,
                         total_variation,
-                        grp["func"],
+                        grp.function,
                     )
 
-            if grp["func"] in (3, 11):
+            if grp.function in (3, 11):
                 derived_bound = adaptive_coefficient_bound(
                     hist,
                     self.config.simulation.temp,
                 )
-                if grp["func"] == 3:
+                if grp.function == 3:
                     override = self.config.optimization.max_abs_rb_coefficient
-                    coefficients = RBParameters.from_gromacs(grp["params"]).coefficients
+                    coefficients = grp.parameters.coefficients
                     option = "-max_rb_coeff"
                 else:
                     override = self.config.optimization.max_abs_cbt_effective_coefficient
-                    coefficients = CBTParameters.from_gromacs(grp["params"]).effective_coefficients
+                    coefficients = grp.parameters.effective_coefficients
                     option = "-max_cbt_coeff"
                 bound = derived_bound if override is None else override
-                grp["coefficient_bound"] = float(bound)
+                grp.coefficient_bound = float(bound)
                 if any(abs(value) > bound for value in coefficients):
                     if override is None:
                         raise exceptions.ScientificValidationError(

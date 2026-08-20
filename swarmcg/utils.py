@@ -68,7 +68,7 @@ def process_scaling_str(ns):
             while i < len(sp_str):
                 geom_id = sp_str[i][1:]
                 if sp_str[i][0].upper() == "C":
-                    if int(geom_id) > ns.cg_itp["nb_constraints"]:
+                    if int(geom_id) > ns.cg_itp.constraint_count:
                         info = "A constraint group id exceeds the number of constraints groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
                     if "C" + geom_id not in ns.scoring.bonds_scaling_specific:
@@ -81,7 +81,7 @@ def process_scaling_str(ns):
                         info = f"A constraint group id is provided multiple times (id: {geom_id})"
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
                 elif sp_str[i][0].upper() == "B":
-                    if int(geom_id) > ns.cg_itp["nb_bonds"]:
+                    if int(geom_id) > ns.cg_itp.bond_count:
                         info = "A bond group id exceeds the number of bonds groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
                     if "B" + geom_id not in ns.scoring.bonds_scaling_specific:

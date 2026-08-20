@@ -5,19 +5,14 @@ from unittest.mock import MagicMock, patch
 
 from swarmcg.config_types import OptimizationConfig, SwarmConfig
 from swarmcg.core.optimization import SwarmOptimizer
+from swarmcg.topology import BondGroup, CGTopology, HarmonicParameters
 
 
 def _single_bond_topology():
-    return {
-        "nb_constraints": 0,
-        "nb_bonds": 1,
-        "nb_angles": 0,
-        "nb_dihedrals": 0,
-        "constraint": [],
-        "bond": [{"value": 0.3, "fct": 0.0, "func": 1}],
-        "angle": [],
-        "dihedral": [],
-    }
+    parameters = HarmonicParameters(0.3, 0.0)
+    return CGTopology(
+        bonds=[BondGroup("1", [(0, 1)], 1, parameters, parameters)]
+    )
 
 
 def test_each_cycle_starts_from_previous_cycle_optimum():
@@ -38,7 +33,7 @@ def test_each_cycle_starts_from_previous_cycle_optimum():
     baselines = []
 
     def initial_guesses(*args, **kwargs):
-        baselines.append(args[3]["bond"][0]["fct"])
+        baselines.append(args[3].bonds[0].force_constant)
         return [[baselines[-1]]]
 
     results = [
@@ -81,4 +76,4 @@ def test_each_cycle_starts_from_previous_cycle_optimum():
             )
 
     assert baselines == [0.0, 1.0, 2.0]
-    assert optimizer.ns.opti_itp["bond"][0]["fct"] == 3.0
+    assert optimizer.ns.opti_itp.bonds[0].force_constant == 3.0

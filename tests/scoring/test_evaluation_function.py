@@ -5,34 +5,14 @@ from unittest.mock import patch
 from swarmcg import config as config_module
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
+from swarmcg.topology import Atom, CGTopology, MoleculeType
 
 
 def _make_min_itp():
-    return {
-        "moleculetype": {"molname": "MOL", "nrexcl": 1},
-        "atoms": [
-            {
-                "bead_id": 0,
-                "bead_type": "A",
-                "resnr": 1,
-                "residue": "RES",
-                "atom": "A",
-                "cgnr": 1,
-                "charge": 0.0,
-                "mass": 1.0,
-                "vs_type": None,
-            }
-        ],
-        "constraint": [],
-        "bond": [],
-        "angle": [],
-        "dihedral": [],
-        "virtual_sites2": {},
-        "virtual_sites3": {},
-        "virtual_sites4": {},
-        "virtual_sitesn": {},
-        "exclusion": [],
-    }
+    return CGTopology(
+        molecule=MoleculeType("MOL", 1),
+        atoms=[Atom(0, "A", 1, "RES", "A", 1, 0.0, 1.0)],
+    )
 
 
 def test_eval_function_handles_missing_md_and_restores_cwd():

@@ -1,6 +1,7 @@
 import numpy as np
 import MDAnalysis as mda
 from swarmcg.shared.logging_utils import get_logger
+from swarmcg.topology import CGTopology
 
 logger = get_logger(__name__)
 
@@ -175,23 +176,29 @@ def vsn_func_1(universe, traj, vs_def_beads_ids):
         traj[ts.frame] = universe.atoms[vs_def_beads_ids].center_of_geometry(pbc=None)
 
 
-def vsn_func_2(universe, traj, vs_def_beads_ids, bead_id, cg_itp=None):
+def vsn_func_2(
+    universe,
+    traj,
+    vs_def_beads_ids,
+    bead_id,
+    topology: CGTopology | None = None,
+):
     """Function for virtual_sitesn.
 
     vs_n func 2 -> Center of Mass
     
     Args:
         universe: MDAnalysis universe
-        cg_itp: Optional dictionary for mass check warning
+        topology: Optional typed topology used for a zero-mass warning.
     """
     # inform user if this VS definition uses beads (or VS) with mass 0,
     # because this is COM so 0 mass means a bead that was marked for defining the VS is in fact ignored
     zero_mass_beads_ids = []
-    if cg_itp is not None:
+    if topology is not None:
         for bid in vs_def_beads_ids:
             try:
-                mass = cg_itp["atoms"][bid].get("mass")
-            except (KeyError, IndexError, TypeError, AttributeError):
+                mass = topology.atoms[bid].mass
+            except (IndexError, TypeError, AttributeError):
                 mass = None
             if mass == 0:
                 zero_mass_beads_ids.append(bid)

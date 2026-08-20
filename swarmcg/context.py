@@ -4,6 +4,7 @@ from typing import Any, Dict, Set, Tuple, Optional
 import numpy as np
 from swarmcg.config_types import SwarmConfig
 from swarmcg.simulations.boltzmann import BoltzmannTarget
+from swarmcg.topology import CGTopology
 
 
 @dataclass
@@ -153,9 +154,9 @@ class OptimizationContext:
     # These are core to the logic flow, could move to 'TopologyState' if desired,
     # but for now let's keep them here or proxy them?
     # Actually, let's keep them as fields here for now as they are central shared state.
-    cg_itp: Dict = field(default_factory=dict)
-    opti_itp: Dict = field(default_factory=dict)
-    out_itp: Dict = field(default_factory=dict) 
+    cg_itp: CGTopology | None = None
+    opti_itp: CGTopology | None = None
+    out_itp: CGTopology | None = None
     opti_cycle: Dict = field(default_factory=dict)
     
     # Managers (injected at runtime)

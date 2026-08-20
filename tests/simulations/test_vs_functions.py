@@ -2,6 +2,7 @@ import numpy as np
 import MDAnalysis as mda
 
 from swarmcg.simulations.vs_functions import vsn_func_2
+from swarmcg.topology import Atom, CGTopology
 
 
 def test_vsn_func_2_warns_on_zero_mass(caplog):
@@ -12,9 +13,14 @@ def test_vsn_func_2_warns_on_zero_mass(caplog):
     universe.load_new(coords)
 
     traj = np.empty((len(universe.trajectory), 3))
-    cg_itp = {"atoms": [{"mass": 0.0}, {"mass": 1.0}], "virtual_sitesn": {}}
+    topology = CGTopology(
+        atoms=[
+            Atom(0, "P1", 1, "MOL", "B1", 1, 0.0, 0.0),
+            Atom(1, "P1", 1, "MOL", "B2", 2, 0.0, 1.0),
+        ]
+    )
 
-    vsn_func_2(universe, traj, [0, 1], bead_id=5, cg_itp=cg_itp)
+    vsn_func_2(universe, traj, [0, 1], bead_id=5, topology=topology)
 
     assert "Virtual site ID 6" in caplog.text
     assert "IDs 1" in caplog.text

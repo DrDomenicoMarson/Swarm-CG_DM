@@ -120,7 +120,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         if np.all(np.isfinite(mapped_masses)) and np.all(mapped_masses > 0):
             ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(
                 ns.scoring.aa2cg_universe,
-                ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])],
+                ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp.atoms)],
                 backend=ns.scoring.mda_backend,
                 offset=ns.config.reference.aa_rg_offset,
             )
@@ -137,36 +137,33 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                                       guess_bonds=False)
         logger.info("  Found %s frames", len(ns.scoring.cg_universe.trajectory))
 
-        if manual_mode or any(atom["mass"] is None for atom in ns.cg_itp["atoms"]):
+        if manual_mode or any(atom.mass is None for atom in ns.cg_itp.atoms):
             # Sync masses from CG trajectory (TPR) to avoid None masses in mapped universe.
-            for bead_id in range(len(ns.cg_itp["atoms"])):
-                ns.cg_itp["atoms"][bead_id]["mass"] = ns.scoring.cg_universe.atoms[bead_id].mass
-            masses = np.array([val["mass"] for val in ns.cg_itp["atoms"]], dtype=float)
+            for bead_id, atom in enumerate(ns.cg_itp.atoms):
+                atom.mass = ns.scoring.cg_universe.atoms[bead_id].mass
+            masses = np.array([atom.mass for atom in ns.cg_itp.atoms], dtype=float)
             ns.scoring.aa2cg_universe._topology.masses.values = masses
 
         # create fake bonds in the CG MDA universe, that will be used only for making the molecule whole
         # we make bonds between each VS and their beads definition, so we retrieve the connectivity
         # iteratively towards the real CG beads, that are all connected
-        if len(ns.cg_itp["vs_beads_ids"]) > 0:
-            fake_bonds = []
-            for vs_type in ["2", "3", "4", "n"]:
-                try:
-                    for bead_id in ns.cg_itp["virtual_sites" + vs_type]:
-                        for vs_def_bead_id in ns.cg_itp["virtual_sites" + vs_type][bead_id]["vs_def_beads_ids"]:
-                            fake_bonds.append([bead_id, vs_def_bead_id])
-                except (IndexError, ValueError):
-                    pass
+        if ns.cg_itp.virtual_bead_ids:
+            fake_bonds = [
+                [site.bead_id, defining_bead]
+                for site in ns.cg_itp.virtual_sites
+                for defining_bead in site.defining_beads
+            ]
             ns.scoring.cg_universe.add_bonds(fake_bonds, guessed=False)
 
         # select the whole molecule as an MDA atomgroup and make its coordinates whole, inplace, across the complete trajectory
-        ag_mol = mda.AtomGroup([bead_id for bead_id in range(len(ns.cg_itp["atoms"]))], ns.scoring.cg_universe)
+        ag_mol = mda.AtomGroup(list(range(len(ns.cg_itp.atoms))), ns.scoring.cg_universe)
         for _ in ns.scoring.cg_universe.trajectory:
             mda.lib.mdamath.make_whole(ag_mol, inplace=True)
 
         # this requires CG data for mapping -- especially, masses are taken from the CG TPR but the CG ITP is also used atm
         if ns.results.gyr_aa_mapped is None:
             # scores.compute_Rg(ns, traj_type="AA_mapped")
-            ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(ns.scoring.aa2cg_universe, ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend, offset=ns.config.reference.aa_rg_offset)
+            ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std = scores.compute_Rg(ns.scoring.aa2cg_universe, ns.scoring.aa2cg_universe.atoms[:len(ns.cg_itp.atoms)], backend=ns.scoring.mda_backend, offset=ns.config.reference.aa_rg_offset)
             logger.info("")
             logger.info(
                 "Radius of gyration (AA reference, CG-mapped, no bonds scaling): %s +/- %s nm",
@@ -175,7 +172,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             )
 
         # scores.compute_Rg(ns, traj_type="CG")
-        ns.results.gyr_cg, ns.results.gyr_cg_std = scores.compute_Rg(ns.scoring.cg_universe, ns.scoring.cg_universe.atoms[:len(ns.cg_itp["atoms"])], backend=ns.scoring.mda_backend)
+        ns.results.gyr_cg, ns.results.gyr_cg_std = scores.compute_Rg(ns.scoring.cg_universe, ns.scoring.cg_universe.atoms[:len(ns.cg_itp.atoms)], backend=ns.scoring.mda_backend)
         logger.info(
             "Radius of gyration (CG model): %s +/- %s nm",
             ns.results.gyr_cg,
@@ -192,11 +189,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # constraints
     logger.info("Processing constraints ...")
-    diff_ordered_grp_constraints = list(range(ns.cg_itp["nb_constraints"]))
+    diff_ordered_grp_constraints = list(range(ns.cg_itp.constraint_count))
     avg_diff_grp_constraints, row_wise_ranges["constraints"] = [], {}
     constraints = {}
 
-    for grp_constraint in range(ns.cg_itp["nb_constraints"]):
+    for grp_constraint in range(ns.cg_itp.constraint_count):
 
         constraints[grp_constraint] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
         constraint_values_aa = None
@@ -204,7 +201,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         if manual_mode:
             constraint_avg, constraint_hist, constraint_values_aa = scores.get_AA_bonds_distrib(
                 ns.scoring.aa2cg_universe,
-                beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                beads_ids=ns.cg_itp.constraints[grp_constraint].beads,
                 grp_type="constraints group",
                 grp_nb=grp_constraint,
                 config=config_obj,
@@ -214,13 +211,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             constraints[grp_constraint]["AA"]["avg"] = constraint_avg
             constraints[grp_constraint]["AA"]["hist"] = constraint_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            constraints[grp_constraint]["AA"]["avg"] = ns.cg_itp["constraint"][grp_constraint]["avg"]
-            constraints[grp_constraint]["AA"]["hist"] = ns.cg_itp["constraint"][grp_constraint]["hist"]
+            constraints[grp_constraint]["AA"]["avg"] = ns.cg_itp.constraints[grp_constraint].average
+            constraints[grp_constraint]["AA"]["hist"] = ns.cg_itp.constraints[grp_constraint].histogram
 
         if not ns.scoring.atom_only:
             constraint_avg, constraint_hist, constraint_values_cg = scores.get_CG_bonds_distrib(
                 ns.scoring.cg_universe,
-                beads_ids=ns.cg_itp["constraint"][grp_constraint]["beads"],
+                beads_ids=ns.cg_itp.constraints[grp_constraint].beads,
                 grp_type=f"constraint group {grp_constraint + 1}",
                 bins=ns.scoring.bins_constraints,
                 bandwidth=ns.config.optimization.bw_constraints,
@@ -270,11 +267,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # bonds
     logger.info("Processing bonds ...")
-    diff_ordered_grp_bonds = list(range(ns.cg_itp["nb_bonds"]))
+    diff_ordered_grp_bonds = list(range(ns.cg_itp.bond_count))
     avg_diff_grp_bonds, row_wise_ranges["bonds"] = [], {}
     bonds = {}
 
-    for grp_bond in range(ns.cg_itp["nb_bonds"]):
+    for grp_bond in range(ns.cg_itp.bond_count):
 
         bonds[grp_bond] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
         bond_values_aa = None
@@ -282,7 +279,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
         if manual_mode:
             bond_avg, bond_hist, bond_values_aa = scores.get_AA_bonds_distrib(
                 ns.scoring.aa2cg_universe,
-                beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
+                beads_ids=ns.cg_itp.bonds[grp_bond].beads,
                 grp_type="bonds group",
                 grp_nb=grp_bond,
                 config=config_obj,
@@ -292,13 +289,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             bonds[grp_bond]["AA"]["avg"] = bond_avg
             bonds[grp_bond]["AA"]["hist"] = bond_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            bonds[grp_bond]["AA"]["avg"] = ns.cg_itp["bond"][grp_bond]["avg"]
-            bonds[grp_bond]["AA"]["hist"] = ns.cg_itp["bond"][grp_bond]["hist"]
+            bonds[grp_bond]["AA"]["avg"] = ns.cg_itp.bonds[grp_bond].average
+            bonds[grp_bond]["AA"]["hist"] = ns.cg_itp.bonds[grp_bond].histogram
 
         if not ns.scoring.atom_only:
             bond_avg, bond_hist, bond_values_cg = scores.get_CG_bonds_distrib(
                 ns.scoring.cg_universe,
-                beads_ids=ns.cg_itp["bond"][grp_bond]["beads"],
+                beads_ids=ns.cg_itp.bonds[grp_bond].beads,
                 grp_type=f"bond group {grp_bond + 1}",
                 bins=ns.scoring.bins_bonds,
                 bandwidth=ns.config.optimization.bw_bonds,
@@ -341,18 +338,18 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # angles
     logger.info("Processing angles ...")
-    diff_ordered_grp_angles = list(range(ns.cg_itp["nb_angles"]))
+    diff_ordered_grp_angles = list(range(ns.cg_itp.angle_count))
     avg_diff_grp_angles, row_wise_ranges["angles"] = [], {}
     angles = {}
 
-    for grp_angle in range(ns.cg_itp["nb_angles"]):
+    for grp_angle in range(ns.cg_itp.angle_count):
 
         angles[grp_angle] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
             angle_avg, angle_hist, _, _ = scores.get_AA_angles_distrib(
                 ns.scoring.aa2cg_universe,
-                beads_ids=ns.cg_itp["angle"][grp_angle]["beads"],
+                beads_ids=ns.cg_itp.angles[grp_angle].beads,
                 bins=ns.scoring.bins_angles,
                 bandwidth=ns.config.optimization.bw_angles,
                 group_label=f"angle group {grp_angle + 1}",
@@ -360,13 +357,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             angles[grp_angle]["AA"]["avg"] = angle_avg
             angles[grp_angle]["AA"]["hist"] = angle_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            angles[grp_angle]["AA"]["avg"] = ns.cg_itp["angle"][grp_angle]["avg"]
-            angles[grp_angle]["AA"]["hist"] = ns.cg_itp["angle"][grp_angle]["hist"]
+            angles[grp_angle]["AA"]["avg"] = ns.cg_itp.angles[grp_angle].average
+            angles[grp_angle]["AA"]["hist"] = ns.cg_itp.angles[grp_angle].histogram
 
         if not ns.scoring.atom_only:
             angle_avg, angle_hist, angle_values_cg, _ = scores.get_CG_angles_distrib(
                 ns.scoring.cg_universe,
-                beads_ids=ns.cg_itp["angle"][grp_angle]["beads"],
+                beads_ids=ns.cg_itp.angles[grp_angle].beads,
                 bins=ns.scoring.bins_angles,
                 bandwidth=ns.config.optimization.bw_angles,
                 group_label=f"angle group {grp_angle + 1}",
@@ -409,18 +406,18 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
     # dihedrals
     logger.info("Processing dihedrals ...")
-    diff_ordered_grp_dihedrals = list(range(ns.cg_itp["nb_dihedrals"]))
+    diff_ordered_grp_dihedrals = list(range(ns.cg_itp.dihedral_count))
     avg_diff_grp_dihedrals, row_wise_ranges["dihedrals"] = [], {}
     dihedrals = {}
 
-    for grp_dihedral in range(ns.cg_itp["nb_dihedrals"]):
+    for grp_dihedral in range(ns.cg_itp.dihedral_count):
 
         dihedrals[grp_dihedral] = {"AA": {"x": [], "y": []}, "CG": {"x": [], "y": []}}
 
         if manual_mode:
             dihedral_avg, dihedral_hist, _, _ = scores.get_AA_dihedrals_distrib(
                 ns.scoring.aa2cg_universe,
-                beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"],
+                beads_ids=ns.cg_itp.dihedrals[grp_dihedral].beads,
                 bins=ns.scoring.bins_dihedrals,
                 bandwidth=ns.config.optimization.bw_dihedrals,
                 group_label=f"dihedral group {grp_dihedral + 1}",
@@ -428,13 +425,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             dihedrals[grp_dihedral]["AA"]["avg"] = dihedral_avg
             dihedrals[grp_dihedral]["AA"]["hist"] = dihedral_hist
         else:  # use atomistic reference that was loaded by the optimization routines
-            dihedrals[grp_dihedral]["AA"]["avg"] = ns.cg_itp["dihedral"][grp_dihedral]["avg"]
-            dihedrals[grp_dihedral]["AA"]["hist"] = ns.cg_itp["dihedral"][grp_dihedral]["hist"]
+            dihedrals[grp_dihedral]["AA"]["avg"] = ns.cg_itp.dihedrals[grp_dihedral].average
+            dihedrals[grp_dihedral]["AA"]["hist"] = ns.cg_itp.dihedrals[grp_dihedral].histogram
 
         if not ns.scoring.atom_only:
             dihedral_avg, dihedral_hist, dihedral_values_cg, _ = scores.get_CG_dihedrals_distrib(
                 ns.scoring.cg_universe,
-                beads_ids=ns.cg_itp["dihedral"][grp_dihedral]["beads"],
+                beads_ids=ns.cg_itp.dihedrals[grp_dihedral].beads,
                 bins=ns.scoring.bins_dihedrals,
                 bandwidth=ns.config.optimization.bw_dihedrals,
                 group_label=f"dihedral group {grp_dihedral + 1}",
@@ -490,8 +487,12 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     # DISPLAY DISTRIBUTIONS PLOTS #
     ###############################
 
-    larger_group = max(ns.cg_itp["nb_constraints"], ns.cg_itp["nb_bonds"], ns.cg_itp["nb_angles"],
-                       ns.cg_itp["nb_dihedrals"])
+    larger_group = max(
+        ns.cg_itp.constraint_count,
+        ns.cg_itp.bond_count,
+        ns.cg_itp.angle_count,
+        ns.cg_itp.dihedral_count,
+    )
     nrow, nrows, ncols = -1, 4, min(ns.scoring.ncols_max, larger_group)
     if ns.scoring.ncols_max == 0:
         ncols = larger_group
@@ -525,8 +526,14 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             logger.info(
                 "Distributions groups will be displayed using ranked mismatch score between pairwise AA-mapped and CG distributions"
             )
-    nrows -= sum([ns.cg_itp["nb_constraints"] == 0, ns.cg_itp["nb_bonds"] == 0, ns.cg_itp["nb_angles"] == 0,
-                  ns.cg_itp["nb_dihedrals"] == 0])
+    nrows -= sum(
+        [
+            ns.cg_itp.constraint_count == 0,
+            ns.cg_itp.bond_count == 0,
+            ns.cg_itp.angle_count == 0,
+            ns.cg_itp.dihedral_count == 0,
+        ]
+    )
 
     fig = plt.figure(figsize=(ncols * 3, nrows * 3))
     ax = fig.subplots(nrows=nrows, ncols=ncols, squeeze=False)
@@ -536,11 +543,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     constraints_max_y, bonds_max_y, angles_max_y, dihedrals_max_y = 0, 0, 0, 0
 
     # constraints
-    if ns.cg_itp["nb_constraints"] != 0:
+    if ns.cg_itp.constraint_count != 0:
         logger.info("")
         nrow += 1
         for i in range(ncols):
-            if i < ns.cg_itp["nb_constraints"]:
+            if i < ns.cg_itp.constraint_count:
                 grp_constraint = diff_ordered_grp_constraints[i]
                 if config.use_hists:
                     ax[nrow][i].step(constraints[grp_constraint]["AA"]["x"], constraints[grp_constraint]["AA"]["y"],
@@ -607,11 +614,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 ax[nrow][i].set_visible(False)
 
     # bonds
-    if ns.cg_itp["nb_bonds"] != 0:
+    if ns.cg_itp.bond_count != 0:
         logger.info("")
         nrow += 1
         for i in range(ncols):
-            if i < ns.cg_itp["nb_bonds"]:
+            if i < ns.cg_itp.bond_count:
                 grp_bond = diff_ordered_grp_bonds[i]
                 if config.use_hists:
                     ax[nrow][i].step(bonds[grp_bond]["AA"]["x"], bonds[grp_bond]["AA"]["y"], label="AA-mapped",
@@ -670,11 +677,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 ax[nrow][i].set_visible(False)
 
     # angles
-    if ns.cg_itp["nb_angles"] != 0:
+    if ns.cg_itp.angle_count != 0:
         logger.info("")
         nrow += 1
         for i in range(ncols):
-            if i < ns.cg_itp["nb_angles"]:
+            if i < ns.cg_itp.angle_count:
                 grp_angle = diff_ordered_grp_angles[i]
                 if config.use_hists:
                     ax[nrow][i].step(angles[grp_angle]["AA"]["x"], angles[grp_angle]["AA"]["y"], label="AA-mapped",
@@ -735,11 +742,11 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 ax[nrow][i].set_visible(False)
 
     # dihedrals
-    if ns.cg_itp["nb_dihedrals"] != 0:
+    if ns.cg_itp.dihedral_count != 0:
         logger.info("")
         nrow += 1
         for i in range(ncols):
-            if i < ns.cg_itp["nb_dihedrals"]:
+            if i < ns.cg_itp.dihedral_count:
                 grp_dihedral = diff_ordered_grp_dihedrals[i]
                 if config.use_hists:
                     ax[nrow][i].step(dihedrals[grp_dihedral]["AA"]["x"], dihedrals[grp_dihedral]["AA"]["y"],
@@ -817,33 +824,33 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
     # now we have all the ylims, so make them all consistent
     if ns.scoring.row_y_scaling:
         nrow = -1
-        if ns.cg_itp["nb_constraints"] != 0:
+        if ns.cg_itp.constraint_count != 0:
             nrow += 1
-            for i in range(ns.cg_itp["nb_constraints"]):
+            for i in range(ns.cg_itp.constraint_count):
                 ax[nrow][i].set_ylim(bottom=constraints_min_y, top=constraints_max_y)
-        if ns.cg_itp["nb_bonds"] != 0:
+        if ns.cg_itp.bond_count != 0:
             nrow += 1
-            for i in range(ns.cg_itp["nb_bonds"]):
+            for i in range(ns.cg_itp.bond_count):
                 ax[nrow][i].set_ylim(bottom=bonds_min_y, top=bonds_max_y)
-        if ns.cg_itp["nb_angles"] != 0:
+        if ns.cg_itp.angle_count != 0:
             nrow += 1
-            for i in range(ns.cg_itp["nb_angles"]):
+            for i in range(ns.cg_itp.angle_count):
                 ax[nrow][i].set_ylim(bottom=angles_min_y, top=angles_max_y)
-        if ns.cg_itp["nb_dihedrals"] != 0:
+        if ns.cg_itp.dihedral_count != 0:
             nrow += 1
-            for i in range(ns.cg_itp["nb_dihedrals"]):
+            for i in range(ns.cg_itp.dihedral_count):
                 ax[nrow][i].set_ylim(bottom=dihedrals_min_y, top=dihedrals_max_y)
 
     # calculate global fitness score and contributions from each geom type
     all_emd_dist_geoms = {
-        "constraints": [np.nan] * ns.cg_itp["nb_constraints"],
-        "bonds": [np.nan] * ns.cg_itp["nb_bonds"],
-        "angles": [np.nan] * ns.cg_itp["nb_angles"],
-        "dihedrals": [np.nan] * ns.cg_itp["nb_dihedrals"],
+        "constraints": [np.nan] * ns.cg_itp.constraint_count,
+        "bonds": [np.nan] * ns.cg_itp.bond_count,
+        "angles": [np.nan] * ns.cg_itp.angle_count,
+        "dihedrals": [np.nan] * ns.cg_itp.dihedral_count,
     }
 
     if not ns.scoring.atom_only:
-        for i in range(ns.cg_itp["nb_constraints"]):
+        for i in range(ns.cg_itp.constraint_count):
             group_index = diff_ordered_grp_constraints[i]
             dist_pairwise = avg_diff_grp_constraints[group_index]
             all_emd_dist_geoms["constraints"][group_index] = dist_pairwise
@@ -853,9 +860,9 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 previous = ns.pso.all_best_emd_dist_geoms["constraints"][group_index]
                 if not np.isfinite(previous) or dist_pairwise < previous:
                     ns.pso.all_best_emd_dist_geoms["constraints"][group_index] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["constraints"][group_index]["params"] = [ns.out_itp["constraint"][group_index]["value"]]
+                    ns.pso.all_best_params_dist_geoms["constraints"][group_index]["params"] = [ns.out_itp.constraints[group_index].equilibrium]
 
-        for i in range(ns.cg_itp["nb_bonds"]):
+        for i in range(ns.cg_itp.bond_count):
             group_index = diff_ordered_grp_bonds[i]
             dist_pairwise = avg_diff_grp_bonds[group_index]
             all_emd_dist_geoms["bonds"][group_index] = dist_pairwise
@@ -865,10 +872,12 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 previous = ns.pso.all_best_emd_dist_geoms["bonds"][group_index]
                 if not np.isfinite(previous) or dist_pairwise < previous:
                     ns.pso.all_best_emd_dist_geoms["bonds"][group_index] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["bonds"][group_index]["params"] = [ns.out_itp["bond"][group_index]["value"],
-                                                                           ns.out_itp["bond"][group_index]["fct"]]
+                    ns.pso.all_best_params_dist_geoms["bonds"][group_index]["params"] = [
+                        ns.out_itp.bonds[group_index].equilibrium,
+                        ns.out_itp.bonds[group_index].force_constant,
+                    ]
 
-        for i in range(ns.cg_itp["nb_angles"]):
+        for i in range(ns.cg_itp.angle_count):
             group_index = diff_ordered_grp_angles[i]
             dist_pairwise = avg_diff_grp_angles[group_index]
             all_emd_dist_geoms["angles"][group_index] = dist_pairwise
@@ -878,11 +887,13 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 previous = ns.pso.all_best_emd_dist_geoms["angles"][group_index]
                 if not np.isfinite(previous) or dist_pairwise < previous:
                     ns.pso.all_best_emd_dist_geoms["angles"][group_index] = dist_pairwise
-                    ns.pso.all_best_params_dist_geoms["angles"][group_index]["params"] = [ns.out_itp["angle"][group_index]["value"],
-                                                                            ns.out_itp["angle"][group_index]["fct"]]
+                    ns.pso.all_best_params_dist_geoms["angles"][group_index]["params"] = [
+                        ns.out_itp.angles[group_index].equilibrium,
+                        ns.out_itp.angles[group_index].force_constant,
+                    ]
 
         # dihedrals_dist_pairwise = 0
-        for i in range(ns.cg_itp["nb_dihedrals"]):
+        for i in range(ns.cg_itp.dihedral_count):
             group_index = diff_ordered_grp_dihedrals[i]
             dist_pairwise = avg_diff_grp_dihedrals[group_index]
             all_emd_dist_geoms["dihedrals"][group_index] = dist_pairwise
@@ -892,11 +903,14 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
                 previous = ns.pso.all_best_emd_dist_geoms["dihedrals"][group_index]
                 if not np.isfinite(previous) or dist_pairwise < previous:
                     ns.pso.all_best_emd_dist_geoms["dihedrals"][group_index] = dist_pairwise
-                    func = ns.cg_itp["dihedral"][group_index]["func"]
+                    func = ns.cg_itp.dihedrals[group_index].function
                     if func in (3, 11):
-                        params = list(ns.out_itp["dihedral"][group_index]["params"])
+                        params = list(ns.out_itp.dihedrals[group_index].gromacs_parameters)
                     else:
-                        params = [ns.out_itp["dihedral"][group_index]["value"], ns.out_itp["dihedral"][group_index]["fct"]]
+                        params = [
+                            ns.out_itp.dihedrals[group_index].equilibrium,
+                            ns.out_itp.dihedrals[group_index].force_constant,
+                        ]
                     ns.pso.all_best_params_dist_geoms["dihedrals"][group_index]["params"] = params
 
         (
@@ -932,7 +946,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
 
         plt.tight_layout(rect=[0, 0, 1, 0.9])
         eval_score = fit_score_total
-        if ignore_dihedrals and ns.cg_itp["nb_dihedrals"] > 0:
+        if ignore_dihedrals and ns.cg_itp.dihedral_count > 0:
             eval_score -= fit_score_dihedrals
         sup_title = (
             f"FITNESS SCORE\nTotal: {round(eval_score, 3)} -- "
@@ -940,7 +954,7 @@ def compare_models(context: OptimizationContext, manual_mode: bool = True, ignor
             f"Angles: {round(fit_score_angles, 3)} -- "
             f"Dihedrals: {round(fit_score_dihedrals, 3)}"
         )
-        if ignore_dihedrals and ns.cg_itp["nb_dihedrals"] > 0:
+        if ignore_dihedrals and ns.cg_itp.dihedral_count > 0:
             sup_title += " (ignored)"
         plt.suptitle(sup_title)
     else:

@@ -8,26 +8,25 @@ import pytest
 from swarmcg.config_types import SwarmConfig
 from swarmcg.forcefield import get_initial_guess_list
 from swarmcg.simulations.polynomial import CBTParameters, RBParameters
+from swarmcg.topology import CGTopology, DihedralGroup
 
 
 def _polynomial_group(func, coefficients, bound=25.0):
     """Build a minimal RB or CBT topology group."""
-    if func == 3:
-        params = RBParameters(tuple(coefficients)).to_gromacs()
-    else:
-        params = CBTParameters(tuple(coefficients)).to_gromacs()
-    return {
-        "func": func,
-        "params": list(params),
-        "params_user": list(params),
-        "value": None,
-        "value_user": None,
-        "fct": None,
-        "fct_user": None,
-        "mult": None,
-        "avg": float("nan"),
-        "coefficient_bound": bound,
-    }
+    parameters = (
+        RBParameters(tuple(coefficients))
+        if func == 3
+        else CBTParameters(tuple(coefficients))
+    )
+    return DihedralGroup(
+        "1",
+        [(0, 1, 2, 3)],
+        func,
+        parameters,
+        parameters,
+        average=float("nan"),
+        coefficient_bound=bound,
+    )
 
 
 def _tracking_state(score=np.nan, params=None):
@@ -53,7 +52,7 @@ def test_first_polynomial_activation_uses_one_seed_and_full_bounds(
     monkeypatch, func
 ):
     group = _polynomial_group(func, (0.0,) * 5)
-    topology = {"constraint": [], "bond": [], "angle": [], "dihedral": [group]}
+    topology = CGTopology(dihedrals=[group])
     cycle = {
         "nb_cycle": 2,
         "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 1},
@@ -89,12 +88,14 @@ def test_first_polynomial_activation_uses_one_seed_and_full_bounds(
 def test_later_cbt_activation_refines_locally_around_prior_optimum(monkeypatch):
     effective = (10.0,) * 5
     group = _polynomial_group(11, effective)
-    topology = {"constraint": [], "bond": [], "angle": [], "dihedral": [group]}
+    topology = CGTopology(dihedrals=[group])
     cycle = {
         "nb_cycle": 3,
         "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 1},
     }
-    best_scores, best_params = _tracking_state(score=1.0, params=group["params"])
+    best_scores, best_params = _tracking_state(
+        score=1.0, params=group.gromacs_parameters
+    )
     ranges = []
 
     def draw_midpoint(low, high, digits):

@@ -17,6 +17,7 @@ from swarmcg.io.job_args.analyze_config import get_analyze_args
 from swarmcg.io.job_args.optimize_config import get_optimize_args
 from swarmcg.shared import exceptions
 from swarmcg.utils import process_scaling_str
+from swarmcg.topology import CGTopology
 
 def test_swarm_config_defaults():
     config = SwarmConfig()
@@ -130,7 +131,7 @@ def test_group_specific_scaling_rejects_invalid_lengths(value):
         optimization=OptimizationConfig(bonds_scaling_str=f"B1 {value}")
     )
     context = OptimizationContext(config=config)
-    context.cg_itp = {"nb_constraints": 0, "nb_bonds": 1}
+    context.cg_itp = CGTopology(bonds=[object()])
 
     with pytest.raises(exceptions.InvalidArgument, match="finite and positive"):
         process_scaling_str(context)

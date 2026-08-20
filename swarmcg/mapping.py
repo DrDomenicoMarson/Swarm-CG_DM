@@ -6,6 +6,7 @@ from swarmcg.shared import exceptions
 from swarmcg.config_types import SwarmConfig
 from swarmcg.simulations import vs_functions as vsf
 from swarmcg.shared.logging_utils import get_logger
+from swarmcg.topology import CGTopology
 
 logger = get_logger(__name__)
 
@@ -131,8 +132,22 @@ class Mapping:
                        f"ID (here 0-indexed) could not be found:\n\n{str(e)}")
                 raise exceptions.MissformattedFile(msg)
 
-    def map_aa2cg_traj(self, aa_universe: mda.Universe, aa2cg_universe: mda.Universe, cg_itp: dict):
-        """Map AA trajectory to CG trajectory."""
+    def map_aa2cg_traj(
+        self,
+        aa_universe: mda.Universe,
+        aa2cg_universe: mda.Universe,
+        topology: CGTopology,
+    ) -> None:
+        """Map an atomistic trajectory onto the typed CG topology.
+
+        Args:
+            aa_universe: Source atomistic trajectory.
+            aa2cg_universe: Destination in-memory CG trajectory.
+            topology: Typed topology defining real and virtual beads.
+
+        Returns:
+            ``None``. Coordinates are loaded into ``aa2cg_universe`` in place.
+        """
         if self.reference_config.mapping_type == "COM":
             logger.info("  Interpretation: Center of Mass (COM)")
         elif self.reference_config.mapping_type == "COG":
@@ -140,11 +155,11 @@ class Mapping:
 
         # Regular beads
         n_frames = len(aa_universe.trajectory)
-        n_beads = len(cg_itp["atoms"])
+        n_beads = len(topology.atoms)
         coord = np.empty((n_frames, n_beads, 3))
         
         # Pre-calculate processing order
-        regular_beads_ids = [i for i in range(n_beads) if not cg_itp["atoms"][i]["bead_type"].startswith("v")]
+        regular_beads_ids = topology.real_bead_ids
         
         logger.info("  Processing %s frames...", n_frames)
         
@@ -158,69 +173,65 @@ class Mapping:
 
         aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
 
-        # Virtual sites
-        for bead_id in range(len(cg_itp["atoms"])):
-            if cg_itp["atoms"][bead_id]["bead_type"].startswith("v"):
-                
-                traj = np.empty((len(aa2cg_universe.trajectory), 3))
-                
-                # VS Type 2
-                if cg_itp["atoms"][bead_id]["vs_type"] == 2:
-                    vs_def_beads_ids = cg_itp["virtual_sites2"][bead_id]["vs_def_beads_ids"]
-                    vs_params = cg_itp["virtual_sites2"][bead_id]["vs_params"]
-
-                    if cg_itp["virtual_sites2"][bead_id]["func"] == 1:
-                        vsf.vs2_func_1(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-                    elif cg_itp["virtual_sites2"][bead_id]["func"] == 2:
-                        vsf.vs2_func_2(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-
-                # VS Type 3
-                if cg_itp["atoms"][bead_id]["vs_type"] == 3:
-                    vs_def_beads_ids = cg_itp["virtual_sites3"][bead_id]["vs_def_beads_ids"]
-                    vs_params = cg_itp["virtual_sites3"][bead_id]["vs_params"]
-
-                    if cg_itp["virtual_sites3"][bead_id]["func"] == 1:
-                        vsf.vs3_func_1(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-                    elif cg_itp["virtual_sites3"][bead_id]["func"] == 2:
-                        vsf.vs3_func_2(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-                    elif cg_itp["virtual_sites3"][bead_id]["func"] == 3:
-                        vsf.vs3_func_3(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-                    elif cg_itp["virtual_sites3"][bead_id]["func"] == 4:
-                        vsf.vs3_func_4(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-
-                # VS Type 4
-                if cg_itp["atoms"][bead_id]["vs_type"] == 4:
-                    vs_def_beads_ids = cg_itp["virtual_sites4"][bead_id]["vs_def_beads_ids"]
-                    vs_params = cg_itp["virtual_sites4"][bead_id]["vs_params"]
-
-                    if cg_itp["virtual_sites4"][bead_id]["func"] == 2:
-                        vsf.vs4_func_2(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-
-                # VS Type n
-                if cg_itp["atoms"][bead_id]["vs_type"] == "n":
-                    vs_def_beads_ids = cg_itp["virtual_sitesn"][bead_id]["vs_def_beads_ids"]
-                    vs_params = cg_itp["virtual_sitesn"][bead_id]["vs_params"]
-
-                    if cg_itp["virtual_sitesn"][bead_id]["func"] == 1:
-                        vsf.vsn_func_1(aa2cg_universe, traj, vs_def_beads_ids)
-                    elif cg_itp["virtual_sitesn"][bead_id]["func"] == 2:
-                        vsf.vsn_func_2(aa2cg_universe, traj, vs_def_beads_ids, bead_id, cg_itp=cg_itp)
-                    elif cg_itp["virtual_sitesn"][bead_id]["func"] == 3:
-                        vsf.vsn_func_3(aa2cg_universe, traj, vs_def_beads_ids, vs_params)
-
-                coord[:, bead_id, :] = traj
+        dispatch = {
+            (2, 1): lambda site, traj: vsf.vs2_func_1(
+                aa2cg_universe, traj, site.defining_beads, site.parameters[0]
+            ),
+            (2, 2): lambda site, traj: vsf.vs2_func_2(
+                aa2cg_universe, traj, site.defining_beads, site.parameters[0]
+            ),
+            (3, 1): lambda site, traj: vsf.vs3_func_1(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+            (3, 2): lambda site, traj: vsf.vs3_func_2(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+            (3, 3): lambda site, traj: vsf.vs3_func_3(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+            (3, 4): lambda site, traj: vsf.vs3_func_4(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+            (4, 2): lambda site, traj: vsf.vs4_func_2(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+            ("n", 1): lambda site, traj: vsf.vsn_func_1(
+                aa2cg_universe, traj, site.defining_beads
+            ),
+            ("n", 2): lambda site, traj: vsf.vsn_func_2(
+                aa2cg_universe,
+                traj,
+                site.defining_beads,
+                site.bead_id,
+                topology=topology,
+            ),
+            ("n", 3): lambda site, traj: vsf.vsn_func_3(
+                aa2cg_universe, traj, site.defining_beads, site.parameters
+            ),
+        }
+        for site in topology.virtual_sites:
+            traj = np.empty((len(aa2cg_universe.trajectory), 3))
+            dispatch[(site.kind, site.function)](site, traj)
+            coord[:, site.bead_id, :] = traj
         
         aa2cg_universe.load_new(coord, format=mda.coordinates.memory.MemoryReader)
 
-def initialize_cg_traj(cg_itp):
-    """Initialize cg trajectory universe object."""
-    masses = np.array([val["mass"] for val in cg_itp["atoms"]])
-    names = np.array([val["atom"] for val in cg_itp["atoms"]])
-    resnames = np.array([val["residue"] for val in cg_itp["atoms"]])
-    resid = np.array([val["resnr"] for val in cg_itp["atoms"]])
-    nr = len(set([val["resnr"] for val in cg_itp["atoms"]]))
+def initialize_cg_traj(topology: CGTopology):
+    """Initialize an in-memory trajectory universe for a typed CG topology.
 
-    aa2cg_universe = mda.Universe.empty(len(cg_itp["atoms"]), n_residues=nr, atom_resindex=resid, n_segments=1,
+    Args:
+        topology: Typed coarse-grained topology.
+
+    Returns:
+        Empty MDAnalysis universe with atom metadata and one trajectory slot.
+    """
+    masses = np.array([atom.mass for atom in topology.atoms])
+    names = np.array([atom.atom_name for atom in topology.atoms])
+    resnames = np.array([atom.residue_name for atom in topology.atoms])
+    resid = np.array([atom.residue_number for atom in topology.atoms])
+    nr = len(set(resid))
+
+    aa2cg_universe = mda.Universe.empty(len(topology.atoms), n_residues=nr, atom_resindex=resid, n_segments=1,
                                         residue_segindex=np.ones(nr), trajectory=True)
     aa2cg_universe.add_TopologyAttr("masses")
     aa2cg_universe._topology.masses.values = np.array(masses)

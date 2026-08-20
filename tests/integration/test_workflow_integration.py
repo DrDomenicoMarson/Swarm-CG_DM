@@ -99,22 +99,22 @@ def test_evaluator_workflow_real_data(real_data_config):
     # Check if we have populated distribution arrays in cg_itp (that's where they end up)
     
     # Constraints/Bonds check
-    nb_bonds = context.cg_itp["nb_bonds"]
+    nb_bonds = context.cg_itp.bond_count
     if nb_bonds > 0:
-        first_bond = context.cg_itp["bond"][0]
-        assert "hist" in first_bond
-        assert "avg" in first_bond
-        assert first_bond["avg"] > 0
-        assert np.sum(first_bond["hist"]) > 0 # Should have some probability mass
+        first_bond = context.cg_itp.bonds[0]
+        assert first_bond.histogram is not None
+        assert first_bond.average is not None
+        assert first_bond.average > 0
+        assert np.sum(first_bond.histogram) > 0 # Should have some probability mass
         
     # Angles check
-    nb_angles = context.cg_itp["nb_angles"]
+    nb_angles = context.cg_itp.angle_count
     if nb_angles > 0:
-        first_angle = context.cg_itp["angle"][0]
-        assert "hist" in first_angle
-        assert "avg" in first_angle
+        first_angle = context.cg_itp.angles[0]
+        assert first_angle.histogram is not None
+        assert first_angle.average is not None
         # Angles in degrees, usually around 100-120 etc
-        assert first_angle["avg"] > 0
+        assert first_angle.average > 0
         
     logger.info("Verified %s bond groups and %s angle groups.", nb_bonds, nb_angles)
 

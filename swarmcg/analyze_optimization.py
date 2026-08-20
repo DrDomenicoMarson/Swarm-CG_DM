@@ -10,7 +10,7 @@ from matplotlib.ticker import MaxNLocator
 import swarmcg.shared.styling
 import swarmcg.io as io
 from swarmcg import config
-from swarmcg.config_types import OutputConfig, SwarmConfig
+from swarmcg.config_types import OutputConfig
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import get_logger, setup_logging
 
@@ -126,11 +126,11 @@ def run(ns):
                         itp_path = os.path.join(cand, sorted(itp_files)[0])
                         break
             if itp_path:
-                cfg = SwarmConfig()
-                cfg.cg_model.cg_itp_filename = itp_path
                 try:
-                    cg_itp = io.read_cg_itp_file(cfg)
-                    dihedral_funcs = [grp["func"] for grp in cg_itp["dihedral"]]
+                    topology = io.read_cg_topology(itp_path)
+                    dihedral_funcs = [
+                        group.function for group in topology.dihedrals
+                    ]
                 except Exception as exc:
                     logger.warning("Failed to read dihedral functions from %s: %s", itp_path, exc)
             else:

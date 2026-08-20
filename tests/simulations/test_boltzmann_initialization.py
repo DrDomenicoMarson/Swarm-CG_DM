@@ -12,6 +12,26 @@ from swarmcg.simulations.boltzmann import (
 )
 from swarmcg.simulations.polynomial import RBParameters
 from swarmcg.simulations.potentials import gmx_dihedrals_func_3
+from swarmcg.shared.periodic import PeriodicDihedralParameters
+from swarmcg.topology import (
+    AngleGroup,
+    BondGroup,
+    CGTopology,
+    DihedralGroup,
+    HarmonicParameters,
+)
+
+
+def _bond(equilibrium, force_constant):
+    """Return one typed harmonic bond group for initialization tests."""
+    parameters = HarmonicParameters(equilibrium, force_constant)
+    return BondGroup("1", [(0, 1)], 1, parameters, parameters)
+
+
+def _angle(function, equilibrium=120.0, force_constant=10.0):
+    """Return one typed angle group for initialization tests."""
+    parameters = HarmonicParameters(equilibrium, force_constant)
+    return AngleGroup("1", [(0, 1, 2)], function, parameters, parameters)
 
 
 def _target_from_basis(centers, basis, force_constant, temperature=300.0):
@@ -101,11 +121,7 @@ def test_perform_bi_fits_around_the_current_fixed_equilibrium(
 ):
     centers = np.linspace(0.3, 0.7, 81)
     basis = 0.5 * (centers - equilibrium) ** 2
-    topology = {
-        "bond": [{"func": 1, "value": equilibrium, "fct": 10.0}],
-        "angle": [],
-        "dihedral": [],
-    }
+    topology = CGTopology(bonds=[_bond(equilibrium, 10.0)])
 
     perform_BI(
         topology,
@@ -121,8 +137,8 @@ def test_perform_bi_fits_around_the_current_fixed_equilibrium(
         exec_mode=exec_mode,
     )
 
-    assert topology["bond"][0]["value"] == equilibrium
-    assert np.isclose(topology["bond"][0]["fct"], 900.0, atol=1e-8)
+    assert topology.bonds[0].equilibrium == equilibrium
+    assert np.isclose(topology.bonds[0].force_constant, 900.0, atol=1e-8)
 
 
 def test_perform_bi_recovers_all_supported_linear_forms_and_rb():
@@ -165,30 +181,31 @@ def test_perform_bi_recovers_all_supported_linear_forms_and_rb():
     )
     rb_probabilities /= rb_probabilities.sum()
 
-    topology = {
-        "bond": [{"func": 1, "value": bond_equilibrium, "fct": 10.0}],
-        "angle": [
-            {"func": func, "value": 120.0, "fct": 10.0}
-            for func in (1, 2, 10)
+    periodic_1 = PeriodicDihedralParameters(35.0, 1.0, 2)
+    periodic_4 = PeriodicDihedralParameters(-145.0, 1.0, 2)
+    improper = HarmonicParameters(-45.0, 1.0)
+    rb_seed = RBParameters((0.0,) * 5)
+    topology = CGTopology(
+        bonds=[_bond(bond_equilibrium, 10.0)],
+        angles=[_angle(function) for function in (1, 2, 10)],
+        dihedrals=[
+            DihedralGroup("1", [(0, 1, 2, 3)], 1, periodic_1, periodic_1),
+            DihedralGroup("2", [(0, 1, 2, 3)], 4, periodic_4, periodic_4),
+            DihedralGroup("3", [(0, 1, 2, 3)], 2, improper, improper),
+            DihedralGroup(
+                "4",
+                [(0, 1, 2, 3)],
+                3,
+                rb_seed,
+                rb_seed,
+                coefficient_bound=25.0,
+            ),
         ],
-        "dihedral": [
-            {"func": 1, "value": 35.0, "fct": 1.0, "mult": 2, "params": []},
-            {"func": 4, "value": -145.0, "fct": 1.0, "mult": 2, "params": []},
-            {"func": 2, "value": -45.0, "fct": 1.0, "mult": None, "params": []},
-            {
-                "func": 3,
-                "value": None,
-                "fct": None,
-                "mult": None,
-                "params": [0.0] * 6,
-                "coefficient_bound": 25.0,
-            },
-        ],
-    }
+    )
     original_values = {
-        "bond": topology["bond"][0]["value"],
-        "angles": [group["value"] for group in topology["angle"]],
-        "dihedrals": [group["value"] for group in topology["dihedral"]],
+        "bond": topology.bonds[0].equilibrium,
+        "angles": [group.equilibrium for group in topology.angles],
+        "dihedrals": [group.equilibrium for group in topology.dihedrals],
     }
     targets = {
         "bond": [_target_from_basis(bond_centers, bond_basis, 1500.0)],
@@ -218,44 +235,43 @@ def test_perform_bi_recovers_all_supported_linear_forms_and_rb():
         exec_mode=1,
     )
 
-    assert np.isclose(topology["bond"][0]["fct"], 1500.0, atol=1e-7)
+    assert np.isclose(topology.bonds[0].force_constant, 1500.0, atol=1e-7)
     assert np.allclose(
-        [group["fct"] for group in topology["angle"]],
+        [group.force_constant for group in topology.angles],
         angle_constants,
         atol=1e-7,
     )
-    assert np.isclose(topology["dihedral"][0]["fct"], 4.0, atol=1e-8)
-    assert np.isclose(topology["dihedral"][1]["fct"], 3.0, atol=1e-8)
-    assert np.isclose(topology["dihedral"][2]["fct"], 175.0, atol=1e-7)
+    assert np.isclose(topology.dihedrals[0].force_constant, 4.0, atol=1e-8)
+    assert np.isclose(topology.dihedrals[1].force_constant, 3.0, atol=1e-8)
+    assert np.isclose(topology.dihedrals[2].force_constant, 175.0, atol=1e-7)
     assert np.allclose(
-        RBParameters.from_gromacs(topology["dihedral"][3]["params"]).coefficients,
+        topology.dihedrals[3].parameters.coefficients,
         rb_expected.coefficients,
         atol=1e-8,
     )
-    assert topology["bond"][0]["value"] == original_values["bond"]
-    assert [group["value"] for group in topology["angle"]] == original_values["angles"]
-    assert [group["value"] for group in topology["dihedral"]] == original_values["dihedrals"]
+    assert topology.bonds[0].equilibrium == original_values["bond"]
+    assert [group.equilibrium for group in topology.angles] == original_values["angles"]
+    assert [group.equilibrium for group in topology.dihedrals] == original_values["dihedrals"]
     assert all(flags.values())
 
 
 def test_underdetermined_force_and_rb_fits_retain_input_seeds(caplog):
     centers = np.linspace(-np.pi, np.pi, 5, endpoint=False)
     one_bin = BoltzmannTarget(centers, np.array([1.0, 0.0, 0.0, 0.0, 0.0]))
-    original_rb = RBParameters((1.0, -2.0, 3.0, -4.0, 5.0)).to_gromacs()
-    topology = {
-        "bond": [{"func": 1, "value": 0.5, "fct": 321.0}],
-        "angle": [],
-        "dihedral": [
-            {
-                "func": 3,
-                "value": None,
-                "fct": None,
-                "mult": None,
-                "params": list(original_rb),
-                "coefficient_bound": 25.0,
-            }
+    original_rb = RBParameters((1.0, -2.0, 3.0, -4.0, 5.0))
+    topology = CGTopology(
+        bonds=[_bond(0.5, 321.0)],
+        dihedrals=[
+            DihedralGroup(
+                "1",
+                [(0, 1, 2, 3)],
+                3,
+                original_rb,
+                original_rb,
+                coefficient_bound=25.0,
+            )
         ],
-    }
+    )
     cycle = {
         "nb_geoms": {"constraint": 0, "bond": 1, "angle": 0, "dihedral": 1}
     }
@@ -270,8 +286,8 @@ def test_underdetermined_force_and_rb_fits_retain_input_seeds(caplog):
         SwarmConfig(),
     )
 
-    assert topology["bond"][0]["fct"] == 321.0
-    assert topology["dihedral"][0]["params"] == list(original_rb)
+    assert topology.bonds[0].force_constant == 321.0
+    assert topology.dihedrals[0].parameters == original_rb
     assert "design rank 1, expected 2" in caplog.text
     assert "design rank" in caplog.text
     assert "broad first-activation exploration" in caplog.text

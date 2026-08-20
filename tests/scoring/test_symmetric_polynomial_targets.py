@@ -12,18 +12,16 @@ from swarmcg.scoring.compare import _format_circular_mean
 from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.shared import exceptions
 from swarmcg.simulations.polynomial import mirrored_total_variation
+from swarmcg.simulations.polynomial import CBTParameters, RBParameters
+from swarmcg.shared.periodic import PeriodicDihedralParameters
+from swarmcg.topology import CGTopology, DihedralGroup
 
 
 def _evaluator_with_dihedrals(groups, exec_mode):
     """Return an initialized lightweight evaluator for distribution tests."""
     config = SwarmConfig(optimization=OptimizationConfig(exec_mode=exec_mode))
     context = OptimizationContext(config=config)
-    context.cg_itp = {
-        "constraint": [],
-        "bond": [],
-        "angle": [],
-        "dihedral": groups,
-    }
+    context.cg_itp = CGTopology(dihedrals=groups)
     create_bins_and_dist_matrices(context)
     evaluator = SwarmEvaluator(config)
     evaluator.ns = context
@@ -40,29 +38,28 @@ def _undefined_mean_distribution(*args, **kwargs):
     return float("nan"), histogram, values_degrees, values_radians
 
 
+def _polynomial_group(function):
+    """Return a zero-coefficient RB or CBT dihedral group."""
+    parameters = (
+        RBParameters((0.0,) * 5)
+        if function == 3
+        else CBTParameters((0.0,) * 5)
+    )
+    return DihedralGroup(
+        "1", [(0, 1, 2, 3)], function, parameters, parameters
+    )
+
+
+def _periodic_group(function, phase, force, multiplicity):
+    """Return one typed periodic dihedral group."""
+    parameters = PeriodicDihedralParameters(phase, force, multiplicity)
+    return DihedralGroup(
+        "1", [(0, 1, 2, 3)], function, parameters, parameters
+    )
+
+
 def test_symmetric_rb_and_cbt_targets_do_not_require_phase(monkeypatch):
-    groups = [
-        {
-            "func": 3,
-            "params": [0.0] * 6,
-            "value": None,
-            "value_user": None,
-            "fct": None,
-            "fct_user": None,
-            "mult": None,
-            "beads": [[0, 1, 2, 3]],
-        },
-        {
-            "func": 11,
-            "params": [0.0] * 6,
-            "value": None,
-            "value_user": None,
-            "fct": None,
-            "fct_user": None,
-            "mult": None,
-            "beads": [[0, 1, 2, 3]],
-        },
-    ]
+    groups = [_polynomial_group(3), _polynomial_group(11)]
     evaluator = _evaluator_with_dihedrals(groups, exec_mode=1)
     monkeypatch.setattr(
         "swarmcg.scoring.evaluator.scores.get_AA_dihedrals_distrib",
@@ -71,26 +68,17 @@ def test_symmetric_rb_and_cbt_targets_do_not_require_phase(monkeypatch):
 
     evaluator.compute_reference_distributions()
 
-    assert all(np.isnan(group["avg"]) for group in groups)
+    assert all(np.isnan(group.average) for group in groups)
     assert evaluator.ns.scoring.domains_val["dihedral"] == [None, None]
     assert len(evaluator.ns.scoring.data_BI["dihedral"]) == 2
-    assert all(group["coefficient_bound"] == 25.0 for group in groups)
-    assert all(group["polynomial_symmetry_tv"] <= 0.10 for group in groups)
+    assert all(group.coefficient_bound == 25.0 for group in groups)
+    assert all(group.polynomial_symmetry_tv <= 0.10 for group in groups)
     assert _format_circular_mean(float("nan")) == "unavailable"
 
 
 def test_phase_function_rejects_undefined_mean_only_in_mode_one(monkeypatch):
     def group():
-        return {
-            "func": 1,
-            "params": [30.0, 2.0],
-            "value": 30.0,
-            "value_user": 30.0,
-            "fct": 2.0,
-            "fct_user": 2.0,
-            "mult": 1,
-            "beads": [[0, 1, 2, 3]],
-        }
+        return _periodic_group(1, 30.0, 2.0, 1)
 
     monkeypatch.setattr(
         "swarmcg.scoring.evaluator.scores.get_AA_dihedrals_distrib",
@@ -107,8 +95,8 @@ def test_phase_function_rejects_undefined_mean_only_in_mode_one(monkeypatch):
     mode_two = _evaluator_with_dihedrals([mode_two_group], exec_mode=2)
     mode_two.compute_reference_distributions()
 
-    assert np.isnan(mode_two_group["avg"])
-    assert mode_two_group["value"] == 30.0
+    assert np.isnan(mode_two_group.average)
+    assert mode_two_group.equilibrium == 30.0
     assert mode_two.ns.scoring.domains_val["dihedral"] == [None]
 
 
@@ -123,16 +111,7 @@ def test_threefold_periodic_target_uses_third_moment_not_first(monkeypatch):
     def distribution(*args, **kwargs):
         return float("nan"), histogram, values_degrees, values_radians
 
-    group = {
-        "func": 1,
-        "params": [0.0, 2.0],
-        "value": 0.0,
-        "value_user": 0.0,
-        "fct": 2.0,
-        "fct_user": 2.0,
-        "mult": 3,
-        "beads": [[0, 1, 2, 3]],
-    }
+    group = _periodic_group(1, 0.0, 2.0, 3)
     evaluator = _evaluator_with_dihedrals([group], exec_mode=1)
     monkeypatch.setattr(
         "swarmcg.scoring.evaluator.scores.get_AA_dihedrals_distrib",
@@ -141,9 +120,9 @@ def test_threefold_periodic_target_uses_third_moment_not_first(monkeypatch):
 
     evaluator.compute_reference_distributions()
 
-    assert np.isnan(group["avg"])
-    assert np.isclose(group["phase_moment_resultant"], 1.0)
-    assert np.isclose(group["value"], -90.0)
+    assert np.isnan(group.average)
+    assert np.isclose(group.phase_moment_resultant, 1.0)
+    assert np.isclose(group.equilibrium, -90.0)
     assert evaluator.ns.scoring.domains_val["dihedral"] == [[-270.0, 90.0]]
 
 
@@ -158,16 +137,7 @@ def test_mode_one_rejects_undefined_multiplicity_order_moment(monkeypatch):
     def distribution(*args, **kwargs):
         return 45.0, histogram, values_degrees, values_radians
 
-    group = {
-        "func": 4,
-        "params": [20.0, 2.0],
-        "value": 20.0,
-        "value_user": 20.0,
-        "fct": 2.0,
-        "fct_user": 2.0,
-        "mult": 2,
-        "beads": [[0, 1, 2, 3]],
-    }
+    group = _periodic_group(4, 20.0, 2.0, 2)
     evaluator = _evaluator_with_dihedrals([group], exec_mode=1)
     monkeypatch.setattr(
         "swarmcg.scoring.evaluator.scores.get_AA_dihedrals_distrib",
@@ -202,16 +172,7 @@ def test_polynomial_forms_warn_for_asymmetric_target(
     def distribution(*args, **kwargs):
         return -147.5, histogram, values_degrees, values_radians
 
-    group = {
-        "func": func,
-        "params": [0.0] * 6,
-        "value": None,
-        "value_user": None,
-        "fct": None,
-        "fct_user": None,
-        "mult": None,
-        "beads": [[0, 1, 2, 3]],
-    }
+    group = _polynomial_group(func)
     evaluator = _evaluator_with_dihedrals([group], exec_mode=1)
     monkeypatch.setattr(
         "swarmcg.scoring.evaluator.scores.get_AA_dihedrals_distrib",
@@ -221,6 +182,6 @@ def test_polynomial_forms_warn_for_asymmetric_target(
 
     evaluator.compute_reference_distributions()
 
-    assert group["polynomial_symmetry_tv"] > 0.10
+    assert group.polynomial_symmetry_tv > 0.10
     assert f"{form_name} dihedral group 1" in caplog.text
     assert "cannot reproduce an asymmetric torsional marginal" in caplog.text
