@@ -6,6 +6,7 @@ from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg.scoring.compare import compare_models
 from swarmcg.scoring.evaluator import SwarmEvaluator
+from swarmcg.topology import GeometryKind
 
 
 TEST_DATA = Path(__file__).parents[1] / "data"
@@ -34,28 +35,33 @@ def test_bundled_model_comparison_numerical_regression(tmp_path):
     result = compare_models(context, manual_mode=False)
 
     assert result is not None
-    assert result[:4] == pytest.approx(
+    assert (
+        result.total_score,
+        result.constraints_bonds_score,
+        result.angles_score,
+        result.dihedrals_score,
+    ) == pytest.approx(
         (8.655850009902657, 3.673883866470647, 4.98196614343201, 0.0),
         rel=1e-12,
         abs=1e-12,
     )
-    assert result[5] == pytest.approx(
+    assert result.pairwise_scores == pytest.approx(
         {
-            "constraints": [],
-            "bonds": [
+            GeometryKind.CONSTRAINT: (),
+            GeometryKind.BOND: (
                 1.5301459735325402,
                 1.9646621856336215,
                 1.4123627255754319,
                 2.3024790969174775,
-            ],
-            "angles": [
+            ),
+            GeometryKind.ANGLE: (
                 1.3395604858379535,
                 2.25970775197642,
                 2.309753523650249,
                 3.376417874488181,
                 1.0881756437101713,
-            ],
-            "dihedrals": [],
+            ),
+            GeometryKind.DIHEDRAL: (),
         },
         rel=1e-12,
         abs=1e-12,

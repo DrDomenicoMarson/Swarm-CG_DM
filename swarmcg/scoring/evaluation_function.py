@@ -232,25 +232,16 @@ def _run_and_score(
 
 
 def _compare_model(ns: OptimizationContext) -> EvaluationResult:
-    values = compare_models(
+    result = compare_models(
         ns,
         manual_mode=False,
         ignore_dihedrals=ns.opti_cycle.counts.dihedrals == 0,
         calc_sasa=ns.config.output.calculate_sasa,
         record_best_indep_params=True,
     )
-    total, bonds, angles, dihedrals, pairwise_text, pairwise = values
-    typed_pairwise = {
-        kind: tuple(pairwise.get(kind.plural, ())) for kind in GeometryKind
-    }
-    return EvaluationResult(
-        total_score=float(total),
-        constraints_bonds_score=float(bonds),
-        angles_score=float(angles),
-        dihedrals_score=float(dihedrals),
-        pairwise_scores=typed_pairwise,
-        pairwise_text=pairwise_text,
-    )
+    if result is None:
+        raise RuntimeError("optimization scoring returned no evaluation result")
+    return result
 
 
 def _score_for_geometries(

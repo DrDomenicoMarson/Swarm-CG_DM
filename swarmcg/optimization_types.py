@@ -166,6 +166,19 @@ class SimulationSetup:
 
 
 @dataclass(frozen=True)
+class ObservableStatistics:
+    """Mean and standard deviation of one structural observable.
+
+    Args:
+        mean: Mean value, or ``None`` when unavailable.
+        standard_deviation: Standard deviation, or ``None`` when unavailable.
+    """
+
+    mean: float | None = None
+    standard_deviation: float | None = None
+
+
+@dataclass(frozen=True)
 class EvaluationResult:
     """Typed result of comparing one coarse-grained model to its reference.
 
@@ -177,6 +190,10 @@ class EvaluationResult:
         pairwise_scores: Per-group mismatch scores by geometry kind.
         pairwise_text: Legacy whitespace serialization retained until the
             versioned history cutover.
+        rg_aa_mapped: Radius-of-gyration statistics for the mapped reference.
+        rg_cg: Radius-of-gyration statistics for the CG model.
+        sasa_aa_mapped: SASA statistics for the mapped reference.
+        sasa_cg: SASA statistics for the CG model.
     """
 
     total_score: float
@@ -185,6 +202,10 @@ class EvaluationResult:
     dihedrals_score: float
     pairwise_scores: Mapping[GeometryKind, tuple[float, ...]]
     pairwise_text: str = ""
+    rg_aa_mapped: ObservableStatistics = ObservableStatistics()
+    rg_cg: ObservableStatistics = ObservableStatistics()
+    sasa_aa_mapped: ObservableStatistics = ObservableStatistics()
+    sasa_cg: ObservableStatistics = ObservableStatistics()
 
 
 @dataclass(frozen=True)

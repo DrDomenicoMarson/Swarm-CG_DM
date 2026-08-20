@@ -6,11 +6,13 @@ from swarmcg import config as config_module
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg.optimization_types import (
+    EvaluationResult,
     OptimizationCycle,
     ParameterVectorLayout,
     SimulationSetup,
 )
 from swarmcg.topology import Atom, CGTopology, MoleculeType
+from swarmcg.topology import GeometryKind
 
 
 def _make_min_itp():
@@ -119,9 +121,14 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
             ctx.results.gyr_aa_mapped = ctx.results.gyr_cg = 1.0
             ctx.results.gyr_aa_mapped_std = ctx.results.gyr_cg_std = 0.0
             ctx.results.sasa_aa_mapped = ctx.results.sasa_cg = None
-            return 1.0, 1.0, 0.0, 0.0, "\n", {
-                "constraints": [], "bonds": [], "angles": [], "dihedrals": []
-            }
+            return EvaluationResult(
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                {kind: () for kind in GeometryKind},
+                "\n",
+            )
 
         with (
             patch(

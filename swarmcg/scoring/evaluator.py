@@ -4,6 +4,7 @@ from typing import Optional
 
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
+from swarmcg.optimization_types import EvaluationResult
 from swarmcg import io
 from swarmcg.mapping import Mapping, initialize_cg_traj, make_aa_traj_whole_for_selected_mols
 from swarmcg.scoring.compare import compare_models
@@ -317,15 +318,17 @@ class SwarmEvaluator:
                         f"the explicit {option} bound of {bound:.3f} kJ/mol."
                     )
 
-    def evaluate_model(self, manual_mode: bool = False) -> tuple | None:
+    def evaluate_model(
+        self, manual_mode: bool = False
+    ) -> EvaluationResult | None:
         """Run model scoring for the trajectories configured in the context.
 
         Args:
             manual_mode: Use evaluation-mode distribution loading and display.
 
         Returns:
-            Fitness total, three class contributions, pairwise-score text, and
-            per-geometry EMD values, or ``None`` for manual display mode.
+            Typed scores, observables, and pairwise geometry results, or
+            ``None`` for manual display mode.
 
         Raises:
             RuntimeError: If :meth:`initialize` has not completed.
