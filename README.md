@@ -138,7 +138,20 @@ Optimization procedures can be monitored at any point during execution. The modu
 
 	scg_monitor -opti_dir MODEL_OPTI__STARTED_03-07-2020_10h_12m_15s
 
-See the help (-h) for a complete description of `scg_monitor` output. Rg and requested SASA values may be rough estimates because they come from short optimization simulations and should be validated with longer trajectories. The monitor marks failed evaluations explicitly and omits SASA summaries and panels when SASA was not requested or no result is available. Using `scg_evaluate` can be helpful to this end.
+Each completed evaluation is flushed as one strict schema-version-1 JSON record
+in `.internal/optimization_history.jsonl`. This is the monitor's only supported
+input format; optimization directories created by older Swarm-CG versions and
+their whitespace recap files are intentionally unsupported. While an
+optimization is active, `scg_monitor` tolerates a syntactically incomplete
+final line but rejects malformed earlier records.
+
+See the help (`-h` or `--help`) for a complete description of `scg_monitor`
+output. Rg and requested SASA values may be rough estimates because they come
+from short optimization simulations and should be validated with longer
+trajectories. The monitor marks stalled, crashed, and scoring-failed
+evaluations explicitly and omits SASA summaries and panels when SASA was not
+requested or no result is available. Using `scg_evaluate` can be helpful to
+this end.
 
 ### Extended usage (untested)
 

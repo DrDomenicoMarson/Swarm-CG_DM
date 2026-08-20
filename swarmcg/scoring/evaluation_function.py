@@ -12,6 +12,7 @@ from typing import Sequence
 
 from swarmcg import config, io, simulations as sim
 from swarmcg.context import OptimizationContext
+from swarmcg.history import HISTORY_SCHEMA_VERSION, append_history_record
 from swarmcg.optimization_types import EvaluationResult
 from swarmcg.scoring.compare import compare_models
 from swarmcg.shared import exceptions, styling
@@ -49,6 +50,9 @@ class _EvaluationOutcome:
     objective: float
     new_global_best: bool = False
     failure_kind: str | None = None
+    failure_message: str | None = None
+    gromacs_seconds: float = 0.0
+    scoring_seconds: float = 0.0
 
 
 def eval_function(parameters_set, ns: OptimizationContext) -> float:
@@ -80,13 +84,12 @@ def eval_function(parameters_set, ns: OptimizationContext) -> float:
 
     outcome = _run_and_score(ns, paths)
     _archive_artifacts(ns, paths, outcome)
-    pairwise_text = _report_outcome(ns, outcome)
+    _report_outcome(ns, outcome)
     elapsed_minutes, elapsed_hours = _record_timing(ns, started_at)
-    _write_legacy_recap(
+    _write_history_record(
         ns,
-        paths.execution,
+        paths.execution / config.optimization_history_file,
         outcome,
-        pairwise_text,
         elapsed_minutes,
         elapsed_hours,
     )
@@ -155,7 +158,14 @@ def _failure_comparison(ns: OptimizationContext) -> EvaluationResult:
         ],
         angles_score=ns.pso.failure_component_scores["angles"],
         dihedrals_score=ns.pso.failure_component_scores["dihedrals"],
-        pairwise_scores={kind: () for kind in GeometryKind},
+        pairwise_scores={
+            GeometryKind.CONSTRAINT: (float("nan"),)
+            * ns.cg_itp.constraint_count,
+            GeometryKind.BOND: (float("nan"),) * ns.cg_itp.bond_count,
+            GeometryKind.ANGLE: (float("nan"),) * ns.cg_itp.angle_count,
+            GeometryKind.DIHEDRAL: (float("nan"),)
+            * ns.cg_itp.dihedral_count,
+        },
     )
 
 
@@ -173,7 +183,8 @@ def _run_and_score(
         )
     except exceptions.ComputationError as exc:
         simulation_error = exc
-    ns.status.total_gmx_time += datetime.now().timestamp() - simulation_started
+    gromacs_seconds = datetime.now().timestamp() - simulation_started
+    ns.status.total_gmx_time += gromacs_seconds
 
     if simulation_error is not None:
         kind = (
@@ -188,7 +199,13 @@ def _run_and_score(
         )
         _record_failure(ns, kind)
         _clear_cg_observables(ns)
-        return _EvaluationOutcome(failure, ns.pso.worst_fit_score, failure_kind=kind)
+        return _EvaluationOutcome(
+            failure,
+            ns.pso.worst_fit_score,
+            failure_kind=kind,
+            failure_message=str(simulation_error),
+            gromacs_seconds=gromacs_seconds,
+        )
 
     if not (paths.workspace / "md.gro").is_file():
         print_stdout_forced(
@@ -198,16 +215,22 @@ def _run_and_score(
         _record_failure(ns, "crashed")
         _clear_cg_observables(ns)
         return _EvaluationOutcome(
-            failure, ns.pso.worst_fit_score, failure_kind="crashed"
+            failure,
+            ns.pso.worst_fit_score,
+            failure_kind="crashed",
+            failure_message="Simulation output md.gro is missing.",
+            gromacs_seconds=gromacs_seconds,
         )
 
     ns.files.cg_tpr_filename = str(paths.workspace / "md.tpr")
     ns.files.cg_traj_filename = str(paths.workspace / "md.xtc")
     ns.files.plot_filename = str(paths.plot)
     scoring_started = datetime.now().timestamp()
+    scoring_error = None
     try:
         comparison = _compare_model(ns)
     except Exception as exc:
+        scoring_error = exc
         print_stdout_forced(
             styling.header_warning
             + "Model scoring failed; assigning worst score and continuing.\n"
@@ -215,12 +238,18 @@ def _run_and_score(
         )
         _record_failure(ns, "crashed")
         _clear_cg_observables(ns)
-        return _EvaluationOutcome(
-            failure, ns.pso.worst_fit_score, failure_kind="crashed"
-        )
     finally:
-        ns.status.total_model_eval_time += (
-            datetime.now().timestamp() - scoring_started
+        scoring_seconds = datetime.now().timestamp() - scoring_started
+        ns.status.total_model_eval_time += scoring_seconds
+
+    if scoring_error is not None:
+        return _EvaluationOutcome(
+            failure,
+            ns.pso.worst_fit_score,
+            failure_kind="scoring_failed",
+            failure_message=str(scoring_error),
+            gromacs_seconds=gromacs_seconds,
+            scoring_seconds=scoring_seconds,
         )
 
     objective = _score_for_geometries(comparison, ns.opti_cycle.geometries)
@@ -228,7 +257,13 @@ def _run_and_score(
     new_best = global_score < ns.pso.best_fitness[0]
     if new_best:
         ns.pso.best_fitness = global_score, ns.status.nb_eval
-    return _EvaluationOutcome(comparison, objective, new_global_best=new_best)
+    return _EvaluationOutcome(
+        comparison,
+        objective,
+        new_global_best=new_best,
+        gromacs_seconds=gromacs_seconds,
+        scoring_seconds=scoring_seconds,
+    )
 
 
 def _compare_model(ns: OptimizationContext) -> EvaluationResult:
@@ -317,18 +352,12 @@ def _archive_artifacts(
         shutil.rmtree(paths.workspace)
 
 
-def _report_outcome(ns: OptimizationContext, outcome: _EvaluationOutcome) -> str:
+def _report_outcome(ns: OptimizationContext, outcome: _EvaluationOutcome) -> None:
     if outcome.failure_kind is not None:
-        group_count = (
-            ns.cg_itp.constraint_count
-            + ns.cg_itp.bond_count
-            + ns.cg_itp.angle_count
-            + ns.cg_itp.dihedral_count
-        )
         print_stdout_forced(
             f"  Evaluation failed; finite penalty objective: {outcome.objective}"
         )
-        return "nan " * group_count + "\n"
+        return
 
     result = outcome.comparison
     print_stdout_forced(
@@ -354,7 +383,7 @@ def _report_outcome(ns: OptimizationContext, outcome: _EvaluationOutcome) -> str
             f"(Error abs. {round(abs(1 - ns.results.sasa_cg / ns.results.sasa_aa_mapped) * 100, 1)}% "
             f"-- Reference SASA AA-mapped: {ns.results.sasa_aa_mapped} nm2)"
         )
-    return result.pairwise_text
+    return None
 
 
 def _record_timing(
@@ -369,57 +398,110 @@ def _record_timing(
     return elapsed_minutes, current_total_hours
 
 
-def _write_legacy_recap(
+def _write_history_record(
     ns: OptimizationContext,
-    execution_dir: Path,
+    history_path: Path,
     outcome: _EvaluationOutcome,
-    pairwise_text: str,
     elapsed_minutes: float,
     elapsed_hours: float,
 ) -> None:
-    pairwise_path = execution_dir / config.opti_pairwise_distances_file
-    with pairwise_path.open("a") as handle:
-        prefix = "1 " if ns.opti_cycle.includes("dihedral") else "0 "
-        handle.write(prefix + pairwise_text)
-
     result = outcome.comparison
-    values = (
-        ns.opti_cycle.number,
-        ns.status.nb_eval,
-        result.total_score,
-        result.constraints_bonds_score,
-        result.angles_score,
-        result.dihedrals_score,
-        outcome.objective,
-        ns.results.gyr_aa_mapped,
-        ns.results.gyr_aa_mapped_std,
-        ns.results.gyr_cg,
-        ns.results.gyr_cg_std,
-        ns.results.sasa_aa_mapped,
-        ns.results.sasa_aa_mapped_std,
-        ns.results.sasa_cg,
-        ns.results.sasa_cg_std,
-    )
-    recap = " ".join(map(str, values)) + " "
-    recap += _serialize_topology_parameters(ns)
-    recap += f"{elapsed_minutes} {elapsed_hours}"
-    with (execution_dir / config.opti_perf_recap_file).open("a") as handle:
-        handle.write(recap + "\n")
+    record = {
+        "schema_version": HISTORY_SCHEMA_VERSION,
+        "evaluation_id": ns.status.nb_eval,
+        "cycle_id": ns.opti_cycle.number,
+        "status": "success" if outcome.failure_kind is None else "failure",
+        "active_geometries": [kind.value for kind in ns.opti_cycle.geometries],
+        "scores": {
+            "total": result.total_score,
+            "constraints_bonds": result.constraints_bonds_score,
+            "angles": result.angles_score,
+            "dihedrals": result.dihedrals_score,
+            "objective": outcome.objective,
+        },
+        "observables": _serialize_observables(ns),
+        "pairwise_scores": {
+            kind.plural: result.pairwise_scores[kind] for kind in GeometryKind
+        },
+        "parameters": _serialize_topology_parameters(ns),
+        "timings": {
+            "evaluation_minutes": elapsed_minutes,
+            "total_hours": elapsed_hours,
+            "gromacs_seconds": outcome.gromacs_seconds,
+            "scoring_seconds": outcome.scoring_seconds,
+        },
+        "failure": (
+            None
+            if outcome.failure_kind is None
+            else {
+                "kind": outcome.failure_kind,
+                "message": outcome.failure_message,
+            }
+        ),
+    }
+    append_history_record(history_path, record)
 
 
-def _serialize_topology_parameters(ns: OptimizationContext) -> str:
-    values: list[float | int] = []
-    for group in ns.out_itp.constraints:
-        values.append(group.equilibrium)
-    for group in ns.out_itp.bonds:
-        values.extend((group.equilibrium, group.force_constant))
-    for group in ns.out_itp.angles:
-        values.extend((group.equilibrium, group.force_constant))
+def _serialize_observables(ns: OptimizationContext) -> dict:
+    return {
+        "radius_of_gyration": {
+            "aa_mapped": {
+                "mean": ns.results.gyr_aa_mapped,
+                "standard_deviation": ns.results.gyr_aa_mapped_std,
+            },
+            "cg": {
+                "mean": ns.results.gyr_cg,
+                "standard_deviation": ns.results.gyr_cg_std,
+            },
+        },
+        "sasa": {
+            "aa_mapped": {
+                "mean": ns.results.sasa_aa_mapped,
+                "standard_deviation": ns.results.sasa_aa_mapped_std,
+            },
+            "cg": {
+                "mean": ns.results.sasa_cg,
+                "standard_deviation": ns.results.sasa_cg_std,
+            },
+        },
+    }
+
+
+def _serialize_topology_parameters(ns: OptimizationContext) -> dict:
+    constraints = [
+        {"function": group.function, "equilibrium": group.equilibrium}
+        for group in ns.out_itp.constraints
+    ]
+    bonds = [
+        {
+            "function": group.function,
+            "equilibrium": group.equilibrium,
+            "force_constant": group.force_constant,
+        }
+        for group in ns.out_itp.bonds
+    ]
+    angles = [
+        {
+            "function": group.function,
+            "equilibrium": group.equilibrium,
+            "force_constant": group.force_constant,
+        }
+        for group in ns.out_itp.angles
+    ]
+    dihedrals = []
     for group in ns.out_itp.dihedrals:
-        if ns.opti_cycle.counts.dihedrals == 0:
-            values.extend((0,) * (6 if group.function in (3, 11) else 2))
-        elif group.function in (3, 11):
-            values.extend(group.gromacs_parameters)
+        parameters = {"function": group.function}
+        if group.function in (3, 11):
+            parameters["coefficients"] = group.gromacs_parameters
         else:
-            values.extend((group.equilibrium, group.force_constant))
-    return " ".join(map(str, values)) + " "
+            parameters["equilibrium"] = group.equilibrium
+            parameters["force_constant"] = group.force_constant
+            if group.multiplicity is not None:
+                parameters["multiplicity"] = group.multiplicity
+        dihedrals.append(parameters)
+    return {
+        "constraints": constraints,
+        "bonds": bonds,
+        "angles": angles,
+        "dihedrals": dihedrals,
+    }

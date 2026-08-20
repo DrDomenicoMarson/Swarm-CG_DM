@@ -1,35 +1,31 @@
-# some numpy version have this ufunc warning at import + many packages call numpy and display annoying warnings
+"""Load, analyze, and render versioned optimization JSONL histories."""
+
+from __future__ import annotations
+
 import os
 import sys
+from pathlib import Path
 from shlex import quote as cmd_quote
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 
-import swarmcg.shared.styling
 import swarmcg.io as io
+import swarmcg.shared.styling
 from swarmcg import config
 from swarmcg.config_types import OutputConfig
-from swarmcg.shared import exceptions, catch_warnings
+from swarmcg.history import (
+    OptimizationHistoryAnalysis,
+    OptimizationHistoryRecord,
+    analyze_optimization_history,
+    load_optimization_history,
+)
+from swarmcg.shared import catch_warnings
 from swarmcg.shared.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
-
-
-def _finite_max(values, default=1.0):
-    """Return the largest finite value, or a plotting-safe default.
-
-    Args:
-        values: Numeric values that may contain failed-evaluation ``NaN`` entries.
-        default: Value returned when no finite entry is present.
-
-    Returns:
-        Largest finite value or *default*.
-    """
-    finite = np.asarray(values, dtype=float)
-    finite = finite[np.isfinite(finite)]
-    return float(np.max(finite)) if finite.size else float(default)
 
 
 def _validated_plot_scale(value):
@@ -46,725 +42,438 @@ def _validated_plot_scale(value):
     """
     return OutputConfig(plot_scale=value).plot_scale
 
-@catch_warnings(DeprecationWarning)  # filter matplotlib warnings
-@catch_warnings(ImportWarning)  # filter Matplotlib mpl_toolkits missing __init__ stuff
-@catch_warnings(UserWarning)  # filter working when reading scores for each geom at each fitness evaluation/simulation
-def run(ns):
-    """Read an optimization recap and write its monitoring summary plot.
+
+@catch_warnings(DeprecationWarning)
+@catch_warnings(ImportWarning)
+@catch_warnings(UserWarning)
+def run(ns) -> None:
+    """Load a JSONL optimization history and render its monitoring plot.
 
     Args:
         ns: Parsed monitor arguments containing the optimization directory,
             output plot path, and plot scale.
 
     Raises:
-        ValidationError: If the requested plot scale is not finite and
-            positive.
-        IncompleteOptimisationFile: If recap files contain no complete rows.
-        OptimisationResultsError: If no selectable evaluation is available.
+        ValidationError: If the plot scale is invalid.
+        IncompleteOptimisationFile: If no complete JSONL record exists.
+        OptimisationResultsError: If records are malformed or no successful
+            evaluation can be selected.
     """
-    ns.plot_scale = _validated_plot_scale(ns.plot_scale)
+    scale = _validated_plot_scale(ns.plot_scale)
+    optimization_dir = Path(ns.opti_dirname)
+    records = load_optimization_history(
+        optimization_dir / config.optimization_history_file
+    )
+    analysis = analyze_optimization_history(records)
+    output = optimization_dir / ns.plot_filename
+    render_optimization_history(analysis, output, scale)
+    _log_best_evaluation(analysis)
+    logger.info("")
+    logger.info("Wrote visual optimization summary file at location:\n %s", output)
+    logger.info("")
 
-    # TODO: print some text to tell user if opti run finished or not -- then we can only look at the results files, not the running processes on the machine
 
-    display_sim_crashes = True
-    display_opti_cycles_sep = True
-    plot_control_std = True
-    opti_cycles_sep_color = "black"
-    color_scores = "darkgreen"
-    color_subscores = "mediumseagreen"
-    yrange_rg = [None, None]
-    yrange_sasa = [None, None]
-    all_gyr_aa_mapped_offset = 0.00  # rescaling offset
+def render_optimization_history(
+    analysis: OptimizationHistoryAnalysis,
+    output_path: str | Path,
+    plot_scale: float = 1.0,
+) -> None:
+    """Render scores, observables, parameters, and pairwise EMD histories.
 
-    plt.rcParams["axes.axisbelow"] = True
+    Args:
+        analysis: Validated records plus best-selection metadata.
+        output_path: Destination image filename.
+        plot_scale: Positive multiplier applied to the figure dimensions.
 
-    # parameters
-    read_offset = 15  # nb of trailing fields that have static lengths in the recap file (i.e. NOT dependent on number of bonds, angles, etc.)
-    min_nb_cols = 9  # to be sure we have enough columns for opti process plots, even if number of bonds/angles/dihedrals is less than this
-
-    # read scores for each geom at each fitness evaluation/simulation
-    iter_indep_scores = np.genfromtxt(ns.opti_dirname + "/" + config.opti_pairwise_distances_file, delimiter=" ")
-
-    iter_indep_scores = np.atleast_2d(iter_indep_scores)
-    try:
-        iter_indep_scores.shape[1]
-    except IndexError:
-        msg = (
-            "The optimization recap file seems empty. Please wait for your optimization process\n"
-            "to have performed a few iterations, or check for errors during execution."
+    Returns:
+        ``None``. The monitor image is written to ``output_path``.
+    """
+    scale = _validated_plot_scale(plot_scale)
+    records = analysis.records
+    counts = _geometry_counts(records)
+    populated = [kind for kind, count in counts.items() if count]
+    columns = max(9, *(counts.values() or [0]))
+    rows = 1 + 2 * len(populated)
+    figure, axes = plt.subplots(
+        rows,
+        columns,
+        squeeze=False,
+        figsize=(columns * 4 * scale, rows * 3 * scale),
+    )
+    x_values = np.arange(1, len(records) + 1)
+    _render_summary_row(axes[0], analysis, x_values)
+    row = 1
+    for kind in populated:
+        _render_parameter_row(
+            axes[row], records, kind, counts[kind], x_values, analysis
         )
-        raise exceptions.IncompleteOptimisationFile(msg)
+        _render_pairwise_row(
+            axes[row + 1], records, kind, counts[kind], x_values, analysis
+        )
+        row += 2
+    figure.tight_layout()
+    figure.savefig(output_path)
+    plt.close(figure)
 
-    # process files and plot
-    with open(ns.opti_dirname + "/" + config.opti_perf_recap_file, "r") as fp:
 
-        eval_lines = fp.read().split("\n")
-        nb_evals = len(eval_lines) - 7
-        logger.info("Found %s optimization steps", nb_evals)
+def _geometry_counts(
+    records: tuple[OptimizationHistoryRecord, ...],
+) -> dict[str, int]:
+    kinds = ("constraints", "bonds", "angles", "dihedrals")
+    counts = {kind: len(records[0].parameters[kind]) for kind in kinds}
+    for record in records[1:]:
+        for kind in kinds:
+            if len(record.parameters[kind]) != counts[kind]:
+                raise ValueError(
+                    f"history parameter count changes for {kind} at "
+                    f"evaluation {record.evaluation_id}"
+                )
+    return counts
 
-        # to make sure the 2 opti recap files contain the same number of iterations (avoid buffering/writing problems so that this script can be executed anytime)
-        iter_indep_scores = iter_indep_scores[:nb_evals, ]
 
-        # read header
-        nb_constraints = int(eval_lines[0].split()[3])
-        nb_bonds = int(eval_lines[1].split()[3])
-        nb_angles = int(eval_lines[2].split()[3])
-        nb_dihedrals = int(eval_lines[3].split()[3])
+def _render_summary_row(
+    axes,
+    analysis: OptimizationHistoryAnalysis,
+    x_values: np.ndarray,
+) -> None:
+    records = analysis.records
+    failures = np.array(
+        [index + 1 for index, record in enumerate(records) if record.status == "failure"]
+    )
+    score_series = (
+        ("Total fitness score", lambda record: record.scores.total),
+        ("Evaluation objective", lambda record: record.scores.objective),
+        ("Constraints/Bonds score", lambda record: record.scores.constraints_bonds),
+        ("Angles score", lambda record: record.scores.angles),
+        ("Dihedrals score", lambda record: record.scores.dihedrals),
+    )
+    for column, (title, accessor) in enumerate(score_series):
+        values = _numeric_series(records, accessor)
+        _plot_summary_series(
+            axes[column],
+            x_values,
+            values,
+            title,
+            analysis,
+            failures,
+            color="darkgreen" if column < 2 else "mediumseagreen",
+        )
+    _plot_observable(
+        axes[5],
+        x_values,
+        analysis,
+        "radius_of_gyration",
+        "Radius of gyration",
+        failures,
+    )
+    sasa_cg = _observable_series(records, "sasa", "cg", "mean")
+    if np.any(np.isfinite(sasa_cg)):
+        _plot_observable(
+            axes[6], x_values, analysis, "sasa", "SASA", failures
+        )
+    else:
+        axes[6].set_visible(False)
+    _plot_summary_series(
+        axes[7],
+        x_values,
+        _timing_series(records, "total_hours"),
+        "Total time (hours)",
+        analysis,
+        failures,
+        color="purple",
+    )
+    _plot_summary_series(
+        axes[8],
+        x_values,
+        _timing_series(records, "evaluation_minutes"),
+        "All evaluation times (min)",
+        analysis,
+        failures,
+        color="mediumorchid",
+        mark_best=False,
+    )
+    for axis in axes[9:]:
+        axis.set_visible(False)
 
-        dihedral_funcs = [None] * nb_dihedrals
-        if nb_dihedrals > 0:
-            itp_candidates = [
-                os.path.join(ns.opti_dirname, config.best_fitted_model_dirname),
-                os.path.join(ns.opti_dirname, "boltzmann_inv_CG_model"),
-                ns.opti_dirname,
-            ]
-            itp_path = None
-            for cand in itp_candidates:
-                if os.path.isdir(cand):
-                    itp_files = [fname for fname in os.listdir(cand) if fname.endswith(".itp")]
-                    if itp_files:
-                        itp_path = os.path.join(cand, sorted(itp_files)[0])
-                        break
-            if itp_path:
-                try:
-                    topology = io.read_cg_topology(itp_path)
-                    dihedral_funcs = [
-                        group.function for group in topology.dihedrals
-                    ]
-                except Exception as exc:
-                    logger.warning("Failed to read dihedral functions from %s: %s", itp_path, exc)
-            else:
-                logger.warning("No ITP file found in %s; defaulting to 2 params per dihedral.", ns.opti_dirname)
-            if len(dihedral_funcs) != nb_dihedrals:
-                logger.warning("Dihedral functions mismatch in analysis; defaulting to 2 params per dihedral.")
-                dihedral_funcs = [None] * nb_dihedrals
 
-        # results storage structure
-        parameters_vals = {
-            "constraints": {"values": {}},
-            "bonds": {"values": {}, "force_ctr": {}},
-            "angles": {"values": {}, "force_ctr": {}},
-            "dihedrals": {"values": {}, "force_ctr": {}, "coeffs": {}}
-        }
+def _plot_summary_series(
+    axis,
+    x_values,
+    values,
+    title,
+    analysis,
+    failures,
+    *,
+    color,
+    mark_best=True,
+) -> None:
+    axis.set_title(title)
+    axis.grid(zorder=0.5)
+    axis.plot(x_values, values, color=color)
+    if failures.size:
+        axis.scatter(
+            failures,
+            values[failures - 1],
+            marker="x",
+            color="black",
+            zorder=2,
+        )
+    _draw_cycle_separators(axis, analysis)
+    if mark_best and np.isfinite(values[analysis.best_index]):
+        axis.plot(
+            analysis.best_index + 1,
+            values[analysis.best_index],
+            marker="D",
+            color="white",
+            markerfacecolor="gold",
+            markersize=10,
+            markeredgewidth=1.5,
+            markeredgecolor="black",
+            zorder=3,
+        )
 
-        for i in range(nb_constraints):
-            parameters_vals["constraints"]["values"][i] = []
-        for i in range(nb_bonds):
-            parameters_vals["bonds"]["values"][i] = []
-            parameters_vals["bonds"]["force_ctr"][i] = []
-        for i in range(nb_angles):
-            parameters_vals["angles"]["values"][i] = []
-            parameters_vals["angles"]["force_ctr"][i] = []
-        for i in range(nb_dihedrals):
-            parameters_vals["dihedrals"]["values"][i] = []
-            parameters_vals["dihedrals"]["force_ctr"][i] = []
-            parameters_vals["dihedrals"]["coeffs"][i] = []
 
-        all_eval_scores, all_eval_times, all_total_times = [], [], []
-        all_fit_score_total, all_fit_score_constraints_bonds, all_fit_score_angles, all_fit_score_dihedrals = np.array(
-            []), np.array([]), np.array([]), np.array([])
-        all_gyr_aa_mapped, all_gyr_aa_mapped_std, all_gyr_cg, all_gyr_cg_std = np.array([]), np.array([]), np.array(
-            []), np.array([])
-        all_sasa_aa_mapped, all_sasa_aa_mapped_std, all_sasa_cg, all_sasa_cg_std = np.array([]), np.array([]), np.array(
-            []), np.array([])
+def _plot_observable(
+    axis,
+    x_values,
+    analysis,
+    observable,
+    title,
+    failures,
+) -> None:
+    records = analysis.records
+    reference = _observable_series(records, observable, "aa_mapped", "mean")
+    reference_std = _observable_series(
+        records, observable, "aa_mapped", "standard_deviation"
+    )
+    cg = _observable_series(records, observable, "cg", "mean")
+    cg_std = _observable_series(
+        records, observable, "cg", "standard_deviation"
+    )
+    axis.set_title(title)
+    axis.grid(zorder=0.5)
+    axis.plot(x_values, reference, color=config.atom_color, label="AA-mapped", lw=2.5)
+    axis.fill_between(
+        x_values,
+        reference - reference_std,
+        reference + reference_std,
+        color=config.atom_color,
+        alpha=0.1,
+    )
+    axis.plot(x_values, cg, color=config.cg_color, label="CG estimation")
+    axis.fill_between(
+        x_values,
+        cg - cg_std,
+        cg + cg_std,
+        color=config.cg_color,
+        alpha=0.2,
+    )
+    if failures.size:
+        axis.scatter(
+            failures, cg[failures - 1], marker="x", color="black", zorder=2
+        )
+    _draw_cycle_separators(axis, analysis)
+    if np.isfinite(cg[analysis.best_index]):
+        axis.plot(
+            analysis.best_index + 1,
+            cg[analysis.best_index],
+            marker="D",
+            color="white",
+            markerfacecolor="gold",
+            markersize=10,
+            markeredgewidth=1.5,
+            markeredgecolor="black",
+            zorder=3,
+        )
+    axis.yaxis.set_major_locator(MaxNLocator(integer=True))
+    axis.legend(loc="lower right")
 
-        all_opti_cycles = []
-        y_fct_range = {"bonds": [np.inf, 0], "angles": [np.inf, 0], "dihedrals": [np.inf, 0]}
 
-        # read content
-        for i in range(6,
-                       6 + nb_evals):  # nb of evaluations is taken from the independent scores to ignore a possible ongoing simulation, to be able to run this script during the opti process
+def _render_parameter_row(
+    axes,
+    records,
+    kind,
+    count,
+    x_values,
+    analysis,
+) -> None:
+    label = kind[:-1].capitalize() if kind != "dihedrals" else "Dihedral"
+    for index, axis in enumerate(axes):
+        if index >= count:
+            axis.set_visible(False)
+            continue
+        parameters = [record.parameters[kind][index] for record in records]
+        coefficients = [parameter.get("coefficients") for parameter in parameters]
+        if any(value is not None for value in coefficients):
+            axis.set_title(f"{label} {index + 1} - Coefficients")
+            width = max(len(value or ()) for value in coefficients)
+            for coefficient_index in range(width):
+                values = np.array(
+                    [
+                        np.nan
+                        if value is None or coefficient_index >= len(value)
+                        else value[coefficient_index]
+                        for value in coefficients
+                    ],
+                    dtype=float,
+                )
+                axis.plot(x_values, values, label=f"C{coefficient_index}")
+            axis.legend(loc="best", fontsize="small")
+        else:
+            equilibrium = np.array(
+                [parameter.get("equilibrium", np.nan) for parameter in parameters],
+                dtype=float,
+            )
+            axis.set_title(f"{label} {index + 1} - Parameters")
+            axis.plot(x_values, equilibrium, color="tab:blue")
+            if any("force_constant" in parameter for parameter in parameters):
+                force = np.array(
+                    [parameter.get("force_constant", np.nan) for parameter in parameters],
+                    dtype=float,
+                )
+                twin = axis.twinx()
+                twin.plot(x_values, force, color="tab:red")
+                if np.isfinite(force[analysis.best_index]):
+                    twin.plot(
+                        analysis.best_index + 1,
+                        force[analysis.best_index],
+                        marker="D",
+                        color="salmon",
+                        markeredgecolor="black",
+                        zorder=3,
+                    )
+            if np.isfinite(equilibrium[analysis.best_index]):
+                axis.plot(
+                    analysis.best_index + 1,
+                    equilibrium[analysis.best_index],
+                    marker="D",
+                    color="lightskyblue",
+                    markeredgecolor="black",
+                    zorder=3,
+                )
+        axis.grid(zorder=0.5)
+        _draw_cycle_separators(axis, analysis)
 
-            sp_eval_line = eval_lines[i].split()
-            opti_cycle = int(sp_eval_line[0])
-            all_opti_cycles.append(opti_cycle)
-            fit_score_total, fit_score_constraints_bonds, fit_score_angles, fit_score_dihedrals, eval_score = list(
-                map(float, sp_eval_line[2:read_offset - 8]))
-            try:
-                gyr_aa_mapped, gyr_aa_mapped_std = float(sp_eval_line[read_offset - 8]), float(
-                    sp_eval_line[read_offset - 7])
-            except ValueError:
-                gyr_aa_mapped, gyr_aa_mapped_std = np.nan, np.nan
-            try:
-                gyr_cg, gyr_cg_std = float(sp_eval_line[read_offset - 6]), float(sp_eval_line[read_offset - 5])
-            # this controls if simulation has crashed
-            except ValueError:
-                gyr_cg, gyr_cg_std = np.nan, np.nan
 
-            try:
-                sasa_aa_mapped, sasa_aa_mapped_std = float(sp_eval_line[read_offset - 4]), float(
-                    sp_eval_line[read_offset - 3])
-            except ValueError:
-                sasa_aa_mapped, sasa_aa_mapped_std = np.nan, np.nan
-            try:
-                sasa_cg, sasa_cg_std = float(sp_eval_line[read_offset - 2]), float(sp_eval_line[read_offset - 1])
-            # this controls if simulation has crashed
-            except ValueError:
-                sasa_cg, sasa_cg_std = np.nan, np.nan
+def _render_pairwise_row(
+    axes,
+    records,
+    kind,
+    count,
+    x_values,
+    analysis,
+) -> None:
+    label = kind[:-1].capitalize() if kind != "dihedrals" else "Dihedral"
+    for index, axis in enumerate(axes):
+        if index >= count:
+            axis.set_visible(False)
+            continue
+        values = np.array(
+            [
+                np.nan
+                if record.pairwise_scores[kind][index] is None
+                else record.pairwise_scores[kind][index]
+                for record in records
+            ],
+            dtype=float,
+        )
+        axis.set_title(f"{label} {index + 1} - Score")
+        axis.grid(zorder=0.5)
+        axis.plot(x_values, values, color="mediumseagreen")
+        _draw_cycle_separators(axis, analysis)
+        if np.isfinite(values[analysis.best_index]):
+            axis.plot(
+                analysis.best_index + 1,
+                values[analysis.best_index],
+                marker="D",
+                color="palegreen",
+                markersize=10,
+                markeredgewidth=1.5,
+                markeredgecolor="black",
+                zorder=3,
+            )
 
-            all_eval_scores = np.append(all_eval_scores, eval_score)
-            all_fit_score_total = np.append(all_fit_score_total, fit_score_total)
-            all_fit_score_constraints_bonds = np.append(all_fit_score_constraints_bonds, fit_score_constraints_bonds)
-            all_fit_score_angles = np.append(all_fit_score_angles, fit_score_angles)
-            all_fit_score_dihedrals = np.append(all_fit_score_dihedrals, fit_score_dihedrals)
-            all_gyr_aa_mapped = np.append(all_gyr_aa_mapped, gyr_aa_mapped)
-            all_gyr_cg = np.append(all_gyr_cg, gyr_cg)
-            all_sasa_aa_mapped = np.append(all_sasa_aa_mapped, sasa_aa_mapped)
-            all_sasa_cg = np.append(all_sasa_cg, sasa_cg)
-            all_gyr_aa_mapped_std = np.append(all_gyr_aa_mapped_std, gyr_aa_mapped_std)
-            all_gyr_cg_std = np.append(all_gyr_cg_std, gyr_cg_std)
-            all_sasa_aa_mapped_std = np.append(all_sasa_aa_mapped_std, sasa_aa_mapped_std)
-            all_sasa_cg_std = np.append(all_sasa_cg_std, sasa_cg_std)
 
-            param_idx = read_offset
+def _draw_cycle_separators(axis, analysis) -> None:
+    for separator in analysis.cycle_separators:
+        axis.axvline(x=separator, color="black")
 
-            # hide profiles when both value and force constant are 0
-            for j in range(nb_constraints):
-                parameters_vals["constraints"]["values"][j].append(float(sp_eval_line[param_idx]))
-                param_idx += 1
 
-            for j in range(nb_bonds):
-                val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
-                param_idx += 2
-                if val == 0 and fct == 0:
-                    val, fct = None, None
-                else:
-                    if fct > y_fct_range["bonds"][1]:
-                        y_fct_range["bonds"][1] = fct
-                    if fct < y_fct_range["bonds"][0]:
-                        y_fct_range["bonds"][0] = fct
-                parameters_vals["bonds"]["values"][j].append(val)
-                parameters_vals["bonds"]["force_ctr"][j].append(fct)
+def _numeric_series(
+    records: tuple[OptimizationHistoryRecord, ...],
+    accessor: Callable[[OptimizationHistoryRecord], float | None],
+) -> np.ndarray:
+    return np.array(
+        [np.nan if accessor(record) is None else accessor(record) for record in records],
+        dtype=float,
+    )
 
-            for j in range(nb_angles):
-                val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
-                param_idx += 2
-                if val == 0 and fct == 0:
-                    val, fct = None, None
-                else:
-                    if fct > y_fct_range["angles"][1]:
-                        y_fct_range["angles"][1] = fct
-                    if fct < y_fct_range["angles"][0]:
-                        y_fct_range["angles"][0] = fct
-                parameters_vals["angles"]["values"][j].append(val)
-                parameters_vals["angles"]["force_ctr"][j].append(fct)
 
-            for j in range(nb_dihedrals):
-                func = dihedral_funcs[j]
-                if func in (3, 11):
-                    coeffs = list(map(float, sp_eval_line[param_idx:param_idx + 6]))
-                    param_idx += 6
-                    parameters_vals["dihedrals"]["coeffs"][j].append(coeffs)
-                    parameters_vals["dihedrals"]["values"][j].append(None)
-                    parameters_vals["dihedrals"]["force_ctr"][j].append(None)
-                else:
-                    val, fct = float(sp_eval_line[param_idx]), float(sp_eval_line[param_idx + 1])
-                    param_idx += 2
-                    if val == 0 and fct == 0:
-                        val, fct = None, None
-                    else:
-                        if fct > y_fct_range["dihedrals"][1]:
-                            y_fct_range["dihedrals"][1] = fct
-                        if fct < y_fct_range["dihedrals"][0]:
-                            y_fct_range["dihedrals"][0] = fct
-                    parameters_vals["dihedrals"]["values"][j].append(val)
-                    parameters_vals["dihedrals"]["force_ctr"][j].append(fct)
-                    parameters_vals["dihedrals"]["coeffs"][j].append(None)
+def _timing_series(records, key) -> np.ndarray:
+    return _numeric_series(records, lambda record: record.timings[key])
 
-            try:
-                eval_time = float(sp_eval_line[param_idx])
-                total_time = float(sp_eval_line[param_idx + 1])
-            except (IndexError, ValueError):
-                eval_time, total_time = np.nan, np.nan
 
-            all_eval_times = np.append(all_eval_times, eval_time)
-            all_total_times = np.append(all_total_times, total_time)
+def _observable_series(records, observable, representation, statistic):
+    return _numeric_series(
+        records,
+        lambda record: record.observables[observable][representation][statistic],
+    )
 
-    # find separations between opti cycles
-    opti_cycles_sep = []
-    for i in range(1, len(all_opti_cycles)):
-        if all_opti_cycles[i] != all_opti_cycles[i - 1]:
-            opti_cycles_sep.append(i + 0.5)
 
-    all_opti_cycles = np.array(all_opti_cycles)
-
-    # select lowest bonded fitness score
-    cyc_mask = np.where((all_opti_cycles > 0) & np.isfinite(all_fit_score_total))[0]
-    id_best_all = np.where(all_fit_score_total == np.amin(all_fit_score_total[cyc_mask]))[0][0]
-
+def _log_best_evaluation(analysis: OptimizationHistoryAnalysis) -> None:
+    best = analysis.best_record
+    rg = best.observables["radius_of_gyration"]
     logger.info(
         "Best bonded terms found at step %s with estimated Rg %s nm",
-        id_best_all + 1,
-        all_gyr_cg[id_best_all],
+        best.evaluation_id,
+        rg["cg"]["mean"],
     )
-
-    logger.info("")
-    logger.info(
-        "  Rg CG:  %s nm   (Error abs. %s%% -- Reference Rg AA-mapped: %s nm)",
-        round(all_gyr_cg[id_best_all], 3),
-        round(abs(1 - all_gyr_cg[id_best_all] / all_gyr_aa_mapped[id_best_all]) * 100, 1),
-        all_gyr_aa_mapped[id_best_all],
-    )
-    sasa_available = bool(np.any(np.isfinite(all_sasa_cg)))
-    if sasa_available and np.isfinite(all_sasa_cg[id_best_all]):
+    if rg["cg"]["mean"] is not None and rg["aa_mapped"]["mean"] is not None:
+        error = abs(1 - rg["cg"]["mean"] / rg["aa_mapped"]["mean"]) * 100
         logger.info(
-            "  SASA CG: %s nm2   (Error abs. %s%% -- Reference SASA AA-mapped: %s nm2)",
-            round(all_sasa_cg[id_best_all], 2),
-            round(abs(1 - all_sasa_cg[id_best_all] / all_sasa_aa_mapped[id_best_all]) * 100, 1),
-            all_sasa_aa_mapped[id_best_all],
+            "  Rg CG: %s nm (Error abs. %s%% -- Reference Rg AA-mapped: %s nm)",
+            round(rg["cg"]["mean"], 3),
+            round(error, 1),
+            rg["aa_mapped"]["mean"],
+        )
+    sasa = best.observables["sasa"]
+    if sasa["cg"]["mean"] is not None and sasa["aa_mapped"]["mean"] is not None:
+        error = abs(1 - sasa["cg"]["mean"] / sasa["aa_mapped"]["mean"]) * 100
+        logger.info(
+            "  SASA CG: %s nm2 (Error abs. %s%% -- Reference SASA "
+            "AA-mapped: %s nm2)",
+            round(sasa["cg"]["mean"], 2),
+            round(error, 1),
+            sasa["aa_mapped"]["mean"],
         )
 
-    # display indicator when simulation(s) crashed for any reason -- check for None gyr_cg to identify a simulation as crashed
-    independent_failed = np.any(~np.isfinite(iter_indep_scores[:, 1:]), axis=1)
-    crashes_ids = np.where(independent_failed | ~np.isfinite(all_gyr_cg))[0] + 1
-    if crashes_ids.size:
-        logger.warning(
-            "Detected %s failed evaluations at steps: %s",
-            crashes_ids.size,
-            ", ".join(map(str, crashes_ids)),
-        )
 
-    for i in range(len(all_gyr_aa_mapped)):
-        all_gyr_aa_mapped[i] += all_gyr_aa_mapped_offset
-
-    larger_group = max(nb_constraints, nb_bonds, nb_angles, nb_dihedrals, min_nb_cols)
-    nrow, nrows, ncols = 0, 9, larger_group
-    nrows -= sum([nb_constraints == 0, nb_bonds == 0, nb_angles == 0, nb_dihedrals == 0]) * 2
-
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4 * ns.plot_scale, nrows * 3 * ns.plot_scale),
-                           squeeze=False)
-
-    # all evaluations scores and stats
-    x_evals = list(range(1, len(all_fit_score_total) + 1))[:nb_evals]
-
-    ax[0][0].set_title("All evaluations scores")
-    ax[0][0].grid(zorder=0.5)
-    ax[0][0].plot(x_evals, all_fit_score_total, color=color_scores)
-    if display_sim_crashes:
-        ax[0][0].scatter(crashes_ids, all_fit_score_total[crashes_ids - 1], marker="x", color="black", zorder=2,
-                         label="sim crash")
-        ax[0][0].legend(loc="best")
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][0].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][0].plot(id_best_all + 1, all_fit_score_total[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="Selected model")
-    ax[0][0].legend(loc="upper right")
-
-    ax[0][1].set_title("All adaptives scores")
-    ax[0][1].grid(zorder=0.5)
-    ax[0][1].plot(x_evals, all_eval_scores, color=color_scores)
-    if display_sim_crashes:
-        ax[0][1].scatter(crashes_ids, all_eval_scores[crashes_ids - 1], marker="x", color="black", zorder=2)
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][1].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][1].plot(id_best_all + 1, all_eval_scores[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="Selected model")
-
-    ax[0][2].set_title("Cstrs & bonds scores")
-    ax[0][2].grid(zorder=0.5)
-    ax[0][2].plot(x_evals, all_fit_score_constraints_bonds, color=color_scores)
-    if display_sim_crashes:
-        ax[0][2].scatter(crashes_ids, all_fit_score_constraints_bonds[crashes_ids - 1], marker="x", color="black",
-                         zorder=2)
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][2].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][2].plot(id_best_all + 1, all_fit_score_constraints_bonds[id_best_all], marker="D", color="white",
-                  markerfacecolor="gold", markersize=10, markeredgewidth=1.5, markeredgecolor="black",
-                  label="Selected model")
-
-    ax[0][3].set_title("Angles scores")
-    ax[0][3].grid(zorder=0.5)
-    ax[0][3].plot(x_evals, all_fit_score_angles, color=color_scores)
-    if display_sim_crashes:
-        ax[0][3].scatter(crashes_ids, all_fit_score_angles[crashes_ids - 1], marker="x", color="black", zorder=2)
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][3].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][3].plot(id_best_all + 1, all_fit_score_angles[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="Selected model")
-
-    ax[0][4].set_title("Dihedrals scores")
-    ax[0][4].grid(zorder=0.5)
-    ax[0][4].plot(x_evals, all_fit_score_dihedrals, color=color_scores)
-    if display_sim_crashes:
-        ax[0][4].scatter(crashes_ids, all_fit_score_dihedrals[crashes_ids - 1], marker="x", color="black", zorder=2)
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][4].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][4].plot(id_best_all + 1, all_fit_score_dihedrals[id_best_all], marker="D", color="white",
-                  markerfacecolor="gold", markersize=10, markeredgewidth=1.5, markeredgecolor="black",
-                  label="Selected model")
-
-    ax[0][5].set_title("Radius of gyration")
-    ax[0][5].grid(zorder=0.5)
-    ax[0][5].plot(x_evals, all_gyr_aa_mapped, color=config.atom_color, label="AA-mapped", lw=2.5)
-    if plot_control_std:
-        ax[0][5].fill_between(x_evals, list(all_gyr_aa_mapped - all_gyr_aa_mapped_std),
-                              list(all_gyr_aa_mapped + all_gyr_aa_mapped_std), color=config.atom_color, alpha=0.1)
-    ax[0][5].plot(x_evals, all_gyr_cg, color=config.cg_color, label="CG estimation")
-    if plot_control_std:
-        ax[0][5].fill_between(x_evals, list(all_gyr_cg - all_gyr_cg_std), list(all_gyr_cg + all_gyr_cg_std),
-                              color=config.cg_color, alpha=0.2)
-    if display_sim_crashes:
-        ax[0][5].scatter(crashes_ids, all_gyr_cg[crashes_ids - 1], marker="x", color="black", zorder=2)
-    ax[0][5].yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax[0][5].legend(loc="lower right")
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][5].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][5].set_ylim(bottom=yrange_rg[0], top=yrange_rg[1])
-    ax[0][5].plot(id_best_all + 1, all_gyr_cg[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="")  # label="Selected model")
-    ax[0][5].legend(loc="lower right")
-
-    ax[0][6].set_title("SASA")
-    if not sasa_available:
-        ax[0][6].set_visible(False)
-    else:
-        ax[0][6].grid(zorder=0.5)
-    ax[0][6].plot(x_evals, all_sasa_aa_mapped, color=config.atom_color, label="AA-mapped", lw=2.5)
-    if plot_control_std:
-        ax[0][6].fill_between(x_evals, list(all_sasa_aa_mapped - all_sasa_aa_mapped_std),
-                              list(all_sasa_aa_mapped + all_sasa_aa_mapped_std), color=config.atom_color, alpha=0.1)
-    ax[0][6].plot(x_evals, all_sasa_cg, color=config.cg_color, label="CG estimation")
-    if plot_control_std:
-        ax[0][6].fill_between(x_evals, list(all_sasa_cg - all_sasa_cg_std), list(all_sasa_cg + all_sasa_cg_std),
-                              color=config.cg_color, alpha=0.2)
-    if display_sim_crashes:
-        ax[0][6].scatter(crashes_ids, all_sasa_cg[crashes_ids - 1], marker="x", color="black", zorder=2)
-    ax[0][6].yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax[0][6].legend(loc="lower right")
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][6].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][6].set_ylim(bottom=yrange_sasa[0], top=yrange_sasa[1])
-    ax[0][6].plot(id_best_all + 1, all_sasa_cg[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="")  # label="Selected model")
-    ax[0][6].legend(loc="lower right")
-
-    ax[0][7].set_title("Total time (hours)")
-    ax[0][7].grid(zorder=0.5)
-    ax[0][7].plot(x_evals, all_total_times, color="purple")
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][7].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-    ax[0][7].plot(id_best_all + 1, all_total_times[id_best_all], marker="D", color="white", markerfacecolor="gold",
-                  markersize=10, markeredgewidth=1.5, markeredgecolor="black", label="Selected model")
-
-    ax[0][8].set_title("All evaluation times (min)")
-    ax[0][8].grid(zorder=0.5)
-    ax[0][8].plot(x_evals, all_eval_times, color="mediumorchid")
-    if display_opti_cycles_sep:
-        for i in range(len(opti_cycles_sep)):
-            ax[0][8].axvline(x=opti_cycles_sep[i], color=opti_cycles_sep_color)
-
-    for i in range(9, ncols):
-        ax[0][i].set_visible(False)
-
-    plt_sidespace = 0.05  # ylim bottom and top margin as a percentage of y range of data
-    x_min, x_max = 1 - (nb_evals - 1) * plt_sidespace, nb_evals + (nb_evals - 1) * plt_sidespace
-
-    # constraints
-    if nb_constraints != 0:
-        nrow += 2
-        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints])
-        for i in range(ncols):
-            if i < nb_constraints:
-                # value
-                ax[nrow - 1][i].set_title("Constraint " + str(i + 1) + " - Value")
-                ax[nrow - 1][i].grid(zorder=0.5)
-                ax[nrow - 1][i].plot(x_evals, parameters_vals["constraints"]["values"][i])
-                ax[nrow - 1][i].set_xlim(x_min, x_max)
-                if display_sim_crashes:
-                    ax[nrow - 1][i].scatter(crashes_ids,
-                                            np.array(parameters_vals["constraints"]["values"][i])[crashes_ids - 1],
-                                            marker="x", color="black", zorder=2)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-
-                # best models parameters
-                if parameters_vals["constraints"]["values"][i][id_best_all] is not None:
-                    ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["constraints"]["values"][i][id_best_all],
-                                         marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
-                                         markeredgecolor="black", zorder=3)
-
-                # independant score
-                ax[nrow][i].set_title("Constraint " + str(i + 1) + " - Score")
-                ax[nrow][i].grid(zorder=0.5)
-                ax[nrow][i].plot(x_evals, iter_indep_scores[:, 1 + i], color=color_subscores)
-                if display_sim_crashes:
-                    ax[nrow][i].scatter(crashes_ids, iter_indep_scores[:, 1 + i][crashes_ids - 1], marker="x",
-                                        color="black", zorder=2)
-                ax[nrow][i].set_ylim(bottom=-y_max * plt_sidespace, top=y_max * (1 + plt_sidespace))
-                ax[nrow][i].set_xlim(x_min, x_max)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-
-                # best models scores
-                ax[nrow][i].plot(id_best_all + 1, iter_indep_scores[id_best_all, 1 + i], marker="D", color="palegreen",
-                                 markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
-            else:
-                ax[nrow - 1][i].set_visible(False)
-                ax[nrow][i].set_visible(False)
-
-    # bonds
-    if nb_bonds != 0:
-        nrow += 2
-        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints:1 + nb_constraints + nb_bonds])
-        for i in range(ncols):
-            if i < nb_bonds:
-                # value and force constant
-                ax[nrow - 1][i].set_title("Bond " + str(i + 1) + " - Value & Force constant")
-                ax[nrow - 1][i].grid(zorder=0.5)
-                color = "tab:blue"
-                ax[nrow - 1][i].plot(x_evals, parameters_vals["bonds"]["values"][i], color=color)
-                if display_sim_crashes:
-                    ax[nrow - 1][i].scatter(crashes_ids,
-                                            np.array(parameters_vals["bonds"]["values"][i])[crashes_ids - 1],
-                                            marker="x", color="black", zorder=2)
-                ax[nrow - 1][i].tick_params(axis="y", labelcolor=color)
-                ax[nrow - 1][i].set_xlim(x_min, x_max)
-
-                ax2 = ax[nrow - 1][i].twinx()
-                color = "tab:red"
-                ax2.plot(x_evals, parameters_vals["bonds"]["force_ctr"][i], color=color)
-                if display_sim_crashes:
-                    ax2.scatter(crashes_ids, np.array(parameters_vals["bonds"]["force_ctr"][i])[crashes_ids - 1],
-                                marker="x", color="black", zorder=2)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-                ax2.set_ylim(bottom=y_fct_range["bonds"][0] - (
-                            y_fct_range["bonds"][1] - y_fct_range["bonds"][0]) * plt_sidespace,
-                             top=y_fct_range["bonds"][1] + (
-                                         y_fct_range["bonds"][1] - y_fct_range["bonds"][0]) * plt_sidespace)
-                if i == nb_bonds - 1:
-                    ax2.tick_params(axis="y", labelcolor=color)
-                else:
-                    ax2.yaxis.set_ticklabels([])
-
-                # best models parameters
-                if parameters_vals["bonds"]["values"][i][id_best_all] is not None:
-                    ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["bonds"]["values"][i][id_best_all],
-                                         marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
-                                         markeredgecolor="black", zorder=3)
-                    ax2.plot(id_best_all + 1, parameters_vals["bonds"]["force_ctr"][i][id_best_all], marker="D",
-                             color="salmon", markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
-
-                # independant score
-                ax[nrow][i].set_title("Bond " + str(i + 1) + " - Score")
-                ax[nrow][i].grid(zorder=0.5)
-                ax[nrow][i].plot(x_evals, iter_indep_scores[:, 1 + nb_constraints + i], color=color_subscores)
-                if display_sim_crashes:
-                    ax[nrow][i].scatter(crashes_ids, iter_indep_scores[:, 1 + nb_constraints + i][crashes_ids - 1],
-                                        marker="x", color="black", zorder=2)
-                ax[nrow][i].set_ylim(bottom=-y_max * plt_sidespace, top=y_max * (1 + plt_sidespace))
-                ax[nrow][i].set_xlim(x_min, x_max)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-
-                # best models scores
-                ax[nrow][i].plot(id_best_all + 1, iter_indep_scores[id_best_all, 1 + nb_constraints + i], marker="D",
-                                 color="palegreen", markersize=10, markeredgewidth=1.5, markeredgecolor="black",
-                                 zorder=3)
-            else:
-                ax[nrow - 1][i].set_visible(False)
-                ax[nrow][i].set_visible(False)
-
-    # angles
-    if nb_angles != 0:
-        nrow += 2
-        y_max = _finite_max(iter_indep_scores[:, 1 + nb_constraints + nb_bonds:1 + nb_constraints + nb_bonds + nb_angles])
-        for i in range(ncols):
-            if i < nb_angles:
-                # value and force constant
-                ax[nrow - 1][i].set_title("Angle " + str(i + 1) + " - Value & Force constant")
-                ax[nrow - 1][i].grid(zorder=0.5)
-                color = "tab:blue"
-                ax[nrow - 1][i].plot(x_evals, parameters_vals["angles"]["values"][i], color=color)
-                if display_sim_crashes:
-                    ax[nrow - 1][i].scatter(crashes_ids,
-                                            np.array(parameters_vals["angles"]["values"][i])[crashes_ids - 1],
-                                            marker="x", color="black", zorder=2)
-                ax[nrow - 1][i].tick_params(axis="y", labelcolor=color)
-                ax[nrow - 1][i].set_xlim(x_min, x_max)
-                ax2 = ax[nrow - 1][i].twinx()
-                color = "tab:red"
-                ax2.plot(x_evals, parameters_vals["angles"]["force_ctr"][i], color=color)
-                if display_sim_crashes:
-                    ax2.scatter(crashes_ids, np.array(parameters_vals["angles"]["force_ctr"][i])[crashes_ids - 1],
-                                marker="x", color="black", zorder=2)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-                ax2.set_ylim(bottom=y_fct_range["angles"][0] - (
-                            y_fct_range["angles"][1] - y_fct_range["angles"][0]) * plt_sidespace,
-                             top=y_fct_range["angles"][1] + (
-                                         y_fct_range["angles"][1] - y_fct_range["angles"][0]) * plt_sidespace)
-                if i == nb_angles - 1:
-                    ax2.tick_params(axis="y", labelcolor=color)
-                else:
-                    ax2.yaxis.set_ticklabels([])
-
-                # best models parameters
-                if parameters_vals["angles"]["values"][i][id_best_all] is not None:
-                    ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["angles"]["values"][i][id_best_all],
-                                         marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
-                                         markeredgecolor="black", zorder=3)
-                    ax2.plot(id_best_all + 1, parameters_vals["angles"]["force_ctr"][i][id_best_all], marker="D",
-                             color="salmon", markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
-
-                # independant score
-                ax[nrow][i].set_title("Angle " + str(i + 1) + " - Score")
-                ax[nrow][i].plot(x_evals, iter_indep_scores[:, 1 + nb_constraints + nb_bonds + i],
-                                 color=color_subscores)
-                if display_sim_crashes:
-                    ax[nrow][i].scatter(crashes_ids,
-                                        iter_indep_scores[:, 1 + nb_constraints + nb_bonds + i][crashes_ids - 1],
-                                        marker="x", color="black", zorder=2)
-                ax[nrow][i].grid(zorder=0.5)
-                ax[nrow][i].set_ylim(bottom=-y_max * plt_sidespace, top=y_max * (1 + plt_sidespace))
-                ax[nrow][i].set_xlim(x_min, x_max)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-
-                # best models scores
-                ax[nrow][i].plot(id_best_all + 1, iter_indep_scores[id_best_all, 1 + nb_constraints + nb_bonds + i],
-                                 marker="D", color="palegreen", markersize=10, markeredgewidth=1.5,
-                                 markeredgecolor="black", zorder=3)
-            else:
-                ax[nrow - 1][i].set_visible(False)
-                ax[nrow][i].set_visible(False)
-
-    # dihedrals
-    if nb_dihedrals != 0:
-        nrow += 2
-        y_max = _finite_max(iter_indep_scores[:,
-                       1 + nb_constraints + nb_bonds + nb_angles:1 + nb_constraints + nb_bonds + nb_angles + nb_dihedrals])
-        for i in range(ncols):
-            if i < nb_dihedrals:
-                func = dihedral_funcs[i]
-                if func in (3, 11):
-                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - Coeffs")
-                    ax[nrow - 1][i].grid(zorder=0.5)
-                    ax[nrow - 1][i].set_xlim(x_min, x_max)
-                    ax[nrow - 1][i].set_ylim(0, 1)
-                    ax[nrow - 1][i].text(0.5, 0.5, "Dihedral coefficients\nnot plotted",
-                                         ha="center", va="center", transform=ax[nrow - 1][i].transAxes)
-                    if display_opti_cycles_sep:
-                        for j in range(len(opti_cycles_sep)):
-                            ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-                else:
-                    # value and force constant
-                    ax[nrow - 1][i].set_title("Dihedral " + str(i + 1) + " - Value & Force constant")
-                    ax[nrow - 1][i].grid(zorder=0.5)
-                    color = "tab:blue"
-                    ax[nrow - 1][i].plot(x_evals, parameters_vals["dihedrals"]["values"][i], color=color)
-                    if display_sim_crashes:
-                        ax[nrow - 1][i].scatter(crashes_ids,
-                                                np.array(parameters_vals["dihedrals"]["values"][i])[crashes_ids - 1],
-                                                marker="x", color="black", zorder=2)
-                    ax[nrow - 1][i].tick_params(axis="y", labelcolor=color)
-                    ax[nrow - 1][i].set_xlim(x_min, x_max)
-                    ax2 = ax[nrow - 1][i].twinx()
-                    color = "tab:red"
-                    ax2.plot(x_evals, parameters_vals["dihedrals"]["force_ctr"][i], color=color)
-                    if display_sim_crashes:
-                        ax2.scatter(crashes_ids, np.array(parameters_vals["dihedrals"]["force_ctr"][i])[crashes_ids - 1],
-                                    marker="x", color="black", zorder=2)
-                    if display_opti_cycles_sep:
-                        for j in range(len(opti_cycles_sep)):
-                            ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-                    try:
-                        ax2.set_ylim(bottom=y_fct_range["dihedrals"][0] - (
-                                    y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace,
-                                     top=y_fct_range["dihedrals"][1] + (
-                                                 y_fct_range["dihedrals"][1] - y_fct_range["dihedrals"][0]) * plt_sidespace)
-                    except ValueError:
-                        pass  # TODO: modify this once we handle dihedrals properly
-                    if i == nb_dihedrals - 1:
-                        ax2.tick_params(axis="y", labelcolor=color)
-                    else:
-                        ax2.yaxis.set_ticklabels([])
-
-                    # best models parameters
-                    if parameters_vals["dihedrals"]["values"][i][id_best_all] is not None:
-                        ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["dihedrals"]["values"][i][id_best_all],
-                                             marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
-                                             markeredgecolor="black", zorder=3)
-                        ax2.plot(id_best_all + 1, parameters_vals["dihedrals"]["force_ctr"][i][id_best_all], marker="D",
-                                 color="salmon", markersize=10, markeredgewidth=1.5, markeredgecolor="black", zorder=3)
-
-                # independant score
-                ax[nrow][i].set_title("Dihedral " + str(i + 1) + " - Score")
-                ax[nrow][i].plot(x_evals, iter_indep_scores[:, 1 + nb_constraints + nb_bonds + nb_angles + i],
-                                 color=color_subscores)
-                if display_sim_crashes:
-                    ax[nrow][i].scatter(crashes_ids,
-                                        iter_indep_scores[:, 1 + nb_constraints + nb_bonds + nb_angles + i][
-                                            crashes_ids - 1], marker="x", color="black", zorder=2)
-                ax[nrow][i].grid(zorder=0.5)
-                ax[nrow][i].set_ylim(bottom=-y_max * plt_sidespace, top=y_max * (1 + plt_sidespace))
-                ax[nrow][i].set_xlim(x_min, x_max)
-                if display_opti_cycles_sep:
-                    for j in range(len(opti_cycles_sep)):
-                        ax[nrow][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
-
-                # best models scores
-                ax[nrow][i].plot(id_best_all + 1,
-                                 iter_indep_scores[id_best_all, 1 + nb_constraints + nb_bonds + nb_angles + i],
-                                 marker="D", color="palegreen", markersize=10, markeredgewidth=1.5,
-                                 markeredgecolor="black", zorder=3)
-            else:
-                ax[nrow - 1][i].set_visible(False)
-                ax[nrow][i].set_visible(False)
-
-    plt.tight_layout()
-    plt.savefig(ns.opti_dirname + "/" + ns.plot_filename)
-    logger.info("")
-    logger.info(
-        "Wrote visual optimization summary file at location:\n %s",
-        os.path.normpath(ns.opti_dirname + "/" + ns.plot_filename),
-    )
-    logger.info("")
-
-
-def main():
+def main() -> None:
+    """Run the ``scg_monitor`` command-line entry point."""
     module_name = "monitor"
-    setup_logging(module_name=module_name, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
+    setup_logging(
+        module_name=module_name,
+        verbose=("-v" in sys.argv or "--verbose" in sys.argv),
+    )
     if "--nobanner" in sys.argv or "-nobanner" in sys.argv:
         logger.info(swarmcg.shared.styling.header_simple(module_name))
     else:
-        logger.info(swarmcg.shared.styling.header_package("Module: Optimization run analysis\n"))
-
-    args_parser = io.get_analyze_args()
-
-    # display help if script was called without arguments
+        logger.info(
+            swarmcg.shared.styling.header_package(
+                "Module: Optimization run analysis\n"
+            )
+        )
+    parser = io.get_analyze_args()
     if len(sys.argv) == 1:
-        args_parser.print_help()
+        parser.print_help()
         sys.exit()
-
-    # arguments handling, display command line if help or no arguments provided
-    ns = args_parser.parse_args()
-    setup_logging(module_name=module_name, log_dir=ns.opti_dirname, verbose=getattr(ns, "verbose", False))
-    input_cmdline = " ".join(map(cmd_quote, sys.argv))
+    ns = parser.parse_args()
+    setup_logging(
+        module_name=module_name,
+        log_dir=ns.opti_dirname,
+        verbose=getattr(ns, "verbose", False),
+    )
     logger.info("Working directory: %s", os.getcwd())
-    logger.info("Command line: %s", input_cmdline)
+    logger.info("Command line: %s", " ".join(map(cmd_quote, sys.argv)))
     logger.info("")
-    logger.info(swarmcg.shared.styling.sep_close)
-    logger.info("| SUMMARIZING OPTIMIZATION PROCEDURE                                                          |")
-    logger.info(swarmcg.shared.styling.sep_close)
-    logger.info("")
-
     run(ns)
-
-
-if __name__ == "__main__":
-    main()

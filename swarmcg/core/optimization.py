@@ -121,20 +121,10 @@ class SwarmOptimizer:
         logger.info("")
 
     def _create_output_files(self):
-        with open(os.path.join(self.ns.files.exec_folder, config.opti_perf_recap_file), "w") as fp:
-            fp.write(f"# nb constraints: {self.ns.cg_itp.constraint_count}\n")
-            fp.write(f"# nb bonds: {self.ns.cg_itp.bond_count}\n")
-            fp.write(f"# nb angles: {self.ns.cg_itp.angle_count}\n")
-            fp.write(f"# nb dihedrals: {self.ns.cg_itp.dihedral_count}\n")
-            fp.write("#\n")
-            fp.write(
-                "# opti_cycle nb_eval fit_score_all fit_score_cstrs_bonds fit_score_angles "
-                "fit_score_dihedrals eval_score Rg_AA_mapped Rg_AA_mapped_std Rg_CG "
-                "Rg_CG_std SASA_AA_mapped SASA_AA_mapped_std SASA_CG SASA_CG_std "
-                "parameters_set eval_time current_total_time\n"
-            )
-        
-        with open(os.path.join(self.ns.files.exec_folder, config.opti_pairwise_distances_file), "w"):
+        history_path = os.path.join(
+            self.ns.files.exec_folder, config.optimization_history_file
+        )
+        with open(history_path, "w", encoding="utf-8"):
             pass
             
         self.ns.results.gyr_aa_mapped, self.ns.results.gyr_aa_mapped_std = None, None

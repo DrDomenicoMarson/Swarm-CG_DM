@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=75", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ dynamic = ["version"]
 description = "Automatic parametrization of bonded terms in coarse-grained molecular models"
 readme = "README.md"
 requires-python = ">=3.13"
-license = {file = "LICENSE.txt"}
+license = "MIT"
+license-files = ["LICENSE.txt"]
 authors = [
   {name = "Charly Empereur-mot", email = "charly.empereur@gmail.com"},
 ]
@@ -17,7 +18,6 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 dependencies = [

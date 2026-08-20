@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from swarmcg.optimization_types import (
 )
 from swarmcg.topology import Atom, CGTopology, MoleculeType
 from swarmcg.topology import GeometryKind
+from swarmcg.shared.exceptions import ComputationError
 
 
 def _make_min_itp():
@@ -82,6 +84,14 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
         assert score == ctx.pso.worst_fit_score
         assert os.getcwd() == original_cwd
 
+        history = os.path.join(
+            tmpdir, config_module.optimization_history_file
+        )
+        with open(history, encoding="utf-8") as handle:
+            record = json.loads(handle.read())
+        assert record["status"] == "failure"
+        assert record["failure"]["kind"] == "crashed"
+
         eval_dir = os.path.join(
             tmpdir,
             f"{config_module.iteration_sim_files_dirname}_eval_step_1",
@@ -142,6 +152,14 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
         ):
             score = eval_function([], ctx)
 
+        history = os.path.join(
+            tmpdir, config_module.optimization_history_file
+        )
+        with open(history, encoding="utf-8") as handle:
+            record = json.loads(handle.read())
+        assert record["status"] == "success"
+        assert record["observables"]["sasa"]["cg"]["mean"] is None
+
     assert score == 1.0
 
 
@@ -185,11 +203,51 @@ def test_model_scoring_failure_receives_finite_failure_objective():
         ):
             score = eval_function([], ctx)
 
-        pairwise = os.path.join(
-            tmpdir, config_module.opti_pairwise_distances_file
+        history = os.path.join(
+            tmpdir, config_module.optimization_history_file
         )
-        assert open(pairwise).read().strip() == "0"
+        with open(history, encoding="utf-8") as handle:
+            record = json.loads(handle.read())
+        assert record["status"] == "failure"
+        assert record["failure"]["kind"] == "scoring_failed"
+        assert record["scores"]["objective"] == 999.0
 
     assert score == 999.0
     assert ctx.status.failed_eval_count == 1
     assert ctx.status.crashed_eval_count == 1
+
+
+def test_stalled_simulation_is_classified_in_jsonl_history():
+    from swarmcg.scoring.evaluation_function import eval_function
+
+    config = SwarmConfig()
+    ctx = OptimizationContext(config=config)
+    ctx.cg_itp = _make_min_itp()
+    ctx.out_itp = _make_min_itp()
+    _configure_typed_evaluation(ctx)
+    ctx.pso.worst_fit_score = 999.0
+    ctx.status.start_opti_ts = 0.0
+    ctx.files.cg_itp_basename = "cg_model.itp"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ctx.files.exec_folder = tmpdir
+        os.makedirs(os.path.join(tmpdir, ".internal"))
+        input_dir = os.path.join(tmpdir, config_module.input_sim_files_dirname)
+        os.makedirs(input_dir)
+        with open(os.path.join(input_dir, "dummy.txt"), "w") as handle:
+            handle.write("dummy")
+
+        with patch(
+            "swarmcg.scoring.evaluation_function.sim.SimulationManager.run_simulation",
+            side_effect=ComputationError("unstable simulation was killed"),
+        ):
+            assert eval_function([], ctx) == 999.0
+
+        history = os.path.join(
+            tmpdir, config_module.optimization_history_file
+        )
+        with open(history, encoding="utf-8") as handle:
+            record = json.loads(handle.read())
+
+    assert record["failure"]["kind"] == "stalled"
+    assert ctx.status.stalled_eval_count == 1
