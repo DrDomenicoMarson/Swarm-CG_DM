@@ -3,8 +3,13 @@ from typing import Any, Dict, Set, Tuple, Optional
 
 import numpy as np
 from swarmcg.config_types import SwarmConfig
+from swarmcg.optimization_types import (
+    OptimizationCycle,
+    ParameterVectorLayout,
+    SimulationSetup,
+)
 from swarmcg.simulations.boltzmann import BoltzmannTarget
-from swarmcg.topology import CGTopology
+from swarmcg.topology import CGTopology, GeometryKind
 
 
 @dataclass
@@ -96,16 +101,6 @@ class OptimizationStatus:
     process_alive_nb_cycles_dead: int = 0
     bonds_rescaling_performed: bool = False
     
-    # Cycle Parameters/Status
-    prod_sim_time: float = 0.0
-    prod_nb_frames: int = 0
-    val_guess_fact: float = 0.0
-    fct_guess_fact: float = 0.0
-    max_swarm_iter: int = 0
-    max_swarm_iter_without_new_global_best: int = 0
-    eval_nb_geoms: Dict = field(default_factory=lambda: {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0})
-
-
 @dataclass
 class OptimizationResults:
     """Stores metrics of the current evaluation."""
@@ -135,7 +130,7 @@ class ParticleSwarmState:
     )
     
     # Active set of geometries being optimized
-    opti_geoms_all: Set = field(default_factory=set)
+    opti_geoms_all: Set[GeometryKind] = field(default_factory=set)
 
 
 @dataclass
@@ -157,7 +152,9 @@ class OptimizationContext:
     cg_itp: CGTopology | None = None
     opti_itp: CGTopology | None = None
     out_itp: CGTopology | None = None
-    opti_cycle: Dict = field(default_factory=dict)
+    opti_cycle: OptimizationCycle | None = None
+    simulation_setup: SimulationSetup | None = None
+    parameter_layout: ParameterVectorLayout | None = None
     
     # Managers (injected at runtime)
     workspace_manager: Any = None

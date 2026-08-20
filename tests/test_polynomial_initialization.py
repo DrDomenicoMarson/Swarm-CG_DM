@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 from swarmcg.config_types import SwarmConfig
-from swarmcg.forcefield import get_initial_guess_list
+from swarmcg.optimization_types import OptimizationCycle, ParameterVectorLayout
+from swarmcg.particle_initialization import initialize_particles
 from swarmcg.simulations.polynomial import CBTParameters, RBParameters
 from swarmcg.topology import CGTopology, DihedralGroup
 
@@ -53,10 +54,7 @@ def test_first_polynomial_activation_uses_one_seed_and_full_bounds(
 ):
     group = _polynomial_group(func, (0.0,) * 5)
     topology = CGTopology(dihedrals=[group])
-    cycle = {
-        "nb_cycle": 2,
-        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 1},
-    }
+    cycle = OptimizationCycle.from_topology(2, ["dihedral"], topology)
     best_scores, best_params = _tracking_state()
     ranges = []
 
@@ -64,19 +62,21 @@ def test_first_polynomial_activation_uses_one_seed_and_full_bounds(
         ranges.append((low, high, digits))
         return round(high, digits)
 
-    monkeypatch.setattr("swarmcg.forcefield.draw_float", draw_high)
+    monkeypatch.setattr("swarmcg.particle_initialization.draw_float", draw_high)
 
-    particles = get_initial_guess_list(
+    domains = {"constraint": [], "bond": [], "angle": [], "dihedral": [None]}
+    layout = ParameterVectorLayout.build(
+        topology, cycle, domains, 1, SwarmConfig()
+    )
+    particles = initialize_particles(
         4,
-        cycle,
+        layout,
         topology,
         deepcopy(topology),
-        {"constraint": [], "bond": [], "angle": [], "dihedral": [None]},
         best_scores,
         best_params,
-        1,
         SwarmConfig(),
-        fct_guess_fact=0.2,
+        force_guess_factor=0.2,
     )
 
     assert len(particles) == 4
@@ -89,10 +89,7 @@ def test_later_cbt_activation_refines_locally_around_prior_optimum(monkeypatch):
     effective = (10.0,) * 5
     group = _polynomial_group(11, effective)
     topology = CGTopology(dihedrals=[group])
-    cycle = {
-        "nb_cycle": 3,
-        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 1},
-    }
+    cycle = OptimizationCycle.from_topology(3, ["dihedral"], topology)
     best_scores, best_params = _tracking_state(
         score=1.0, params=group.gromacs_parameters
     )
@@ -102,19 +99,23 @@ def test_later_cbt_activation_refines_locally_around_prior_optimum(monkeypatch):
         ranges.append((low, high, digits))
         return round((low + high) / 2.0, digits)
 
-    monkeypatch.setattr("swarmcg.forcefield.draw_float", draw_midpoint)
+    monkeypatch.setattr(
+        "swarmcg.particle_initialization.draw_float", draw_midpoint
+    )
 
-    particles = get_initial_guess_list(
+    domains = {"constraint": [], "bond": [], "angle": [], "dihedral": [None]}
+    layout = ParameterVectorLayout.build(
+        topology, cycle, domains, 1, SwarmConfig()
+    )
+    particles = initialize_particles(
         4,
-        cycle,
+        layout,
         topology,
         deepcopy(topology),
-        {"constraint": [], "bond": [], "angle": [], "dihedral": [None]},
         best_scores,
         best_params,
-        1,
         SwarmConfig(),
-        fct_guess_fact=0.2,
+        force_guess_factor=0.2,
     )
 
     assert len(particles) == 4

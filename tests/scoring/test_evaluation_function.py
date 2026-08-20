@@ -5,6 +5,11 @@ from unittest.mock import patch
 from swarmcg import config as config_module
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
+from swarmcg.optimization_types import (
+    OptimizationCycle,
+    ParameterVectorLayout,
+    SimulationSetup,
+)
 from swarmcg.topology import Atom, CGTopology, MoleculeType
 
 
@@ -12,6 +17,19 @@ def _make_min_itp():
     return CGTopology(
         molecule=MoleculeType("MOL", 1),
         atoms=[Atom(0, "A", 1, "RES", "A", 1, 0.0, 1.0)],
+    )
+
+
+def _configure_typed_evaluation(ctx):
+    """Attach the typed execution seams required by the PSO callback."""
+    ctx.opti_cycle = OptimizationCycle.from_topology(1, ["bond"], ctx.cg_itp)
+    ctx.simulation_setup = SimulationSetup(1.0, 10, 1, 1, 1.0, 0.5)
+    ctx.parameter_layout = ParameterVectorLayout.build(
+        ctx.cg_itp,
+        ctx.opti_cycle,
+        {"constraint": [], "bond": [], "angle": [], "dihedral": []},
+        ctx.config.optimization.exec_mode,
+        ctx.config,
     )
 
 
@@ -26,11 +44,7 @@ def test_eval_function_handles_missing_md_and_restores_cwd():
     ctx = OptimizationContext(config=config)
     ctx.cg_itp = _make_min_itp()
     ctx.out_itp = _make_min_itp()
-    ctx.opti_cycle = {
-        "nb_cycle": 1,
-        "geoms": ["bond"],
-        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
-    }
+    _configure_typed_evaluation(ctx)
     ctx.pso.opti_geoms_all = set()
     ctx.pso.best_fitness = (float("inf"), None)
     ctx.pso.worst_fit_score = 123.0
@@ -81,11 +95,7 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
     ctx = OptimizationContext(config=config)
     ctx.cg_itp = _make_min_itp()
     ctx.out_itp = _make_min_itp()
-    ctx.opti_cycle = {
-        "nb_cycle": 1,
-        "geoms": ["bond"],
-        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
-    }
+    _configure_typed_evaluation(ctx)
     ctx.pso.opti_geoms_all = {"bond"}
     ctx.pso.best_fitness = (-1.0, None)
     ctx.pso.worst_fit_score = 999.0
@@ -136,11 +146,7 @@ def test_model_scoring_failure_receives_finite_failure_objective():
     ctx = OptimizationContext(config=config)
     ctx.cg_itp = _make_min_itp()
     ctx.out_itp = _make_min_itp()
-    ctx.opti_cycle = {
-        "nb_cycle": 1,
-        "geoms": ["bond"],
-        "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0},
-    }
+    _configure_typed_evaluation(ctx)
     ctx.pso.opti_geoms_all = {"bond"}
     ctx.pso.best_fitness = (float("inf"), None)
     ctx.pso.worst_fit_score = 999.0

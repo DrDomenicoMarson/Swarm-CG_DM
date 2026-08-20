@@ -17,6 +17,7 @@ from swarmcg.scoring.distances import (
 )
 from swarmcg.config_types import OptimizationConfig, SwarmConfig
 from swarmcg.core.optimization import SwarmOptimizer
+from swarmcg.optimization_types import OptimizationCycle
 from swarmcg.scoring.distances import create_bins_and_dist_matrices
 from swarmcg.shared.periodic import (
     PeriodicDihedralParameters,
@@ -237,9 +238,11 @@ def test_failure_score_is_next_float_above_active_theoretical_maximum():
         angles=[object()],
         dihedrals=[object()],
     )
-    optimizer.ns.opti_cycle = {
-        "geoms": ["constraint", "bond", "angle", "dihedral"]
-    }
+    optimizer.ns.opti_cycle = OptimizationCycle.from_topology(
+        1,
+        ["constraint", "bond", "angle", "dihedral"],
+        optimizer.ns.cg_itp,
+    )
     create_bins_and_dist_matrices(optimizer.ns)
 
     optimizer._calculate_worst_fit_score()

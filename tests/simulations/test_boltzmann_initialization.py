@@ -6,6 +6,7 @@ import pytest
 from swarmcg import config
 from swarmcg.config_types import SwarmConfig
 from swarmcg.forcefield import perform_BI
+from swarmcg.optimization_types import OptimizationCycle
 from swarmcg.simulations.boltzmann import (
     BoltzmannTarget,
     fit_bounded_force_constant,
@@ -125,7 +126,7 @@ def test_perform_bi_fits_around_the_current_fixed_equilibrium(
 
     perform_BI(
         topology,
-        {"nb_geoms": {"constraint": 0, "bond": 1, "angle": 0, "dihedral": 0}},
+        OptimizationCycle.from_topology(1, ["bond"], topology),
         {
             "bond": [_target_from_basis(centers, basis, 900.0)],
             "angle": [],
@@ -220,9 +221,9 @@ def test_perform_bi_recovers_all_supported_linear_forms_and_rb():
             BoltzmannTarget(dihedral_centers, rb_probabilities),
         ],
     }
-    cycle = {
-        "nb_geoms": {"constraint": 0, "bond": 1, "angle": 3, "dihedral": 4}
-    }
+    cycle = OptimizationCycle.from_topology(
+        1, ["bond", "angle", "dihedral"], topology
+    )
     flags = {"bond": False, "angle": False, "dihedral": False}
 
     perform_BI(
@@ -272,9 +273,9 @@ def test_underdetermined_force_and_rb_fits_retain_input_seeds(caplog):
             )
         ],
     )
-    cycle = {
-        "nb_geoms": {"constraint": 0, "bond": 1, "angle": 0, "dihedral": 1}
-    }
+    cycle = OptimizationCycle.from_topology(
+        1, ["bond", "dihedral"], topology
+    )
     flags = {"bond": False, "angle": False, "dihedral": False}
 
     perform_BI(

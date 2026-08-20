@@ -57,11 +57,7 @@ def test_each_cycle_starts_from_previous_cycle_optimum():
     with (
         patch("swarmcg.core.optimization.forcefield.perform_BI"),
         patch(
-            "swarmcg.core.optimization.forcefield.get_search_space_boundaries",
-            return_value=[[0.0, 10.0]],
-        ),
-        patch(
-            "swarmcg.core.optimization.forcefield.get_initial_guess_list",
+            "swarmcg.core.optimization.initialize_particles",
             side_effect=initial_guesses,
         ),
         patch("swarmcg.core.optimization.FuzzyPSO", return_value=pso),

@@ -13,9 +13,16 @@ from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.scoring.compare import compare_models
 from swarmcg import config
 from swarmcg import forcefield
+from swarmcg.optimization_types import (
+    OptimizationCycle,
+    ParameterVectorLayout,
+    SimulationSetup,
+)
+from swarmcg.particle_initialization import initialize_particles
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import setup_logging, get_logger
 from swarmcg.context import OptimizationContext
+from swarmcg.topology import GeometryKind
 
 logger = get_logger(__name__)
 
@@ -150,14 +157,16 @@ class SwarmOptimizer:
         sim_types, opti_cycles, sim_cycles, particle_setter = get_settings(self.ns)
         
         self.ns.opti_itp = copy.deepcopy(self.ns.cg_itp)
-        self.ns.status.eval_nb_geoms = {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}
-
         # Handle dihedrals case
         if self.ns.cg_itp.dihedral_count == 0:
             opti_cycles = self._remove_dihedrals_from_cycles(opti_cycles)
 
         self.ns.scoring.performed_init_BI = {"bond": False, "angle": False, "dihedral": False}
-        self.ns.pso.opti_geoms_all = set(geom for opti_cycle_geoms in opti_cycles for geom in opti_cycle_geoms)
+        self.ns.pso.opti_geoms_all = {
+            GeometryKind(geometry)
+            for cycle_geometries in opti_cycles
+            for geometry in cycle_geometries
+        }
         self.ns.pso.best_fitness = [np.inf, None]
 
         # Initialize tracking dictionaries
@@ -184,18 +193,20 @@ class SwarmOptimizer:
         return new_cycles
 
     def _run_single_cycle(self, i, cycle_geoms, sim_cycles, sim_types, particle_setter):
-        self.ns.opti_cycle = {"nb_cycle": i + 1, "geoms": cycle_geoms,
-                         "nb_geoms": {"constraint": 0, "bond": 0, "angle": 0, "dihedral": 0}}
+        self.ns.opti_cycle = OptimizationCycle.from_topology(
+            i + 1, cycle_geoms, self.ns.cg_itp
+        )
         self.ns.out_itp = copy.deepcopy(self.ns.opti_itp)
-
-        self.ns.status.prod_sim_time = sim_types[sim_cycles[i]]["sim_duration"]
-        self.ns.status.prod_nb_frames = sim_types[sim_cycles[i]]["prod_nb_frames"]
-        self.ns.status.val_guess_fact = sim_types[sim_cycles[i]]["val_guess_fact"]
-        self.ns.status.fct_guess_fact = sim_types[sim_cycles[i]]["fct_guess_fact"]
-        self.ns.status.max_swarm_iter = sim_types[sim_cycles[i]]["max_swarm_iter"]
-        self.ns.status.max_swarm_iter_without_new_global_best = sim_types[sim_cycles[i]]["max_swarm_iter_without_new_global_best"]
-
-        self._update_geom_counts_for_cycle()
+        self.ns.simulation_setup = SimulationSetup.from_mapping(
+            sim_types[sim_cycles[i]]
+        )
+        self.ns.parameter_layout = ParameterVectorLayout.build(
+            self.ns.cg_itp,
+            self.ns.opti_cycle,
+            self.ns.scoring.domains_val,
+            self.config.optimization.exec_mode,
+            self.config,
+        )
         
         geoms_display = self._get_geoms_display_string()
 
@@ -203,7 +214,7 @@ class SwarmOptimizer:
         logger.info(swarmcg.shared.styling.sep_close)
         logger.info(
             "| STARTING OPTIMIZATION CYCLE %s                                                              |",
-            self.ns.opti_cycle["nb_cycle"],
+            self.ns.opti_cycle.number,
         )
         logger.info(
             "| Optimizing %s %s|",
@@ -222,16 +233,11 @@ class SwarmOptimizer:
             exec_mode=self.config.optimization.exec_mode,
         )
 
-        search_space_boundaries = forcefield.get_search_space_boundaries(
-            self.ns.cg_itp,
-            self.ns.opti_cycle,
-            self.ns.scoring.domains_val,
-            self.config.optimization.exec_mode,
-            config_obj=self.ns.config,
-        )
+        search_space_boundaries = self.ns.parameter_layout.bounds
 
+        max_swarm_iterations = self.ns.simulation_setup.max_swarm_iterations
         if self.config.optimization.sim_type == "OPTIMAL":
-            self.ns.status.max_swarm_iter = int(
+            max_swarm_iterations = int(
                 round(6 + np.sqrt(len(search_space_boundaries)))
             )
 
@@ -239,19 +245,19 @@ class SwarmOptimizer:
 
         nb_particles = particle_setter(search_space_boundaries)
         
-        initial_guess_list = forcefield.get_initial_guess_list(
+        initial_guess_list = initialize_particles(
             nb_particles,
-            self.ns.opti_cycle,
+            self.ns.parameter_layout,
             self.ns.cg_itp,
             self.ns.out_itp,
-            self.ns.scoring.domains_val,
             self.ns.pso.all_best_emd_dist_geoms,
             self.ns.pso.all_best_params_dist_geoms,
-            self.config.optimization.exec_mode,
-            config_obj=self.ns.config,
-            user_input=self.config.cg_model.user_input,
-            val_guess_fact=self.ns.status.val_guess_fact,
-            fct_guess_fact=self.ns.status.fct_guess_fact,
+            self.ns.config,
+            use_input_seed=self.config.cg_model.user_input,
+            equilibrium_guess_factor=(
+                self.ns.simulation_setup.equilibrium_guess_factor
+            ),
+            force_guess_factor=self.ns.simulation_setup.force_guess_factor,
         )
 
         # Optimization
@@ -262,45 +268,32 @@ class SwarmOptimizer:
                 FP.set_swarm_size(nb_particles)
                 FP.set_fitness(fitness=eval_function, arguments=self.ns, skip_test=True)
                 result = FP.solve_with_fstpso(
-                    max_iter=self.ns.status.max_swarm_iter,
+                    max_iter=max_swarm_iterations,
                     initial_guess_list=initial_guess_list,
-                    max_iter_without_new_global_best=self.ns.status.max_swarm_iter_without_new_global_best,
+                    max_iter_without_new_global_best=(
+                        self.ns.simulation_setup.max_iterations_without_improvement
+                    ),
                 )
 
-        forcefield.update_cg_itp_obj(
-            self.ns.out_itp,
-            self.ns.opti_cycle,
-            parameters_set=result[0].X,
-            exec_mode=self.config.optimization.exec_mode,
-        )
+        self.ns.parameter_layout.apply(self.ns.out_itp, result[0].X)
         # Every cycle is a mandatory staged refinement of the cycle optimum.
         # The separately tracked global score still controls the final best-model
         # directory and is intentionally not used as the next-cycle baseline.
         self.ns.opti_itp = copy.deepcopy(self.ns.out_itp)
 
-    def _update_geom_counts_for_cycle(self):
-        if "constraint" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["constraint"] = self.ns.cg_itp.constraint_count
-        if "bond" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["bond"] = self.ns.cg_itp.bond_count
-        if "angle" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["angle"] = self.ns.cg_itp.angle_count
-        if "dihedral" in self.ns.opti_cycle["geoms"]:
-            self.ns.opti_cycle["nb_geoms"]["dihedral"] = self.ns.cg_itp.dihedral_count
-
     def _get_geoms_display_string(self):
         geoms_display = []
-        if "constraint" in self.ns.opti_cycle["geoms"] or "bond" in self.ns.opti_cycle["geoms"]:
+        if self.ns.opti_cycle.includes("constraint") or self.ns.opti_cycle.includes("bond"):
             geoms_display.append("constraints/bonds")
-        if "angle" in self.ns.opti_cycle["geoms"]:
+        if self.ns.opti_cycle.includes("angle"):
             geoms_display.append("angles")
-        if "dihedral" in self.ns.opti_cycle["geoms"]:
+        if self.ns.opti_cycle.includes("dihedral"):
             geoms_display.append("dihedrals")
         return " & ".join(geoms_display)
 
     def _calculate_worst_fit_score(self):
         """Set a finite failure objective strictly above any valid cycle score."""
-        active = set(self.ns.opti_cycle["geoms"])
+        active = set(self.ns.opti_cycle.geometries)
         factor = self.config.optimization.bonds2angles_scoring_factor
 
         constraint_max = float(np.max(self.ns.scoring.constraints_grid.cost_matrix)) * factor
