@@ -6,7 +6,7 @@ import MDAnalysis as mda
 import swarmcg.scoring as scores
 from swarmcg.context import OptimizationContext
 from swarmcg import config
-from swarmcg.shared import exceptions, styling
+from swarmcg.shared import styling
 from swarmcg.shared.logging_utils import get_logger
 
 # Use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation

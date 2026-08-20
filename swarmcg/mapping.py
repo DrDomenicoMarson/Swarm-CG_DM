@@ -2,7 +2,6 @@ import re
 import collections
 import numpy as np
 import MDAnalysis as mda
-from swarmcg import config
 from swarmcg.shared import exceptions
 from swarmcg.config_types import SwarmConfig
 from swarmcg.simulations import vs_functions as vsf

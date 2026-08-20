@@ -125,7 +125,7 @@ def write_cg_itp_file(
                     else:
                         # handle writing of multiplicity
                         multiplicity = itp_obj["dihedral"][j]["mult"]
-                        if multiplicity == None:
+                        if multiplicity is None:
                             multiplicity = ""
                         if func in (1, 4):
                             canonical = PeriodicDihedralParameters.from_gromacs(

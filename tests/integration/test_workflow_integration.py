@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
-import swarmcg.config as config
 from swarmcg.evaluate_model import run as run_evaluation
 
 TEST_DATA = "tests/data/"

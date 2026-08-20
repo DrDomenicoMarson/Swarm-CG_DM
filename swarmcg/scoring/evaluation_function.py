@@ -5,7 +5,6 @@ import time
 from datetime import datetime
 
 from swarmcg import config, io as io, simulations as sim
-from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
 from swarmcg.scoring.compare import compare_models
 from swarmcg.forcefield import update_cg_itp_obj

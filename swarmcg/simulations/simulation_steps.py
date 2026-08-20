@@ -1,4 +1,5 @@
-import os, re
+import os
+import re
 
 from swarmcg.shared import exceptions
 from swarmcg.shared.utils import parse_string_args
@@ -23,9 +24,12 @@ class BaseSimulationConfig:
         SUB_PATTERN = r"[\n\t\s]*"
         SPLIT_PATTER = "(.*)=(.*)"
         KEEP_PATTERN = "^[^;]*"
-        f_clean = lambda x: re.sub(SUB_PATTERN, "", x)
-        f_split = lambda x: re.match(SPLIT_PATTER, x).groups()
-        f_keep = lambda x: re.match(KEEP_PATTERN, x).group()
+        def f_clean(x):
+            return re.sub(SUB_PATTERN, "", x)
+        def f_split(x):
+            return re.match(SPLIT_PATTER, x).groups()
+        def f_keep(x):
+            return re.match(KEEP_PATTERN, x).group()
         cleaned = filter(None, map(f_clean, raw_content))
         split = map(f_split, cleaned)
         sim_setup = {k: f_keep(v) for k, v in split}

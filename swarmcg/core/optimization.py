@@ -7,14 +7,12 @@ from datetime import datetime
 from fstpso import FuzzyPSO
 
 import swarmcg.shared.styling
-import swarmcg.scoring as scores
 from swarmcg.scoring import eval_function
 from swarmcg.simulations import SimulationStep, get_settings, WorkspaceManager
 from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.scoring.compare import compare_models
 from swarmcg import config
 from swarmcg import forcefield
-from swarmcg import utils
 from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import setup_logging, get_logger
 from swarmcg.context import OptimizationContext

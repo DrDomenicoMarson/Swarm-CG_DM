@@ -1,6 +1,5 @@
 
 import math
-import os
 import shutil
 import subprocess
 import pytest
@@ -10,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from MDAnalysis.lib.distances import calc_angles, calc_dihedrals
 
-from swarmcg.config_types import SwarmConfig, SimulationConfig, CGModelConfig, GromacsConfig
+from swarmcg.config_types import SwarmConfig
 from swarmcg.simulations.runner import SimulationManager, SimulationStep, config_to_runner, select_class
 from swarmcg.simulations.potentials import (
     gmx_angles_func_10,

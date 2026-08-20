@@ -2,12 +2,10 @@ import os
 import sys
 from shlex import quote as cmd_quote
 
-import numpy as np
 import matplotlib
 
 import swarmcg.io as io
 import swarmcg.shared.styling
-from swarmcg.shared import catch_warnings
 from swarmcg.shared.logging_utils import get_logger, setup_logging
 from swarmcg.scoring.compare import compare_models
 from swarmcg.config_types import SwarmConfig

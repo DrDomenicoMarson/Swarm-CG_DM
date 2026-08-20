@@ -71,7 +71,7 @@ def process_scaling_str(ns):
                     if int(geom_id) > ns.cg_itp["nb_constraints"]:
                         info = "A constraint group id exceeds the number of constraints groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
-                    if not "C" + geom_id in ns.scoring.bonds_scaling_specific:
+                    if "C" + geom_id not in ns.scoring.bonds_scaling_specific:
                         target_length = float(sp_str[i + 1])
                         if not math.isfinite(target_length) or target_length <= 0:
                             info = "Average distribution lengths must be finite and positive."
@@ -84,7 +84,7 @@ def process_scaling_str(ns):
                     if int(geom_id) > ns.cg_itp["nb_bonds"]:
                         info = "A bond group id exceeds the number of bonds groups defined in the input CG ITP file."
                         raise exceptions.InvalidArgument("bonds_scaling_str", current_val, info)
-                    if not "B" + geom_id in ns.scoring.bonds_scaling_specific:
+                    if "B" + geom_id not in ns.scoring.bonds_scaling_specific:
                         target_length = float(sp_str[i + 1])
                         if not math.isfinite(target_length) or target_length <= 0:
                             info = "Average distribution lengths must be finite and positive."

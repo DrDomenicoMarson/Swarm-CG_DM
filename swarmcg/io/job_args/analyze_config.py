@@ -5,7 +5,8 @@ from swarmcg.io.job_args import defaults
 
 
 def get_analyze_args():
-    formatter = lambda prog: RawTextHelpFormatter(prog, width=135, max_help_position=52)
+    def formatter(prog):
+        return RawTextHelpFormatter(prog, width=135, max_help_position=52)
     args_parser = ArgumentParser(
         description=styling.ANALYSE_DESCR,
         formatter_class=formatter,
@@ -22,7 +23,7 @@ def get_analyze_args():
 
     optional_args = args_parser.add_argument_group(bullet + "OTHERS")
     optional_args.add_argument("-plot_scale", **defaults.plot_scale.args)
-    optional_args.add_argument("-h", "-help", **defaults.help.args)
+    optional_args.add_argument("-h", "--help", **defaults.help.args)
     optional_args.add_argument("--nobanner", "-nobanner", **defaults.nobanner.args)
 
     return args_parser

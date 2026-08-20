@@ -1,7 +1,7 @@
 import os
 import shutil
 import time
-from typing import List, Optional
+from typing import List
 from pathlib import Path
 from swarmcg.config_types import SwarmConfig
 import swarmcg.config as config

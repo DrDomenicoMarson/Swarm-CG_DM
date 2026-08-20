@@ -27,10 +27,10 @@ def get_AA_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None, gro
     """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
-    bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_3 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_4 = np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
 
     # Indices
     indices = np.array(beads_ids)
@@ -88,10 +88,10 @@ def get_CG_dihedrals_distrib(universe, beads_ids, bins=None, bandwidth=None, gro
     """
     dihedral_values_rad = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
-    bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_3 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_4 = np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
 
     # Indices
     indices = np.array(beads_ids)

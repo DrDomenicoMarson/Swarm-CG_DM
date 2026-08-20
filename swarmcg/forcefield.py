@@ -402,8 +402,10 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
     input_guess = []
 
     # defaults if not provided (should be provided by caller from config)
-    if val_guess_fact is None: val_guess_fact = 1.0 # default?
-    if fct_guess_fact is None: fct_guess_fact = 0.5 # default?
+    if val_guess_fact is None:
+        val_guess_fact = 1.0
+    if fct_guess_fact is None:
+        fct_guess_fact = 0.5
 
     opt_config = config_obj.optimization
     
@@ -431,8 +433,18 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         """Return whether a per-geometry best score is available."""
         try:
             return bool(np.isfinite(all_best_emd_dist_geoms[geometry][index]))
-        except (KeyError, TypeError):
+        except (IndexError, KeyError, TypeError):
             return False
+
+    def history_error_factor(geometry, index, divisor):
+        """Return a finite exploration scale derived from optimization history."""
+        try:
+            error = float(all_best_emd_dist_geoms[geometry][index])
+        except (IndexError, KeyError, TypeError, ValueError):
+            return 1.0
+        if not np.isfinite(error):
+            return 1.0
+        return max(1.0, error / divisor)
 
     def append_unique_guess(candidate):
         """Append a seed unless an equivalent particle is already present."""
@@ -650,8 +662,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         # constraints
         if exec_mode == 1:
             for j in range(opti_cycle["nb_geoms"]["constraint"]):
-                try: emd_err_fact = max(1, all_best_emd_dist_geoms["constraints"][j] / 2)
-                except: emd_err_fact = 1
+                emd_err_fact = history_error_factor("constraints", j, 2)
                 draw_low = max(out_itp["constraint"][j]["value"] - bond_dist_guess_variation * val_guess_fact * emd_err_fact, domains_val["constraint"][j][0])
                 draw_high = min(out_itp["constraint"][j]["value"] + bond_dist_guess_variation * val_guess_fact * emd_err_fact, domains_val["constraint"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
@@ -659,15 +670,13 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         # bonds
         if exec_mode == 1:
             for j in range(opti_cycle["nb_geoms"]["bond"]):
-                try: emd_err_fact = max(1, all_best_emd_dist_geoms["bonds"][j] / 2)
-                except: emd_err_fact = 1
+                emd_err_fact = history_error_factor("bonds", j, 2)
                 draw_low = max(out_itp["bond"][j]["value"] - bond_dist_guess_variation * val_guess_fact * emd_err_fact, domains_val["bond"][j][0])
                 draw_high = min(out_itp["bond"][j]["value"] + bond_dist_guess_variation * val_guess_fact * emd_err_fact, domains_val["bond"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
         
         for j in range(opti_cycle["nb_geoms"]["bond"]):
-            try: emd_err_fact = max(1, all_best_emd_dist_geoms["bonds"][j] / 2)
-            except: emd_err_fact = 1
+            emd_err_fact = history_error_factor("bonds", j, 2)
             draw_low = max(min(out_itp["bond"][j]["fct"] * (1 - fct_guess_fact * emd_err_fact), out_itp["bond"][j]["fct"] - fct_guess_min_flat_diff_bonds), 0)
             draw_high = min(max(out_itp["bond"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact), out_itp["bond"][j]["fct"] + fct_guess_min_flat_diff_bonds), default_max_fct_bonds_opti)
             init_guess.append(draw_float(draw_low, draw_high, 3))
@@ -675,15 +684,13 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
         # angles
         if exec_mode == 1:
             for j in range(opti_cycle["nb_geoms"]["angle"]):
-                try: emd_err_fact = max(1, all_best_emd_dist_geoms["angles"][j] / 2)
-                except: emd_err_fact = 1
+                emd_err_fact = history_error_factor("angles", j, 2)
                 draw_low = max(out_itp["angle"][j]["value"] - angle_value_guess_variation * val_guess_fact * emd_err_fact, domains_val["angle"][j][0])
                 draw_high = min(out_itp["angle"][j]["value"] + angle_value_guess_variation * val_guess_fact * emd_err_fact, domains_val["angle"][j][1])
                 init_guess.append(draw_float(draw_low, draw_high, 3))
 
         for j in range(opti_cycle["nb_geoms"]["angle"]):
-            try: emd_err_fact = max(1, all_best_emd_dist_geoms["angles"][j] / 2)
-            except: emd_err_fact = 1
+            emd_err_fact = history_error_factor("angles", j, 2)
             draw_low = max(min(out_itp["angle"][j]["fct"] * (1 - fct_guess_fact * emd_err_fact), out_itp["angle"][j]["fct"] - fct_guess_min_flat_diff_angles), 0)
             if cg_itp["angle"][j]["func"] == 1:
                 draw_high = min(max(out_itp["angle"][j]["fct"] * (1 + fct_guess_fact * emd_err_fact), out_itp["angle"][j]["fct"] + fct_guess_min_flat_diff_angles), default_max_fct_angles_opti_f1)
@@ -695,10 +702,7 @@ def get_initial_guess_list(nb_particles, opti_cycle, cg_itp, out_itp, domains_va
 
         # dihedrals
         for j in range(opti_cycle["nb_geoms"]["dihedral"]):
-            try:
-                emd_err_fact = max(1, all_best_emd_dist_geoms["dihedrals"][j] / 5)
-            except:
-                emd_err_fact = 1
+            emd_err_fact = history_error_factor("dihedrals", j, 5)
 
             func = cg_itp["dihedral"][j]["func"]
             if func in (3, 11):

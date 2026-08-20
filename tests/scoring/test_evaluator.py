@@ -3,7 +3,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 from swarmcg.scoring.evaluator import SwarmEvaluator
 from swarmcg.config_types import SwarmConfig
-import numpy as np
 
 @pytest.fixture
 def mock_config():

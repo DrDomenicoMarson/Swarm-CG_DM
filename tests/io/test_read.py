@@ -1,9 +1,8 @@
-import os
 
 import pytest
 
 from swarmcg.shared import exceptions
-from swarmcg.io.read import read_itp, read_cg_itp_file, validate_cg_itp
+from swarmcg.io.read import read_cg_itp_file, validate_cg_itp
 from swarmcg.io.write import write_cg_itp_file
 from swarmcg.config_types import SwarmConfig
 from swarmcg.io.itp import CGITP
@@ -30,7 +29,7 @@ def check_ipt_dict(cg_itp):
 
 def test_read_cg_itp_file(ns_opt):
     # when:
-    filename = f"tests/data/test.itp"
+    filename = "tests/data/test.itp"
     ns = ns_opt(cg_itp_filename=filename)
     config = SwarmConfig.from_namespace(ns)
 
@@ -56,7 +55,7 @@ def test_read_cg_itp_file(ns_opt):
 
 def test_read_cg_itp_file_basic(ns_opt):
     # when:
-    filename = f"tests/data/cg_model.itp"
+    filename = "tests/data/cg_model.itp"
     ns = ns_opt(cg_itp_filename=filename)
     config = SwarmConfig.from_namespace(ns)
 

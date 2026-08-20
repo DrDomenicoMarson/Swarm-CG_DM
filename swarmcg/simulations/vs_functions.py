@@ -146,7 +146,7 @@ def vs4_func_2(universe, traj, vs_def_beads_ids, vs_params):
     NOTE: only function 2 is defined for vs_4 in GROMACS, because it replaces function 1
     which still exists for retro compatibility but its usage must be avoided
     """
-    i, j, k, l = vs_def_beads_ids
+    i, j, k, fourth = vs_def_beads_ids
     a, b, c = vs_params  # weight, weight, nm
     c = c * 10  # retrieve amgstrom for MDA
 
@@ -154,7 +154,7 @@ def vs4_func_2(universe, traj, vs_def_beads_ids, vs_params):
         pos_i = universe.atoms[i].position
         pos_j = universe.atoms[j].position
         pos_k = universe.atoms[k].position
-        pos_l = universe.atoms[l].position
+        pos_l = universe.atoms[fourth].position
         r_ij = pos_j - pos_i
         r_ik = pos_k - pos_i
         r_il = pos_l - pos_i

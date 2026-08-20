@@ -1,5 +1,6 @@
 # some numpy version have this ufunc warning at import + many packages call numpy and display annoying warnings
-import os, sys
+import os
+import sys
 from shlex import quote as cmd_quote
 
 import matplotlib.pyplot as plt
@@ -486,7 +487,7 @@ def run(ns):
                         ax[nrow - 1][i].axvline(x=opti_cycles_sep[j], color=opti_cycles_sep_color)
 
                 # best models parameters
-                if parameters_vals["constraints"]["values"][i][id_best_all] != None:
+                if parameters_vals["constraints"]["values"][i][id_best_all] is not None:
                     ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["constraints"]["values"][i][id_best_all],
                                          marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
                                          markeredgecolor="black", zorder=3)
@@ -548,7 +549,7 @@ def run(ns):
                     ax2.yaxis.set_ticklabels([])
 
                 # best models parameters
-                if parameters_vals["bonds"]["values"][i][id_best_all] != None:
+                if parameters_vals["bonds"]["values"][i][id_best_all] is not None:
                     ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["bonds"]["values"][i][id_best_all],
                                          marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
                                          markeredgecolor="black", zorder=3)
@@ -612,7 +613,7 @@ def run(ns):
                     ax2.yaxis.set_ticklabels([])
 
                 # best models parameters
-                if parameters_vals["angles"]["values"][i][id_best_all] != None:
+                if parameters_vals["angles"]["values"][i][id_best_all] is not None:
                     ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["angles"]["values"][i][id_best_all],
                                          marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
                                          markeredgecolor="black", zorder=3)
@@ -694,7 +695,7 @@ def run(ns):
                         ax2.yaxis.set_ticklabels([])
 
                     # best models parameters
-                    if parameters_vals["dihedrals"]["values"][i][id_best_all] != None:
+                    if parameters_vals["dihedrals"]["values"][i][id_best_all] is not None:
                         ax[nrow - 1][i].plot(id_best_all + 1, parameters_vals["dihedrals"]["values"][i][id_best_all],
                                              marker="D", color="lightskyblue", markersize=10, markeredgewidth=1.5,
                                              markeredgecolor="black", zorder=3)

@@ -24,6 +24,22 @@ from swarmcg.shared.periodic import (
     unwrap_degrees_around,
 )
 
+__all__ = [
+    "HistogramGrid",
+    "HistogramObservation",
+    "circular_mean_degrees",
+    "compose_classwise_l2_score",
+    "create_bins_and_dist_matrices",
+    "create_histogram_grid",
+    "earth_movers_distance",
+    "normalize_periodic_degrees",
+    "normalized_histogram",
+    "observe_histogram",
+    "require_complete_reference",
+    "support_neighborhood",
+    "unwrap_degrees_around",
+]
+
 
 @dataclass(frozen=True)
 class HistogramGrid:

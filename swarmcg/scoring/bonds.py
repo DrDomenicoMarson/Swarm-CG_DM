@@ -32,8 +32,8 @@ def get_AA_bonds_distrib(universe, beads_ids, grp_type, grp_nb, config: SwarmCon
     """
     bond_values = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
-    bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
 
     # Pre-calculate indices
     beads_ids_arr = np.array(beads_ids)
@@ -124,8 +124,8 @@ def get_CG_bonds_distrib(universe, beads_ids, grp_type, bins=None, bandwidth=Non
     """
     bond_values = np.empty(len(universe.trajectory) * len(beads_ids))
     frame_values = np.empty(len(beads_ids))
-    bead_pos_1 = np.empty((len(beads_ids), 3), dtype=np.float32)
-    bead_pos_2 = np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
+    np.empty((len(beads_ids), 3), dtype=np.float32)
 
     # Pre-calculate indices
     beads_ids_arr = np.array(beads_ids)

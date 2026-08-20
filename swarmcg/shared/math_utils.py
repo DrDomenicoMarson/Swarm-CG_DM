@@ -21,7 +21,7 @@ def forward_fill(arr, cond_value):
                     if arr[j] != cond_value:
                         valid_val = arr[j]
                         break
-                except IndexError as e:
+                except IndexError:
                     msg = (
                         "Unexpected read of the optimization results, "
                         "please check that your simulations have not all been crashing"

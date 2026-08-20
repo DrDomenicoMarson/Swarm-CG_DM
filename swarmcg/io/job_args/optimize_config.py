@@ -5,7 +5,8 @@ from swarmcg.io.job_args import defaults
 
 
 def get_optimize_args():
-    formatter = lambda prog: RawTextHelpFormatter(prog, width=135, max_help_position=52)
+    def formatter(prog):
+        return RawTextHelpFormatter(prog, width=135, max_help_position=52)
     args_parser = ArgumentParser(
         description=styling.OPTIMISE_DESCR,
         formatter_class=formatter,

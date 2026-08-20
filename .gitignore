@@ -102,8 +102,6 @@ ENV/
 /distributions.png
 /G1_DATA/.aa_traj.xtc_offsets.npz
 /G1_DATA/.cg_traj.xtc_offsets.npz
-*.DS_Store
 .DS_Store
-.DS_Store
-tests/data/.aa_traj.xtc_offsets.npz
+.*_offsets.npz
 tests/workflow_output

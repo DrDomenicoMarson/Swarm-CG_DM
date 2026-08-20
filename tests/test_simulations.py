@@ -1,7 +1,6 @@
-import os
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
-from swarmcg.simulations.runner import SimulationStep, SimulationManager, config_to_runner
+from swarmcg.simulations.runner import SimulationStep, SimulationManager
 from swarmcg.config_types import SwarmConfig
 
 @pytest.fixture

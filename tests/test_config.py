@@ -1,5 +1,6 @@
 import pytest
 from argparse import Namespace
+from pathlib import Path
 from pydantic import ValidationError
 
 from swarmcg.config_types import (
@@ -23,6 +24,14 @@ def test_swarm_config_defaults():
     assert config.gromacs.gmx_path == "gmx"
     assert config.gromacs.nb_threads == 0
     assert config.gromacs.ntomp == 0
+    for filename in (
+        config.simulation.mdp_minimization_filename,
+        config.simulation.mdp_equi_filename,
+        config.simulation.mdp_md_filename,
+    ):
+        path = Path(filename)
+        assert path.is_file()
+        assert path.parent.name == "data"
 
 def test_swarm_config_from_namespace():
     ns = Namespace(
@@ -49,6 +58,17 @@ def test_swarm_config_from_namespace():
     assert config.gromacs.gmx_args_str == "-v"
     assert config.gromacs.mini_maxwarn == 2
     assert config.gromacs.sim_kill_delay == 120
+    assert Path(config.simulation.mdp_minimization_filename).is_file()
+    assert Path(config.simulation.mdp_equi_filename).is_file()
+    assert Path(config.simulation.mdp_md_filename).is_file()
+
+
+def test_monitor_supports_standard_long_help_flag():
+    """The monitor accepts the same standard help spelling as other CLIs."""
+    with pytest.raises(SystemExit) as exit_info:
+        get_analyze_args().parse_args(["--help"])
+
+    assert exit_info.value.code == 0
 
 def test_config_immutability_partial():
     # Dataclasses are mutable by default, but we check basic integrity

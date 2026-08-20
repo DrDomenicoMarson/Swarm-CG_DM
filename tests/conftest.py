@@ -4,9 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 import swarmcg
-import swarmcg
 from swarmcg import config
-from swarmcg.simulations.runner import config_to_runner, SimulationStep
+from swarmcg.simulations.runner import config_to_runner
 from swarmcg.simulations.simulation_steps import Minimisation, Equilibration, Production
 from swarmcg.config_types import SwarmConfig
 

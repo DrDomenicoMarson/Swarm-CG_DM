@@ -1,6 +1,5 @@
 
 import os
-import shutil
 import pytest
 from unittest.mock import MagicMock
 from swarmcg.simulations.workspace import WorkspaceManager

@@ -1,6 +1,7 @@
 
 import math
 import os
+from importlib import resources
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -9,6 +10,36 @@ from swarmcg import config as config_module
 from swarmcg.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def _package_data_path(filename: str) -> str:
+    """Return the installed path of a bundled Swarm-CG data file.
+
+    Args:
+        filename: Basename inside the package ``data`` directory.
+
+    Returns:
+        Absolute or installation-relative filesystem path to the resource.
+    """
+    return str(resources.files("swarmcg").joinpath("data", filename))
+
+
+def _section_from_namespace(model_type, defaults, namespace):
+    """Build one Pydantic configuration section from an argparse namespace.
+
+    Args:
+        model_type: Pydantic model class to construct.
+        defaults: Default model instance providing missing namespace values.
+        namespace: Parsed argparse namespace or namespace-like object.
+
+    Returns:
+        A validated instance of ``model_type``.
+    """
+    values = {
+        name: getattr(namespace, name, getattr(defaults, name))
+        for name in model_type.model_fields
+    }
+    return model_type(**values)
 
 class GromacsConfig(BaseModel):
     """Configuration for GROMACS preprocessing and simulation commands."""
@@ -120,9 +151,15 @@ class SimulationConfig(BaseModel):
     """MDP files and physical conditions for optimization simulations."""
 
     # MDP files
-    mdp_minimization_filename: str = "honeycomb/data/mini.mdp"
-    mdp_equi_filename: str = "honeycomb/data/equi.mdp"
-    mdp_md_filename: str = "honeycomb/data/md.mdp"
+    mdp_minimization_filename: str = Field(
+        default_factory=lambda: _package_data_path("mini.mdp")
+    )
+    mdp_equi_filename: str = Field(
+        default_factory=lambda: _package_data_path("equi.mdp")
+    )
+    mdp_md_filename: str = Field(
+        default_factory=lambda: _package_data_path("md.mdp")
+    )
     
     # Simulation Parameters
     sim_duration_short: float = 10.0 # ns
@@ -491,108 +528,18 @@ class SwarmConfig(BaseModel):
             ValidationError: If a numeric, strategy, mapping, or cross-field
                 constraint is invalid.
         """
-        # Gromacs
-        gromacs = GromacsConfig(
-            gmx_path=getattr(ns, 'gmx_path', 'gmx'),
-            nb_threads=getattr(ns, 'nb_threads', 0),
-            ntomp=getattr(ns, 'ntomp', 0),
-            mpi_tasks=getattr(ns, 'mpi_tasks', 0),
-            gpu_id=getattr(ns, 'gpu_id', ""),
-            gmx_args_str=getattr(ns, 'gmx_args_str', ""),
-            mini_maxwarn=getattr(ns, 'mini_maxwarn', 1),
-            sim_kill_delay=getattr(ns, 'sim_kill_delay', 60)
+        defaults = cls()
+        return cls(
+            gromacs=_section_from_namespace(GromacsConfig, defaults.gromacs, ns),
+            reference=_section_from_namespace(
+                ReferenceModelConfig, defaults.reference, ns
+            ),
+            cg_model=_section_from_namespace(CGModelConfig, defaults.cg_model, ns),
+            simulation=_section_from_namespace(
+                SimulationConfig, defaults.simulation, ns
+            ),
+            optimization=_section_from_namespace(
+                OptimizationConfig, defaults.optimization, ns
+            ),
+            output=_section_from_namespace(OutputConfig, defaults.output, ns),
         )
-
-        # Reference Model
-        reference = ReferenceModelConfig(
-            aa_tpr_filename=getattr(ns, 'aa_tpr_filename', "aa_topol.tpr"),
-            aa_traj_filename=getattr(ns, 'aa_traj_filename', "aa_traj.xtc"),
-            cg_map_filename=getattr(ns, 'cg_map_filename', "cg_map.ndx"),
-            mapping_type=getattr(ns, 'mapping_type', "COM"),
-            aa_rg_offset=getattr(ns, 'aa_rg_offset', 0.0)
-        )
-
-        # CG Model
-        cg_model = CGModelConfig(
-            cg_itp_filename=getattr(ns, 'cg_itp_filename', "cg_model.itp"),
-            gro_input_filename=getattr(ns, 'gro_input_filename', "start_conf.gro"),
-            top_input_filename=getattr(ns, 'top_input_filename', "system.top"),
-            cg_tpr_filename=getattr(ns, 'cg_tpr_filename', "cg_topol.tpr"),
-            cg_traj_filename=getattr(ns, 'cg_traj_filename', "cg_traj.xtc"),
-            user_input=getattr(ns, 'user_input', False)
-        )
-
-        # Simulation
-        simulation = SimulationConfig(
-            mdp_minimization_filename=getattr(ns, 'mdp_minimization_filename', ""),
-            mdp_equi_filename=getattr(ns, 'mdp_equi_filename', ""),
-            mdp_md_filename=getattr(ns, 'mdp_md_filename', ""),
-            sim_duration_short=getattr(ns, 'sim_duration_short', 10.0),
-            sim_duration_long=getattr(ns, 'sim_duration_long', 25.0),
-            temp=getattr(ns, 'temp', 300.0)
-        )
-
-        # Optimization
-        optimization = OptimizationConfig(
-            exec_mode=getattr(ns, 'exec_mode', 1),
-            sim_type=getattr(ns, 'sim_type', "OPTIMAL"),
-            default_max_fct_bonds_opti=getattr(ns, 'default_max_fct_bonds_opti', 18000.0),
-            default_max_fct_angles_opti_f1=getattr(ns, 'default_max_fct_angles_opti_f1', 1700.0),
-            default_max_fct_angles_opti_f2=getattr(ns, 'default_max_fct_angles_opti_f2', 1700.0),
-            default_max_fct_angles_opti_f10=getattr(ns, 'default_max_fct_angles_opti_f10', 1700.0),
-            default_abs_range_fct_dihedrals_opti_func_with_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_with_mult', 15.0),
-            default_abs_range_fct_dihedrals_opti_func_without_mult=getattr(ns, 'default_abs_range_fct_dihedrals_opti_func_without_mult', 1500.0),
-            max_abs_rb_coefficient=getattr(ns, 'max_abs_rb_coefficient', None),
-            max_abs_cbt_effective_coefficient=getattr(ns, 'max_abs_cbt_effective_coefficient', None),
-            bonds2angles_scoring_factor=getattr(ns, 'bonds2angles_scoring_factor', 500.0),
-            bw_constraints=getattr(ns, 'bw_constraints', 0.002),
-            bw_bonds=getattr(ns, 'bw_bonds', 0.01),
-            bw_angles=getattr(ns, 'bw_angles', 2.5),
-            bw_dihedrals=getattr(ns, 'bw_dihedrals', 2.5),
-            bonded_max_range=getattr(ns, 'bonded_max_range', 15.0),
-            bonds_scaling=getattr(ns, 'bonds_scaling', 1.0),
-            bonds_scaling_str=getattr(ns, 'bonds_scaling_str', ""),
-            min_bonds_length=getattr(ns, 'min_bonds_length', 0.0),
-            keep_all_sims=getattr(ns, 'keep_all_sims', False),
-            bi_nb_bins=getattr(ns, 'bi_nb_bins', 50),
-            bond_dist_guess_variation=getattr(ns, 'bond_dist_guess_variation', config_module.bond_dist_guess_variation),
-            angle_value_guess_variation=getattr(ns, 'angle_value_guess_variation', config_module.angle_value_guess_variation),
-            dihedral_value_guess_variation=getattr(ns, 'dihedral_value_guess_variation', config_module.dihedral_value_guess_variation),
-            fct_guess_min_flat_diff_bonds=getattr(ns, 'fct_guess_min_flat_diff_bonds', config_module.fct_guess_min_flat_diff_bonds),
-            fct_guess_min_flat_diff_angles=getattr(ns, 'fct_guess_min_flat_diff_angles', config_module.fct_guess_min_flat_diff_angles),
-            fct_guess_min_flat_diff_dihedrals_without_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_without_mult', config_module.fct_guess_min_flat_diff_dihedrals_without_mult),
-            fct_guess_min_flat_diff_dihedrals_with_mult=getattr(ns, 'fct_guess_min_flat_diff_dihedrals_with_mult', config_module.fct_guess_min_flat_diff_dihedrals_with_mult),
-        )
-
-        # Output
-        output = OutputConfig(
-            input_folder=getattr(ns, 'input_folder', ""),
-            output_folder=getattr(ns, 'output_folder', ""),
-            opti_dirname=getattr(ns, 'opti_dirname', ""),
-            plot_filename=getattr(ns, 'plot_filename', "distributions.png"),
-            mismatch_order=getattr(ns, 'mismatch_order', False),
-            row_x_scaling=getattr(ns, 'row_x_scaling', True),
-            row_y_scaling=getattr(ns, 'row_y_scaling', True),
-            ncols_max=getattr(ns, 'ncols_max', 0),
-            plot_scale=getattr(ns, 'plot_scale', 1.0),
-            verbose=getattr(ns, 'verbose', False),
-            calculate_sasa=getattr(ns, 'calculate_sasa', False),
-        )
-
-        config = cls(
-            gromacs=gromacs,
-            reference=reference,
-            cg_model=cg_model,
-            simulation=simulation,
-            optimization=optimization,
-            output=output
-        )
-        # Run file existence validation immediately after creation, 
-        # mimicking the original 'input_parameter_validation' call in main/entry points.
-        # However, for unit tests decoupling, we might want to call this explicitly.
-        # But 'from_namespace' is main entry point util, so it's safe to validate here if files are expected.
-        # NOTE: If unit tests mock files, this will fail if it runs os.path.isfile. 
-        # So we should perhaps call validate_files_exist() explicitly in entry points instead of here.
-        # I will leave it to be called explicitly.
-        
-        return config
