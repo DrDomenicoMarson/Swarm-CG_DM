@@ -5,7 +5,7 @@ from __future__ import annotations
 import gzip
 import shutil
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -17,7 +17,12 @@ from swarmcg.optimization_types import EvaluationResult
 from swarmcg.scoring.compare import compare_models
 from swarmcg.shared import exceptions, styling
 from swarmcg.topology import GeometryKind
+from swarmcg.sasa_types import SasaDiagnostic, SasaRepresentation
+from swarmcg.shared.logging_utils import get_logger
 from swarmcg.utils import print_stdout_forced
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,7 @@ def eval_function(parameters_set, ns: OptimizationContext) -> float:
     """
     _validate_context(ns)
     ns.status.nb_eval += 1
+    ns.results.sasa_cg = SasaDiagnostic()
     started_at = datetime.now().timestamp()
     paths = _EvaluationPaths.build(ns)
     _announce_evaluation(ns)
@@ -257,6 +263,9 @@ def _run_and_score(
     new_best = global_score < ns.pso.best_fitness[0]
     if new_best:
         ns.pso.best_fitness = global_score, ns.status.nb_eval
+        if ns.config.sasa.enabled:
+            ns.results.sasa_cg = _compute_new_best_sasa(ns, paths)
+            comparison = replace(comparison, sasa_cg=ns.results.sasa_cg)
     return _EvaluationOutcome(
         comparison,
         objective,
@@ -271,7 +280,6 @@ def _compare_model(ns: OptimizationContext) -> EvaluationResult:
         ns,
         manual_mode=False,
         ignore_dihedrals=ns.opti_cycle.counts.dihedrals == 0,
-        calc_sasa=ns.config.output.calculate_sasa,
         record_best_indep_params=True,
     )
     if result is None:
@@ -305,8 +313,37 @@ def _record_failure(ns: OptimizationContext, kind: str) -> None:
 def _clear_cg_observables(ns: OptimizationContext) -> None:
     ns.results.gyr_cg = None
     ns.results.gyr_cg_std = None
-    ns.results.sasa_cg = None
-    ns.results.sasa_cg_std = None
+    ns.results.sasa_cg = SasaDiagnostic()
+
+
+def _compute_new_best_sasa(
+    ns: OptimizationContext, paths: _EvaluationPaths
+) -> SasaDiagnostic:
+    """Compute a non-fitness CG SASA diagnostic for a new global best.
+
+    Args:
+        ns: Scored optimization context with the successful CG trajectory.
+        paths: Current evaluation artifact paths.
+
+    Returns:
+        Successful or failed typed diagnostic. A failure is logged and stored
+        but does not change the particle score or best-model selection.
+    """
+    from swarmcg.scoring.sasa import compute_sasa
+
+    try:
+        measurement = compute_sasa(
+            ns, SasaRepresentation.CG, paths.workspace / "sasa" / "cg"
+        )
+    except Exception as exc:
+        logger.warning(
+            "CG SASA diagnostic failed for new-best evaluation %s without "
+            "changing its fitness: %s",
+            ns.status.nb_eval,
+            exc,
+        )
+        return SasaDiagnostic.failed(exc)
+    return SasaDiagnostic.success(measurement)
 
 
 def _archive_artifacts(
@@ -377,11 +414,32 @@ def _report_outcome(ns: OptimizationContext, outcome: _EvaluationOutcome) -> Non
         f"(Error abs. {round(abs(1 - ns.results.gyr_cg / ns.results.gyr_aa_mapped) * 100, 1)}% "
         f"-- Reference Rg AA-mapped: {ns.results.gyr_aa_mapped} nm)"
     )
-    if ns.config.output.calculate_sasa and ns.results.sasa_cg is not None:
+    if (
+        ns.config.sasa.enabled
+        and ns.results.sasa_cg.status == "success"
+        and ns.results.sasa_cg.measurement is not None
+        and ns.results.sasa_aa.status == "success"
+        and ns.results.sasa_aa.measurement is not None
+    ):
+        cg_sasa = ns.results.sasa_cg.measurement.mean
+        aa_sasa = ns.results.sasa_aa.measurement.mean
+        mapped = ns.results.sasa_aa_mapped.measurement
         print_stdout_forced(
-            f"  SASA CG: {ns.results.sasa_cg} nm2   "
-            f"(Error abs. {round(abs(1 - ns.results.sasa_cg / ns.results.sasa_aa_mapped) * 100, 1)}% "
-            f"-- Reference SASA AA-mapped: {ns.results.sasa_aa_mapped} nm2)"
+            f"  SASA CG: {round(cg_sasa, 3)} nm2 "
+            f"(primary error vs full AA: "
+            f"{round(abs(1 - cg_sasa / aa_sasa) * 100, 1)}%"
+            + (
+                f"; secondary error vs AA-mapped: "
+                f"{round(abs(1 - cg_sasa / mapped.mean) * 100, 1)}%"
+                if mapped is not None and mapped.mean != 0
+                else ""
+            )
+            + ")"
+        )
+    elif ns.config.sasa.enabled and ns.results.sasa_cg.status == "failed":
+        print_stdout_forced(
+            "  SASA CG diagnostic failed without affecting fitness: "
+            f"{ns.results.sasa_cg.error}"
         )
     return None
 
@@ -455,15 +513,44 @@ def _serialize_observables(ns: OptimizationContext) -> dict:
             },
         },
         "sasa": {
-            "aa_mapped": {
-                "mean": ns.results.sasa_aa_mapped,
-                "standard_deviation": ns.results.sasa_aa_mapped_std,
-            },
-            "cg": {
-                "mean": ns.results.sasa_cg,
-                "standard_deviation": ns.results.sasa_cg_std,
-            },
+            "aa": _serialize_sasa_diagnostic(ns.results.sasa_aa),
+            "aa_mapped": _serialize_sasa_diagnostic(
+                ns.results.sasa_aa_mapped
+            ),
+            "cg": _serialize_sasa_diagnostic(ns.results.sasa_cg),
         },
+    }
+
+
+def _serialize_sasa_diagnostic(diagnostic: SasaDiagnostic) -> dict:
+    """Convert one typed SASA diagnostic to strict history data.
+
+    Args:
+        diagnostic: Scheduling and measurement state to serialize.
+
+    Returns:
+        JSON-compatible status, optional measurement, and optional error.
+    """
+    measurement = diagnostic.measurement
+    return {
+        "status": diagnostic.status,
+        "measurement": (
+            None
+            if measurement is None
+            else {
+                "representation": measurement.representation.value,
+                "mean": measurement.mean,
+                "standard_deviation": measurement.standard_deviation,
+                "frame_count": measurement.frame_count,
+                "protocol": {
+                    "probe_radius_nm": measurement.protocol.probe_radius_nm,
+                    "sphere_points": measurement.protocol.sphere_points,
+                    "radii_source": measurement.protocol.radii_source,
+                    "radii_sha256": measurement.protocol.radii_sha256,
+                },
+            }
+        ),
+        "error": diagnostic.error,
     }
 
 

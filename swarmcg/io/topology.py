@@ -500,9 +500,9 @@ def _parse_virtual_sites(
             raise exceptions.MissformattedFile(
                 f"Virtual-site bead {site.bead_id + 1} is outside the atom table."
             )
-        if not atoms[site.bead_id].is_virtual:
+        if atoms[site.bead_id].virtual_site_kind is not None:
             raise exceptions.MissformattedFile(
-                f"Virtual-site bead {site.bead_id + 1} does not use a type starting with 'v'."
+                f"Virtual-site bead {site.bead_id + 1} is defined more than once."
             )
         atoms[site.bead_id].virtual_site_kind = site.kind
     return sites

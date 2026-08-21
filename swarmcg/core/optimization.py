@@ -4,6 +4,7 @@ import copy
 import contextlib
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 from fstpso import FuzzyPSO
 
 import swarmcg.shared.styling
@@ -23,6 +24,7 @@ from swarmcg.shared import exceptions, catch_warnings
 from swarmcg.shared.logging_utils import setup_logging, get_logger
 from swarmcg.context import OptimizationContext
 from swarmcg.topology import GeometryKind
+from swarmcg.sasa_types import SasaDiagnostic, SasaRepresentation
 
 logger = get_logger(__name__)
 
@@ -58,6 +60,8 @@ class SwarmOptimizer:
         self._validate_environment()
         self._initialize_optimization()
         self._create_output_files()
+        if self.config.sasa.enabled:
+            self._initialize_sasa_references()
         
         # Reference distributions plot
         self._plot_reference_distributions()
@@ -128,7 +132,42 @@ class SwarmOptimizer:
             pass
             
         self.ns.results.gyr_aa_mapped, self.ns.results.gyr_aa_mapped_std = None, None
-        self.ns.results.sasa_aa_mapped, self.ns.results.sasa_aa_mapped_std = None, None
+
+    def _initialize_sasa_references(self) -> None:
+        """Validate and calculate optimization-invariant SASA references.
+
+        Returns:
+            ``None``. Full-AA and mapped-reference measurements are attached
+            to the optimization context and persisted under ``.internal``.
+
+        Raises:
+            ComputationError: If SASA configuration, radii, selections, or
+                either reference calculation is invalid. This happens before
+                the first particle is evaluated.
+        """
+        from swarmcg.scoring.sasa import compute_sasa, validate_sasa_inputs
+
+        validate_sasa_inputs(self.ns)
+        root = Path(self.ns.files.exec_folder) / ".internal" / "sasa_reference"
+        for representation in (
+            SasaRepresentation.AA,
+            SasaRepresentation.AA_MAPPED,
+        ):
+            measurement = compute_sasa(
+                self.ns, representation, root / representation.value
+            )
+            setattr(
+                self.ns.results,
+                f"sasa_{representation.value}",
+                SasaDiagnostic.success(measurement),
+            )
+            logger.info(
+                "Initialized %s SASA reference: %.6g +/- %.6g nm2 (%s frames)",
+                representation.value,
+                measurement.mean,
+                measurement.standard_deviation,
+                measurement.frame_count,
+            )
 
     def _plot_reference_distributions(self):
         self.ns.scoring.atom_only = True

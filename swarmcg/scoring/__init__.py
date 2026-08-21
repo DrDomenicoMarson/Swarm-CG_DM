@@ -1,7 +1,7 @@
 from .angles import get_AA_angles_distrib, get_CG_angles_distrib
 from .bonds import get_AA_bonds_distrib, get_CG_bonds_distrib
 from .dihedrals import get_AA_dihedrals_distrib, get_CG_dihedrals_distrib
-from .sasa import compute_SASA
+from .sasa import compute_sasa, validate_sasa_inputs
 from .rg import compute_Rg
 from .distances import (
     HistogramGrid,
@@ -26,7 +26,7 @@ __all__ = [
     "circular_mean_degrees",
     "compose_classwise_l2_score",
     "compute_Rg",
-    "compute_SASA",
+    "compute_sasa",
     "create_bins_and_dist_matrices",
     "create_histogram_grid",
     "earth_movers_distance",
@@ -43,4 +43,5 @@ __all__ = [
     "require_complete_reference",
     "support_neighborhood",
     "unwrap_degrees_around",
+    "validate_sasa_inputs",
 ]

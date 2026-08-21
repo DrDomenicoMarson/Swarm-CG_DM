@@ -166,11 +166,9 @@ def _render_summary_row(
         "Radius of gyration",
         failures,
     )
-    sasa_cg = _observable_series(records, "sasa", "cg", "mean")
+    sasa_cg = _sasa_measurement_series(records, "cg", "mean")
     if np.any(np.isfinite(sasa_cg)):
-        _plot_observable(
-            axes[6], x_values, analysis, "sasa", "SASA", failures
-        )
+        _plot_sasa(axes[6], x_values, analysis)
     else:
         axes[6].set_visible(False)
     _plot_summary_series(
@@ -286,6 +284,71 @@ def _plot_observable(
             zorder=3,
         )
     axis.yaxis.set_major_locator(MaxNLocator(integer=True))
+    axis.legend(loc="lower right")
+
+
+def _plot_sasa(axis, x_values, analysis) -> None:
+    """Plot sparse new-best CG SASA against both reference definitions.
+
+    Args:
+        axis: Matplotlib axis receiving the plot.
+        x_values: One-based evaluation positions.
+        analysis: Validated schema-version-2 history analysis.
+
+    Returns:
+        ``None``. The axis is populated in place.
+    """
+    records = analysis.records
+    aa = _sasa_measurement_series(records, "aa", "mean")
+    aa_std = _sasa_measurement_series(records, "aa", "standard_deviation")
+    mapped = _sasa_measurement_series(records, "aa_mapped", "mean")
+    mapped_std = _sasa_measurement_series(
+        records, "aa_mapped", "standard_deviation"
+    )
+    cg = _sasa_measurement_series(records, "cg", "mean")
+    cg_std = _sasa_measurement_series(records, "cg", "standard_deviation")
+    axis.set_title("SASA (new global bests only)")
+    axis.grid(zorder=0.5)
+    axis.plot(x_values, aa, color=config.atom_color, label="Full AA (primary)", lw=2.5)
+    axis.fill_between(
+        x_values, aa - aa_std, aa + aa_std, color=config.atom_color, alpha=0.1
+    )
+    axis.plot(
+        x_values,
+        mapped,
+        color="darkorange",
+        label="AA mapped to CG centres (secondary)",
+        lw=2,
+    )
+    axis.fill_between(
+        x_values,
+        mapped - mapped_std,
+        mapped + mapped_std,
+        color="darkorange",
+        alpha=0.1,
+    )
+    axis.errorbar(
+        x_values,
+        cg,
+        yerr=cg_std,
+        color=config.cg_color,
+        marker="o",
+        linestyle="none",
+        label="CG new-best diagnostic",
+    )
+    _draw_cycle_separators(axis, analysis)
+    if np.isfinite(cg[analysis.best_index]):
+        axis.plot(
+            analysis.best_index + 1,
+            cg[analysis.best_index],
+            marker="D",
+            color="white",
+            markerfacecolor="gold",
+            markersize=10,
+            markeredgewidth=1.5,
+            markeredgecolor="black",
+            zorder=3,
+        )
     axis.legend(loc="lower right")
 
 
@@ -420,6 +483,17 @@ def _observable_series(records, observable, representation, statistic):
     )
 
 
+def _sasa_measurement_series(records, representation, statistic):
+    return _numeric_series(
+        records,
+        lambda record: (
+            None
+            if record.observables["sasa"][representation]["measurement"] is None
+            else record.observables["sasa"][representation]["measurement"][statistic]
+        ),
+    )
+
+
 def _log_best_evaluation(analysis: OptimizationHistoryAnalysis) -> None:
     best = analysis.best_record
     rg = best.observables["radius_of_gyration"]
@@ -437,15 +511,28 @@ def _log_best_evaluation(analysis: OptimizationHistoryAnalysis) -> None:
             rg["aa_mapped"]["mean"],
         )
     sasa = best.observables["sasa"]
-    if sasa["cg"]["mean"] is not None and sasa["aa_mapped"]["mean"] is not None:
-        error = abs(1 - sasa["cg"]["mean"] / sasa["aa_mapped"]["mean"]) * 100
+    cg = sasa["cg"]["measurement"]
+    aa = sasa["aa"]["measurement"]
+    mapped = sasa["aa_mapped"]["measurement"]
+    if cg is not None and aa is not None:
+        primary_error = abs(1 - cg["mean"] / aa["mean"]) * 100
         logger.info(
-            "  SASA CG: %s nm2 (Error abs. %s%% -- Reference SASA "
-            "AA-mapped: %s nm2)",
-            round(sasa["cg"]["mean"], 2),
-            round(error, 1),
-            sasa["aa_mapped"]["mean"],
+            "  SASA CG: %s nm2 (primary error vs full AA: %s%%; "
+            "full-AA reference: %s nm2)",
+            round(cg["mean"], 3),
+            round(primary_error, 1),
+            aa["mean"],
         )
+        if mapped is not None:
+            secondary_error = abs(1 - cg["mean"] / mapped["mean"]) * 100
+            logger.info(
+                "  Secondary CG-vs-mapped SASA error: %s%% "
+                "(mapped reference: %s nm2)",
+                round(secondary_error, 1),
+                mapped["mean"],
+            )
+    elif sasa["cg"]["status"] == "failed":
+        logger.warning("  Best-evaluation CG SASA failed: %s", sasa["cg"]["error"])
 
 
 def main() -> None:

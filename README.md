@@ -50,7 +50,20 @@ It can also be used for inspecting AA-mapped distributions exclusively.
 
 	scg_evaluate -aa_tpr G1_DATA/aa_topol.tpr -aa_traj G1_DATA/aa_traj.xtc -cg_map G1_DATA/cg_map.ndx -cg_itp G1_DATA/cg_model.itp
 
-This module is particularly useful to assess the need to run an optimization procedure (assuming one already has a CG model). It is also suited to the assessment of geometrical changes triggered by a modification of CG beads types (defining non-bonded parameters) or after manually editing bonded parameters while working on a model. This command also provides publication-quality figures to support the parametrization of your models (also in vectorized formats). Radius of gyration (Rg) is always calculated. SASA is an optional diagnostic enabled with `-sasa`/`--sasa`; a SASA failure is reported but never changes a fitness score or model selection.
+This module is particularly useful to assess the need to run an optimization procedure (assuming one already has a CG model). It is also suited to the assessment of geometrical changes triggered by a modification of CG beads types (defining non-bonded parameters) or after manually editing bonded parameters while working on a model. This command also provides publication-quality figures to support the parametrization of your models (also in vectorized formats). Radius of gyration (Rg) is always calculated.
+
+SASA is an optional Martini 3 validation enabled with `-sasa`/`--sasa`. The
+primary comparison is full-AA SASA versus CG SASA. AA coordinates mapped to CG
+centres provide a secondary resolution/geometry diagnostic; they are not a
+backmapped trajectory. The built-in AA profile uses the Rowland--Taylor radii
+recommended by the [Martini 3 small-molecule workflow](https://cgmartini.nl/docs/tutorials/Martini3/Small_Molecule_Parametrization/),
+while CG radii are 0.264, 0.230, and 0.191 nm for regular, small, and tiny
+beads. The common protocol is a 0.191 nm probe and 4800 surface dots. Override
+these settings with `--sasa-aa-radii`, `--sasa-probe-radius`, and
+`--sasa-ndots`; AA overrides use GROMACS `vdwradii.dat` syntax. Unresolved or
+conflicting radii fail standalone evaluation clearly rather than permitting
+GROMACS's 0.14 nm fallback. Raw XVG values, exact radii, command output, and
+protocol metadata are retained beside the evaluation plot.
 
 ### 2. Optimize bonded terms of a CG model
 
@@ -138,7 +151,7 @@ Optimization procedures can be monitored at any point during execution. The modu
 
 	scg_monitor -opti_dir MODEL_OPTI__STARTED_03-07-2020_10h_12m_15s
 
-Each completed evaluation is flushed as one strict schema-version-1 JSON record
+Each completed evaluation is flushed as one strict schema-version-2 JSON record
 in `.internal/optimization_history.jsonl`. This is the monitor's only supported
 input format; optimization directories created by older Swarm-CG versions and
 their whitespace recap files are intentionally unsupported. While an
@@ -146,12 +159,15 @@ optimization is active, `scg_monitor` tolerates a syntactically incomplete
 final line but rejects malformed earlier records.
 
 See the help (`-h` or `--help`) for a complete description of `scg_monitor`
-output. Rg and requested SASA values may be rough estimates because they come
-from short optimization simulations and should be validated with longer
-trajectories. The monitor marks stalled, crashed, and scoring-failed
-evaluations explicitly and omits SASA summaries and panels when SASA was not
-requested or no result is available. Using `scg_evaluate` can be helpful to
-this end.
+output. During optimization, full-AA and mapped-reference SASA are computed
+once at initialization. CG SASA is computed only for successful evaluations
+that become the new global best, remains outside fitness, and is stored as
+`not_scheduled`, `success`, or `failed`. A runtime CG diagnostic failure is
+visible in the history but does not invalidate that particle. The monitor
+plots these sparse CG points against full-AA (primary) and mapped-reference
+(secondary) horizontal references. SASA from short optimization simulations
+should still be reconfirmed on a suitably long final trajectory. Histories
+from schema version 1 and legacy whitespace recap files are unsupported.
 
 ### Extended usage (untested)
 

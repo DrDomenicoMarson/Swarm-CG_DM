@@ -15,6 +15,7 @@ from swarmcg.shared.periodic import (
 )
 from swarmcg.simulations.polynomial import CBTParameters, RBParameters
 from swarmcg.topology import CGTopology, GeometryKind, HarmonicParameters
+from swarmcg.sasa_types import SasaDiagnostic
 
 
 @dataclass(frozen=True)
@@ -192,8 +193,9 @@ class EvaluationResult:
             versioned history cutover.
         rg_aa_mapped: Radius-of-gyration statistics for the mapped reference.
         rg_cg: Radius-of-gyration statistics for the CG model.
-        sasa_aa_mapped: SASA statistics for the mapped reference.
-        sasa_cg: SASA statistics for the CG model.
+        sasa_aa: Full-atomistic SASA diagnostic.
+        sasa_aa_mapped: Mapped-reference SASA diagnostic.
+        sasa_cg: Coarse-grained SASA diagnostic.
     """
 
     total_score: float
@@ -204,8 +206,9 @@ class EvaluationResult:
     pairwise_text: str = ""
     rg_aa_mapped: ObservableStatistics = ObservableStatistics()
     rg_cg: ObservableStatistics = ObservableStatistics()
-    sasa_aa_mapped: ObservableStatistics = ObservableStatistics()
-    sasa_cg: ObservableStatistics = ObservableStatistics()
+    sasa_aa: SasaDiagnostic = SasaDiagnostic()
+    sasa_aa_mapped: SasaDiagnostic = SasaDiagnostic()
+    sasa_cg: SasaDiagnostic = SasaDiagnostic()
 
 
 @dataclass(frozen=True)

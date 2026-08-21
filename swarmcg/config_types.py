@@ -408,7 +408,7 @@ class OptimizationConfig(BaseModel):
         return self
 
 class OutputConfig(BaseModel):
-    """Output, plotting, and optional diagnostic settings."""
+    """Output and plotting settings."""
 
     input_folder: str = ""
     output_folder: str = ""
@@ -420,11 +420,6 @@ class OutputConfig(BaseModel):
     ncols_max: int = 0
     plot_scale: float = 1.0
     verbose: bool = False
-    calculate_sasa: bool = Field(
-        default=False,
-        description="Calculate SASA as a nonfatal diagnostic that never enters fitness.",
-    )
-
     @field_validator("ncols_max")
     @classmethod
     def check_nonnegative_columns(cls, value: int) -> int:
@@ -461,6 +456,74 @@ class OutputConfig(BaseModel):
             raise ValueError("plot_scale must be finite and greater than zero.")
         return value
 
+
+class SasaConfig(BaseModel):
+    """Validated Martini 3 solvent-accessible surface-area protocol.
+
+    Args:
+        enabled: Enable SASA validation without adding it to optimization
+            fitness.
+        probe_radius_nm: Solvent-probe radius in nanometres.
+        sphere_points: Number of surface dots per sphere used by GROMACS.
+        aa_radii_filename: Optional GROMACS ``vdwradii.dat``-format AA radii
+            override. The packaged Rowland--Taylor profile is used otherwise.
+    """
+
+    enabled: bool = False
+    probe_radius_nm: float = 0.191
+    sphere_points: int = 4800
+    aa_radii_filename: str | None = None
+
+    @field_validator("probe_radius_nm")
+    @classmethod
+    def check_positive_probe_radius(cls, value: float) -> float:
+        """Require a finite positive solvent-probe radius.
+
+        Args:
+            value: Probe radius in nanometres.
+
+        Returns:
+            Validated probe radius.
+
+        Raises:
+            ValueError: If *value* is non-finite or not positive.
+        """
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("probe_radius_nm must be finite and greater than zero.")
+        return value
+
+    @field_validator("sphere_points")
+    @classmethod
+    def check_positive_sphere_points(cls, value: int) -> int:
+        """Require a positive GROMACS surface-dot count.
+
+        Args:
+            value: Requested number of dots per sphere.
+
+        Returns:
+            Validated dot count.
+
+        Raises:
+            ValueError: If *value* is not positive.
+        """
+        if value <= 0:
+            raise ValueError("sphere_points must be greater than zero.")
+        return value
+
+    @field_validator("aa_radii_filename")
+    @classmethod
+    def normalize_optional_radii_path(cls, value: str | None) -> str | None:
+        """Normalize an empty radii override to ``None``.
+
+        Args:
+            value: Optional user-supplied filename.
+
+        Returns:
+            The filename, or ``None`` for an empty value.
+        """
+        return value or None
+
+
 class SwarmConfig(BaseModel):
     """Complete validated configuration for a Swarm-CG command."""
 
@@ -470,6 +533,7 @@ class SwarmConfig(BaseModel):
     simulation: SimulationConfig = Field(default_factory=SimulationConfig)
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    sasa: SasaConfig = Field(default_factory=SasaConfig)
     
     # We can add a method to validation files existence if desired, 
     # but Pydantic validators usually validate *data*, not external state (like file existence).
@@ -542,4 +606,5 @@ class SwarmConfig(BaseModel):
                 OptimizationConfig, defaults.optimization, ns
             ),
             output=_section_from_namespace(OutputConfig, defaults.output, ns),
+            sasa=_section_from_namespace(SasaConfig, defaults.sasa, ns),
         )

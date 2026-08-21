@@ -10,6 +10,7 @@ from swarmcg.optimization_types import (
 )
 from swarmcg.simulations.boltzmann import BoltzmannTarget
 from swarmcg.topology import CGTopology, GeometryKind
+from swarmcg.sasa_types import SasaDiagnostic
 
 
 @dataclass
@@ -109,10 +110,9 @@ class OptimizationResults:
     gyr_cg: Optional[float] = None
     gyr_cg_std: Optional[float] = None
     
-    sasa_aa_mapped: Optional[float] = None
-    sasa_aa_mapped_std: Optional[float] = None
-    sasa_cg: Optional[float] = None
-    sasa_cg_std: Optional[float] = None
+    sasa_aa: SasaDiagnostic = field(default_factory=SasaDiagnostic)
+    sasa_aa_mapped: SasaDiagnostic = field(default_factory=SasaDiagnostic)
+    sasa_cg: SasaDiagnostic = field(default_factory=SasaDiagnostic)
 
 
 @dataclass

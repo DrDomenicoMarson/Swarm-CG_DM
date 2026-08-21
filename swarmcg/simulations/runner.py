@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 import swarmcg.shared.exceptions as exceptions
 import swarmcg.config as config
 from swarmcg.utils import print_stdout_forced
@@ -12,8 +13,32 @@ from swarmcg.simulations.simulation_steps import select_class
 from swarmcg.config_types import SwarmConfig
 
 
-def exec_gmx(gmx_cmd: Sequence[str], *, stdin_text=None, cwd=None):
-    """Execute a GROMACS command without a shell and return its exit code.
+@dataclass(frozen=True)
+class GromacsCommandResult:
+    """Captured result of a completed GROMACS command.
+
+    Args:
+        command: Exact argument sequence passed to the subprocess.
+        returncode: Process exit code.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+    """
+
+    command: tuple[str, ...]
+    returncode: int
+    stdout: str
+    stderr: str
+
+    @property
+    def output(self) -> str:
+        """Return combined standard output and standard error."""
+        return self.stdout + self.stderr
+
+
+def exec_gmx(
+    gmx_cmd: Sequence[str], *, stdin_text: str | None = None, cwd: str | None = None
+) -> GromacsCommandResult:
+    """Execute a GROMACS command without a shell and capture its output.
 
     Args:
         gmx_cmd: Argument sequence. Shell command strings are not accepted.
@@ -21,7 +46,7 @@ def exec_gmx(gmx_cmd: Sequence[str], *, stdin_text=None, cwd=None):
         cwd: Optional working directory.
 
     Returns:
-        Process exit code.
+        Captured command, exit code, standard output, and standard error.
     """
     cmd = list(gmx_cmd)
     completed = subprocess.run(
@@ -33,15 +58,21 @@ def exec_gmx(gmx_cmd: Sequence[str], *, stdin_text=None, cwd=None):
         cwd=cwd,
         check=False,
     )
-    if completed.returncode != 0:
+    result = GromacsCommandResult(
+        command=tuple(cmd),
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
+    if result.returncode != 0:
         print_stdout_forced(
             "NON-ZERO EXIT CODE FOR COMMAND:",
             shlex.join(cmd),
             "\n\nCOMMAND OUTPUT:\n\n",
-            completed.stdout + completed.stderr,
+            result.output,
             "\n\n",
         )
-    return completed.returncode
+    return result
 
 
 class SimulationStep:

@@ -224,21 +224,49 @@ def initialize_cg_traj(topology: CGTopology):
 
     Returns:
         Empty MDAnalysis universe with atom metadata and one trajectory slot.
+
+    Raises:
+        ValueError: If one residue number is associated with conflicting
+            residue names in the topology.
     """
     masses = np.array([atom.mass for atom in topology.atoms])
     names = np.array([atom.atom_name for atom in topology.atoms])
-    resnames = np.array([atom.residue_name for atom in topology.atoms])
-    resid = np.array([atom.residue_number for atom in topology.atoms])
-    nr = len(set(resid))
+    residue_numbers = tuple(
+        dict.fromkeys(atom.residue_number for atom in topology.atoms)
+    )
+    residue_index = {
+        residue_number: index
+        for index, residue_number in enumerate(residue_numbers)
+    }
+    atom_resindex = np.array(
+        [residue_index[atom.residue_number] for atom in topology.atoms]
+    )
+    residue_names = []
+    for residue_number in residue_numbers:
+        names_for_residue = {
+            atom.residue_name
+            for atom in topology.atoms
+            if atom.residue_number == residue_number
+        }
+        if len(names_for_residue) != 1:
+            raise ValueError(
+                f"CG residue {residue_number} has conflicting residue names."
+            )
+        residue_names.append(names_for_residue.pop())
 
-    aa2cg_universe = mda.Universe.empty(len(topology.atoms), n_residues=nr, atom_resindex=resid, n_segments=1,
-                                        residue_segindex=np.ones(nr), trajectory=True)
-    aa2cg_universe.add_TopologyAttr("masses")
-    aa2cg_universe._topology.masses.values = np.array(masses)
-    aa2cg_universe.add_TopologyAttr("names")
-    aa2cg_universe._topology.names.values = names
-    aa2cg_universe.add_TopologyAttr("resnames")
-    aa2cg_universe._topology.resnames.values = resnames
+    aa2cg_universe = mda.Universe.empty(
+        len(topology.atoms),
+        n_residues=len(residue_numbers),
+        atom_resindex=atom_resindex,
+        n_segments=1,
+        residue_segindex=np.zeros(len(residue_numbers), dtype=int),
+        trajectory=True,
+    )
+    aa2cg_universe.add_TopologyAttr("masses", masses)
+    aa2cg_universe.add_TopologyAttr("names", names)
+    aa2cg_universe.add_TopologyAttr("resnames", residue_names)
+    aa2cg_universe.add_TopologyAttr("resids", residue_numbers)
+    aa2cg_universe.add_TopologyAttr("segids", ["SYSTEM"])
     return aa2cg_universe
 
 def make_aa_traj_whole_for_selected_mols(aa_universe, all_aa_mols):

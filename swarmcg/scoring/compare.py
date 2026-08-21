@@ -85,7 +85,6 @@ def compare_models(
     context: OptimizationContext,
     manual_mode: bool = True,
     ignore_dihedrals: bool = False,
-    calc_sasa: bool = False,
     record_best_indep_params: bool = False,
 ) -> EvaluationResult | None:
     """Compare mapped atomistic and CG bonded distributions and plot them.
@@ -95,7 +94,6 @@ def compare_models(
             histogram grids, output paths, and mutable optimization state.
         manual_mode: Recalculate atomistic references for ``scg_evaluate``.
         ignore_dihedrals: Mark dihedrals as excluded from the cycle objective.
-        calc_sasa: Calculate SASA as a nonfatal diagnostic after scoring.
         record_best_indep_params: Record improving per-group parameters.
 
     Returns:
@@ -118,8 +116,7 @@ def compare_models(
             record_best_indep_params=record_best_indep_params,
         )
     _render_comparisons(context, comparisons, result, ignore_dihedrals)
-    if calc_sasa and not context.scoring.atom_only:
-        _compute_optional_sasa(context)
+    if result is not None:
         result = _with_observables(context, result)
     if not manual_mode and not context.scoring.atom_only:
         return result
@@ -770,34 +767,6 @@ def _format_circular_mean(value: float) -> str:
     return f"{float(value):.1f}°" if np.isfinite(value) else "unavailable"
 
 
-def _compute_optional_sasa(ns: OptimizationContext) -> None:
-    try:
-        if ns.results.sasa_aa_mapped is None:
-            ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std = (
-                scores.compute_SASA(ns, traj_type="AA_mapped")
-            )
-        ns.results.sasa_cg, ns.results.sasa_cg_std = scores.compute_SASA(
-            ns, traj_type="CG"
-        )
-        logger.info(
-            "SASA (AA reference, CG-mapped): %s +/- %s nm2",
-            ns.results.sasa_aa_mapped,
-            ns.results.sasa_aa_mapped_std,
-        )
-        logger.info(
-            "SASA (CG model): %s +/- %s nm2",
-            ns.results.sasa_cg,
-            ns.results.sasa_cg_std,
-        )
-    except Exception as exc:
-        ns.results.sasa_cg = ns.results.sasa_cg_std = None
-        logger.warning(
-            "Optional SASA diagnostic failed and will not affect fitness: %s",
-            exc,
-        )
-    logger.info("")
-
-
 def _with_observables(
     ns: OptimizationContext, result: EvaluationResult
 ) -> EvaluationResult:
@@ -812,10 +781,7 @@ def _with_observables(
             ns.results.gyr_aa_mapped, ns.results.gyr_aa_mapped_std
         ),
         rg_cg=ObservableStatistics(ns.results.gyr_cg, ns.results.gyr_cg_std),
-        sasa_aa_mapped=ObservableStatistics(
-            ns.results.sasa_aa_mapped, ns.results.sasa_aa_mapped_std
-        ),
-        sasa_cg=ObservableStatistics(
-            ns.results.sasa_cg, ns.results.sasa_cg_std
-        ),
+        sasa_aa=ns.results.sasa_aa,
+        sasa_aa_mapped=ns.results.sasa_aa_mapped,
+        sasa_cg=ns.results.sasa_cg,
     )

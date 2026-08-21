@@ -313,10 +313,28 @@ bonds_max_range = BaseField(
 )
 
 sasa = BaseField(
-    dest="calculate_sasa",
-    default=DEFAULTS.output.calculate_sasa,
-    help="Calculate SASA as an optional diagnostic; SASA never affects fitness",
+    dest="enabled",
+    default=DEFAULTS.sasa.enabled,
+    help="Run the reproducible Martini 3 SASA validation protocol",
     action="store_true",
+)
+sasa_aa_radii = BaseField(
+    dest="aa_radii_filename",
+    type=str,
+    default=DEFAULTS.sasa.aa_radii_filename,
+    help="AA radii override in GROMACS vdwradii.dat syntax",
+)
+sasa_probe_radius = BaseField(
+    dest="probe_radius_nm",
+    type=float,
+    default=DEFAULTS.sasa.probe_radius_nm,
+    help="SASA solvent-probe radius in nm (default: 0.191)",
+)
+sasa_ndots = BaseField(
+    dest="sphere_points",
+    type=int,
+    default=DEFAULTS.sasa.sphere_points,
+    help="SASA surface dots per sphere (default: 4800)",
 )
 
 # MODEL SCALING

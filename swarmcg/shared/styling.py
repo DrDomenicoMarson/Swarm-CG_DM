@@ -58,10 +58,10 @@ It works whether the optimization is ongoing or finished. The plot will be produ
 directory provided via argument -opti_dir.
 
 Top row displays bonded terms score (global and breakdown) together with radius of gyration
-(Rg) and solvent accessible surface area (SASA) estimations. We call these estimations because
-they are calculated on short simulations used during optimization (time depends on parameters
-used for optimization), therefore one should always run a long simulation at the end of the
-optimizaton process, from which one can calculate the real Rg and SASA values for your model.
+(Rg) and optional solvent accessible surface area (SASA) diagnostics. CG SASA is calculated
+only for new global-best models and is compared primarily with full-AA SASA and secondarily
+with AA coordinates mapped to CG centres. Because CG values use the short optimization
+simulations, one should still validate the final model with a suitably long trajectory.
 
 Other rows display bond, angle and dihedral parameters tested together with their independant
 score (distance from the AA distributions using EMD/Wasserstein). This allows to diagnose

@@ -1,0 +1,19 @@
+; Rowland--Taylor van der Waals radii used by the Martini 3 small-molecule
+; parametrization workflow. Values are in nm.
+;
+; Reference: Rowland, R. S.; Taylor, R. Intermolecular Nonbonded Contact
+; Distances in Organic Crystal Structures: Comparison with Distances Expected
+; from van der Waals Radii. J. Phys. Chem. 1996, 100, 7384-7391.
+; DOI: 10.1021/jp953141+
+;
+; This is an element table consumed by Swarm-CG. Each run generates exact
+; residue/atom entries in a local GROMACS vdwradii.dat file.
+H   0.110
+C   0.177
+N   0.164
+O   0.158
+F   0.146
+S   0.181
+Cl  0.176
+Br  0.187
+I   0.203

@@ -340,5 +340,4 @@ class SwarmEvaluator:
         return compare_models(
             self.ns,
             manual_mode=manual_mode,
-            calc_sasa=self.config.output.calculate_sasa,
         )

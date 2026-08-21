@@ -26,6 +26,11 @@ def get_evaluate_args():
     for arg in ["bonds_scaling", "bonds_scaling_str", "min_bonds_length", "b2a_score_fact"]:
         optional_args.add_argument(f"-{arg}", **getattr(defaults, arg).args)
     optional_args.add_argument("-sasa", "--sasa", **defaults.sasa.args)
+    optional_args.add_argument("--sasa-aa-radii", **defaults.sasa_aa_radii.args)
+    optional_args.add_argument(
+        "--sasa-probe-radius", **defaults.sasa_probe_radius.args
+    )
+    optional_args.add_argument("--sasa-ndots", **defaults.sasa_ndots.args)
 
     graphical_args = args_parser.add_argument_group(bullet + "FIGURE DISPLAY")
     for arg in ["mismatch_ordering", "bw_constraints", "bw_bonds", "bw_angles", "bw_dihedrals",

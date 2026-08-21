@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 from shlex import quote as cmd_quote
 
 import matplotlib
@@ -10,6 +11,7 @@ from swarmcg.shared.logging_utils import get_logger, setup_logging
 from swarmcg.scoring.compare import compare_models
 from swarmcg.config_types import SwarmConfig
 from swarmcg.context import OptimizationContext
+from swarmcg.sasa_types import SasaDiagnostic, SasaRepresentation
 
 matplotlib.use("AGG")  # use the Anti-Grain Geometry non-interactive backend suited for scripted PNG creation
 
@@ -64,16 +66,58 @@ def run(config_obj: SwarmConfig) -> None:
     else:
         ns.scoring.atom_only = False
 
-    calculate_sasa = config_obj.output.calculate_sasa
-    if calculate_sasa and ns.scoring.atom_only:
-        logger.warning("SASA requires a CG topology and trajectory; skipping SASA in AA-only mode.")
-        calculate_sasa = False
-
     # Initialize Evaluator (loads AA reference, mapping, maps AA->CG)
     ns.evaluator.initialize(ns)
 
     # Run comparison
-    compare_models(ns, manual_mode=True, calc_sasa=calculate_sasa)
+    compare_models(ns, manual_mode=True)
+    if config_obj.sasa.enabled:
+        _run_requested_sasa(ns)
+
+
+def _run_requested_sasa(context: OptimizationContext) -> None:
+    """Compute all SASA representations available to ``scg_evaluate``.
+
+    Args:
+        context: Initialized and scored standalone-evaluation context.
+
+    Returns:
+        ``None``. Raw artifacts are stored beside the comparison plot and
+        typed measurements are attached to ``context``.
+
+    Raises:
+        ComputationError: If any requested SASA representation fails. AA-only
+            mode requires AA and mapped-reference SASA; full mode additionally
+            requires CG SASA.
+    """
+    from swarmcg.scoring.sasa import compute_sasa, validate_sasa_inputs
+
+    validate_sasa_inputs(context)
+    plot = Path(context.files.plot_filename)
+    root = plot.parent / f"{plot.stem}_sasa"
+    representations = [SasaRepresentation.AA, SasaRepresentation.AA_MAPPED]
+    if not context.scoring.atom_only:
+        representations.append(SasaRepresentation.CG)
+    for representation in representations:
+        measurement = compute_sasa(
+            context, representation, root / representation.value
+        )
+        diagnostic = SasaDiagnostic.success(measurement)
+        setattr(context.results, f"sasa_{representation.value}", diagnostic)
+        label = (
+            "full AA reference"
+            if representation is SasaRepresentation.AA
+            else "AA mapped to CG centres"
+            if representation is SasaRepresentation.AA_MAPPED
+            else "CG model"
+        )
+        logger.info(
+            "SASA (%s): %.6g +/- %.6g nm2 (%s frames)",
+            label,
+            measurement.mean,
+            measurement.standard_deviation,
+            measurement.frame_count,
+        )
 
 
 def _normalized_plot_filename(filename: str) -> str:

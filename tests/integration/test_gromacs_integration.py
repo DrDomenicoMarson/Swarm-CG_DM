@@ -324,7 +324,7 @@ def test_gromacs_nonzero_restricted_bending_rb_and_cbt():
         import MDAnalysis as mda
 
         universe = mda.Universe(
-            str(tmp_path / "added_bonded_forms.tpr"),
+            str(tmp_path / "added_bonded_forms.gro"),
             str(tmp_path / "added_bonded_forms.xtc"),
         )
         assert len(universe.trajectory) > 0

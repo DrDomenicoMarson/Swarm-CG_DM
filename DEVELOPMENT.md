@@ -27,6 +27,9 @@ release.
   dimensions, bounds, encoding, and topology application.
 - Model comparison is separated into trajectory preparation, typed per-group
   distribution comparisons, class-wise score aggregation, and rendering.
+- `swarmcg.scoring.sasa` resolves exact Rowland--Taylor or Martini 3 radii,
+  stages each representation in isolation, and rejects fallback-radius
+  warnings, partial frames, and non-finite values.
 - `eval_function(parameters, context) -> float` remains the FST-PSO seam and
   delegates workspace staging, simulation, scoring, artifacts, and history.
 
@@ -35,10 +38,15 @@ These are internal interfaces and are not re-exported from `swarmcg`.
 ## Optimization history
 
 New runs write only `.internal/optimization_history.jsonl`. Every evaluation is
-one flushed strict-JSON object with `schema_version: 1`, identifiers, status,
+one flushed strict-JSON object with `schema_version: 2`, identifiers, status,
 score breakdown, observables, pairwise geometry scores, canonical parameters,
 timings, and optional failure details. Unavailable and non-finite values are
 written as JSON `null`; non-standard `NaN` tokens are never emitted.
+
+Schema version 2 stores full-AA, mapped-reference, and CG SASA independently.
+Each entry has a scheduling status, full-precision statistics, frame count,
+probe and dot settings, radii source, and the SHA-256 hash of the exact staged
+`vdwradii.dat`. CG SASA appears only at new global-best evaluations.
 
 The monitor supports only this JSONL schema. It may ignore a syntactically
 truncated final line from an active writer, but any malformed complete record

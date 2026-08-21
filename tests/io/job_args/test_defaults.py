@@ -16,5 +16,20 @@ def test_defaults():
 
 
 def test_sasa_long_option_is_available_for_evaluation_and_optimization():
-    assert get_evaluate_args().parse_args(["--sasa"]).calculate_sasa is True
-    assert get_optimize_args().parse_args(["--sasa"]).calculate_sasa is True
+    evaluate = get_evaluate_args().parse_args(
+        [
+            "--sasa",
+            "--sasa-aa-radii",
+            "custom.dat",
+            "--sasa-probe-radius",
+            "0.2",
+            "--sasa-ndots",
+            "9600",
+        ]
+    )
+    optimize = get_optimize_args().parse_args(["--sasa"])
+    assert evaluate.enabled is True
+    assert evaluate.aa_radii_filename == "custom.dat"
+    assert evaluate.probe_radius_nm == 0.2
+    assert evaluate.sphere_points == 9600
+    assert optimize.enabled is True

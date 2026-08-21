@@ -112,8 +112,8 @@ class Atom:
 
     @property
     def is_virtual(self) -> bool:
-        """Return whether this atom type denotes a virtual-site bead."""
-        return self.bead_type.startswith("v")
+        """Return whether this atom is defined in a virtual-site section."""
+        return self.virtual_site_kind is not None
 
 
 @dataclass

@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from swarmcg.shared import exceptions
 
-HISTORY_SCHEMA_VERSION = 1
+HISTORY_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class HistoryScoreBreakdown:
 
 @dataclass(frozen=True)
 class OptimizationHistoryRecord:
-    """Validated schema-version-1 optimization history record.
+    """Validated schema-version-2 optimization history record.
 
     Args:
         evaluation_id: One-based evaluation identifier.
@@ -86,7 +86,7 @@ def append_history_record(path: str | Path, record: Mapping[str, Any]) -> None:
 
     Args:
         path: Destination JSONL file.
-        record: Schema-version-1 record to validate and serialize.
+        record: Schema-version-2 record to validate and serialize.
 
     Raises:
         ValueError: If the record is invalid or contains non-finite numbers.
@@ -294,23 +294,120 @@ def _positive_int(value: Any, label: str) -> int:
 
 
 def _parse_observables(raw: Mapping[str, Any]) -> Mapping[str, Any]:
-    parsed = {}
-    for observable in ("radius_of_gyration", "sasa"):
-        parsed[observable] = {}
-        for representation in ("aa_mapped", "cg"):
-            values = raw[observable][representation]
-            parsed[observable][representation] = {
-                "mean": _optional_number(
-                    values["mean"],
-                    f"observables.{observable}.{representation}.mean",
-                ),
-                "standard_deviation": _optional_number(
-                    values["standard_deviation"],
-                    "observables."
-                    f"{observable}.{representation}.standard_deviation",
-                ),
-            }
-    return parsed
+    rg = {}
+    for representation in ("aa_mapped", "cg"):
+        values = raw["radius_of_gyration"][representation]
+        rg[representation] = {
+            "mean": _optional_number(
+                values["mean"],
+                f"observables.radius_of_gyration.{representation}.mean",
+            ),
+            "standard_deviation": _optional_number(
+                values["standard_deviation"],
+                "observables.radius_of_gyration."
+                f"{representation}.standard_deviation",
+            ),
+        }
+    sasa = {
+        representation: _parse_sasa_diagnostic(
+            raw["sasa"][representation], representation
+        )
+        for representation in ("aa", "aa_mapped", "cg")
+    }
+    return {"radius_of_gyration": rg, "sasa": sasa}
+
+
+def _parse_sasa_diagnostic(
+    raw: Mapping[str, Any], representation: str
+) -> Mapping[str, Any]:
+    if not isinstance(raw, Mapping):
+        raise TypeError(
+            f"observables.sasa.{representation} must be a JSON object"
+        )
+    status = raw["status"]
+    if status not in ("not_scheduled", "success", "failed"):
+        raise ValueError(
+            f"observables.sasa.{representation}.status is unsupported"
+        )
+    measurement = raw.get("measurement")
+    error = raw.get("error")
+    if status == "not_scheduled":
+        if measurement is not None or error is not None:
+            raise ValueError(
+                f"not_scheduled SASA {representation} cannot contain results"
+            )
+        return {"status": status, "measurement": None, "error": None}
+    if status == "failed":
+        if measurement is not None or not isinstance(error, str) or not error:
+            raise ValueError(
+                f"failed SASA {representation} requires only non-empty error details"
+            )
+        return {"status": status, "measurement": None, "error": error}
+    if not isinstance(measurement, Mapping) or error is not None:
+        raise ValueError(
+            f"successful SASA {representation} requires one measurement and no error"
+        )
+    if measurement["representation"] != representation:
+        raise ValueError(
+            f"SASA measurement representation does not match {representation}"
+        )
+    protocol = measurement["protocol"]
+    if not isinstance(protocol, Mapping):
+        raise TypeError(
+            f"observables.sasa.{representation}.measurement.protocol must be an object"
+        )
+    frame_count = _positive_int(
+        measurement["frame_count"],
+        f"observables.sasa.{representation}.measurement.frame_count",
+    )
+    probe = _required_number(
+        protocol["probe_radius_nm"],
+        f"observables.sasa.{representation}.measurement.protocol.probe_radius_nm",
+    )
+    sphere_points = _positive_int(
+        protocol["sphere_points"],
+        f"observables.sasa.{representation}.measurement.protocol.sphere_points",
+    )
+    source = protocol["radii_source"]
+    digest = protocol["radii_sha256"]
+    if not isinstance(source, str) or not source:
+        raise ValueError("SASA radii_source must be a non-empty string")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("SASA radii_sha256 must be a lowercase SHA-256 digest")
+    if probe <= 0:
+        raise ValueError("SASA probe_radius_nm must be positive")
+    parsed_measurement = {
+        "representation": representation,
+        "mean": _required_number(
+            measurement["mean"],
+            f"observables.sasa.{representation}.measurement.mean",
+        ),
+        "standard_deviation": _required_number(
+            measurement["standard_deviation"],
+            f"observables.sasa.{representation}.measurement.standard_deviation",
+        ),
+        "frame_count": frame_count,
+        "protocol": {
+            "probe_radius_nm": probe,
+            "sphere_points": sphere_points,
+            "radii_source": source,
+            "radii_sha256": digest,
+        },
+    }
+    if parsed_measurement["standard_deviation"] < 0:
+        raise ValueError("SASA standard_deviation must be nonnegative")
+    return {"status": status, "measurement": parsed_measurement, "error": None}
+
+
+def _required_number(value: Any, label: str) -> float:
+    numeric = _optional_number(value, label)
+    if numeric is None:
+        raise ValueError(f"{label} must be a finite number")
+    return numeric
 
 
 def _optional_number(value: Any, label: str) -> float | None:

@@ -63,6 +63,11 @@ def get_optimize_args():
     for arg in ["temp", "keep_all_sims"]:
         optional_args3.add_argument(f"-{arg}", **getattr(defaults, arg).args)
     optional_args3.add_argument("-sasa", "--sasa", **defaults.sasa.args)
+    optional_args3.add_argument("--sasa-aa-radii", **defaults.sasa_aa_radii.args)
+    optional_args3.add_argument(
+        "--sasa-probe-radius", **defaults.sasa_probe_radius.args
+    )
+    optional_args3.add_argument("--sasa-ndots", **defaults.sasa_ndots.args)
 
     optional_args3.add_argument("-h", "--help", **defaults.help.args)
     optional_args3.add_argument("--nobanner", "-nobanner", **defaults.nobanner.args)

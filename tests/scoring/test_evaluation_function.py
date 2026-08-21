@@ -103,13 +103,13 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
     from swarmcg.scoring.evaluation_function import eval_function
 
     config = SwarmConfig()
-    config.output.calculate_sasa = True
+    config.sasa.enabled = True
     ctx = OptimizationContext(config=config)
     ctx.cg_itp = _make_min_itp()
     ctx.out_itp = _make_min_itp()
     _configure_typed_evaluation(ctx)
     ctx.pso.opti_geoms_all = {"bond"}
-    ctx.pso.best_fitness = (-1.0, None)
+    ctx.pso.best_fitness = (float("inf"), None)
     ctx.pso.worst_fit_score = 999.0
     ctx.status.start_opti_ts = 0.0
     ctx.files.cg_itp_basename = "cg_model.itp"
@@ -130,7 +130,6 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
         def compare_side_effect(*args, **kwargs):
             ctx.results.gyr_aa_mapped = ctx.results.gyr_cg = 1.0
             ctx.results.gyr_aa_mapped_std = ctx.results.gyr_cg_std = 0.0
-            ctx.results.sasa_aa_mapped = ctx.results.sasa_cg = None
             return EvaluationResult(
                 1.0,
                 1.0,
@@ -149,18 +148,27 @@ def test_missing_optional_sasa_never_changes_valid_fitness():
                 "swarmcg.scoring.evaluation_function.compare_models",
                 side_effect=compare_side_effect,
             ),
+            patch(
+                "swarmcg.scoring.sasa.compute_sasa",
+                side_effect=ComputationError("synthetic SASA failure"),
+            ) as sasa_mock,
         ):
             score = eval_function([], ctx)
+            second_score = eval_function([], ctx)
 
         history = os.path.join(
             tmpdir, config_module.optimization_history_file
         )
         with open(history, encoding="utf-8") as handle:
-            record = json.loads(handle.read())
-        assert record["status"] == "success"
-        assert record["observables"]["sasa"]["cg"]["mean"] is None
+            records = [json.loads(line) for line in handle]
+        assert [record["status"] for record in records] == ["success", "success"]
+        assert records[0]["observables"]["sasa"]["cg"]["status"] == "failed"
+        assert "synthetic SASA failure" in records[0]["observables"]["sasa"]["cg"]["error"]
+        assert records[1]["observables"]["sasa"]["cg"]["status"] == "not_scheduled"
+        sasa_mock.assert_called_once()
 
     assert score == 1.0
+    assert second_score == 1.0
 
 
 def test_model_scoring_failure_receives_finite_failure_objective():
